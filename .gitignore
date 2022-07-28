@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+build/
+Build/
+
+*.kdev4
+*.cppcheck
