@@ -684,7 +684,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     }
 
     interface* system::create_overload(init_context* ctx, const std::string_view &func_name, const sol::object &data, container* cont) {
-      if (ctx->current_type == SIZE_MAX) {
+      if (ctx->current_type == type_id<object>()) { // ctx->current_type == SIZE_MAX
         size_t new_obj_type = SIZE_MAX;
         size_t new_arg_count = SIZE_MAX;
         interface* o_begin = nullptr;

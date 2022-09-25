@@ -325,9 +325,6 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     //template <char ... C> constexpr const char string_literal<C...>::size;
     template <char ... C> constexpr const char string_literal<C...>::value[string_literal<C...>::size];
 
-    template <typename CharT, CharT... Cs>
-    constexpr string_literal<Cs...> operator"" _create() { return {}; }
-
 //     template <size_t N, size_t... I>
 //     constexpr void copy_chars_impl(const char* str, char* dest, std::index_sequence<I...>) {
 //       dest[I] = str[I]...;
@@ -405,5 +402,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_OUTER_NAMESPACE
 }
 #endif // DEVILS_SCRIPT_OUTER_NAMESPACE
+
+template <typename CharT, CharT... Cs>
+constexpr devils_script::string_literal<Cs...> operator"" _create() { return {}; }
 
 #endif

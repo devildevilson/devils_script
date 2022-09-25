@@ -87,7 +87,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     };
 
     using draw_function_t = std::function<bool(const local_state* data)>;
-    void add_to_list_temp(void*, const object &) {}
+    inline void add_to_list_temp(void*, const object &) {}
     using add_to_list_t = decltype(&add_to_list_temp);
 
     // размер 472 мне нравится больше
