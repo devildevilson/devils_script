@@ -27,7 +27,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       base & operator=(const base &copy) noexcept = default;
       base & operator=(base &&move) noexcept = default;
 
-      T compute(context* ctx) const {
+      T process(context* ctx) const {
         allocate_additional_locals aal(ctx, max_locals());
 
         if constexpr (std::is_same_v<T, void>) {
@@ -40,8 +40,14 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       }
       // draw теперь не существует, вместо этого нужно вычислить полный стейт скрипта
       // для этого нужно создать аллокатор, вызвать compute и рекурсивно пройтись по всем детям стейта
-      void draw(context* ctx) const {
+      //void draw(context* ctx) const {
         //begin->draw(ctx);
+      //}
+
+      // compute script state
+      local_state* compute(context* ctx, local_state_allocator* allocator) const {
+        allocate_additional_locals aal(ctx, max_locals());
+        return data->begin->compute(ctx, allocator);
       }
 
       bool valid() const noexcept { return data != nullptr; }

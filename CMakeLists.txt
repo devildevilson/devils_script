@@ -65,6 +65,7 @@ set(SRC_LIST
   src/system.cpp
   src/common.cpp
   src/linear_rng.cpp
+  src/core_interface.cpp
 )
 
 set(HDR_LIST
@@ -86,6 +87,7 @@ set(HDR_LIST
   src/common.h
   src/memory_pool.h
   src/linear_rng.h
+  src/core_interface.h
 )
 
 add_library(${PROJECT_NAME} ${SRC_LIST} ${HDR_LIST})

@@ -23,11 +23,13 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return o;
     }
 
-    change_scope_condition::change_scope_condition(const interface* scope, const interface* condition, const interface* child) noexcept : scope(scope), condition(condition), child(child) {}
+    //change_scope_condition::change_scope_condition(const interface* scope, const interface* condition, const interface* child) noexcept : scope(scope), condition(condition), child(child) {}
+    change_scope_condition::change_scope_condition(const interface* scope, const interface* condition, const interface* child) noexcept
+      : scope_interface(scope), condition_interface(condition), one_child_interface(child) {}
     change_scope_condition::~change_scope_condition() noexcept {
-      if (scope != nullptr) scope->~interface();
-      if (condition != nullptr) condition->~interface();
-      child->~interface();
+      //if (scope != nullptr) scope->~interface();
+      //if (condition != nullptr) condition->~interface();
+      //child->~interface();
     }
 
     object change_scope_condition::process(context* ctx) const {
@@ -145,11 +147,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     size_t change_scope_condition::get_type_id() const { return type_id<object>(); }
     std::string_view change_scope_condition::get_name() const { return "change_scope_condition"; }
 
-    change_scope_effect::change_scope_effect(const interface* scope, const interface* condition, const interface* childs) noexcept : scope(scope), condition(condition), childs(childs) {}
+    change_scope_effect::change_scope_effect(const interface* scope, const interface* condition, const interface* childs) noexcept
+      : scope_interface(scope), condition_interface(condition), children_interface(childs) {}
     change_scope_effect::~change_scope_effect() noexcept {
-      if (scope != nullptr) scope->~interface();
-      if (condition != nullptr) condition->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
+//      if (scope != nullptr) scope->~interface();
+//      if (condition != nullptr) condition->~interface();
+//      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
     }
 
     object change_scope_effect::process(context* ctx) const {
@@ -270,10 +273,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     size_t change_scope_effect::get_type_id() const { return type_id<object>(); }
     std::string_view change_scope_effect::get_name() const { return "change_scope_effect"; }
 
-    compute_string::compute_string(const interface* condition, const interface* childs) noexcept : condition(condition), childs(childs) {}
+    //compute_string::compute_string(const interface* condition, const interface* childs) noexcept : condition(condition), childs(childs) {}
+    compute_string::compute_string(const interface* condition, const interface* childs) noexcept
+      : condition_interface(condition), children_interface(childs) {}
     compute_string::~compute_string() noexcept {
-      if (condition != nullptr) condition->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
+      //if (condition != nullptr) condition->~interface();
+      //for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
     }
 
     object compute_string::process(context* ctx) const {
@@ -353,10 +358,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     size_t compute_string::get_type_id() const { return type_id<object>(); }
     std::string_view compute_string::get_name() const { return "compute_string"; }
 
-    compute_object::compute_object(const interface* condition, const interface* childs) noexcept : condition(condition), childs(childs) {}
+    //compute_object::compute_object(const interface* condition, const interface* childs) noexcept : condition(condition), childs(childs) {}
+    compute_object::compute_object(const interface* condition, const interface* childs) noexcept
+      : condition_interface(condition), children_interface(childs) {}
     compute_object::~compute_object() noexcept {
-      if (condition != nullptr) condition->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
+      //if (condition != nullptr) condition->~interface();
+      //for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
     }
 
     object compute_object::process(context* ctx) const {
@@ -437,11 +444,13 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     size_t compute_object::get_type_id() const { return type_id<object>(); }
     std::string_view compute_object::get_name() const { return "compute_object"; }
 
-    compute_number::compute_number(const interface* scope, const interface* condition, const interface* child) noexcept : scope(scope), condition(condition), child(child) {}
+    //compute_number::compute_number(const interface* scope, const interface* condition, const interface* child) noexcept : scope(scope), condition(condition), child(child) {}
+    compute_number::compute_number(const interface* scope, const interface* condition, const interface* child) noexcept
+      : scope_interface(scope), condition_interface(condition), one_child_interface(child) {}
     compute_number::~compute_number() noexcept {
-      if (scope != nullptr) scope->~interface();
-      if (condition != nullptr) condition->~interface();
-      child->~interface();
+      //if (scope != nullptr) scope->~interface();
+      //if (condition != nullptr) condition->~interface();
+      //child->~interface();
     }
     object compute_number::process(context* ctx) const {
       object prev_scope = ctx->prev;
@@ -554,8 +563,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view compute_number::get_name() const { return "compute_number"; }
 
     const size_t selector::type_index = commands::values::selector;
-    selector::selector(const interface* childs) noexcept : childs(childs) {}
-    selector::~selector() noexcept { for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } }
+    selector::selector(const interface* childs) noexcept : children_interface(childs) {}
+    //selector::~selector() noexcept { for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } }
+    selector::~selector() noexcept {}
     object selector::process(context* ctx) const {
       object obj = ignore_value;
       for (auto cur = childs; cur != nullptr && obj.ignore(); cur = cur->next) {
@@ -612,12 +622,16 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view selector::get_name() const { return commands::names[type_index]; }
 
     const size_t sequence::type_index = commands::values::sequence;
-    sequence::sequence(const interface* count, const interface* childs) noexcept : count(count), childs(childs) {}
-    sequence::~sequence() noexcept { for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } }
+    //sequence::sequence(const interface* count, const interface* childs) noexcept : count(count), childs(childs) {}
+    sequence::sequence(const interface* count, const interface* childs) noexcept
+      : additional_child_interface(count), children_interface(childs) {}
+    sequence::~sequence() noexcept {
+      //for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
+    }
     object sequence::process(context* ctx) const {
       size_t max_count = SIZE_MAX;
-      if (count != nullptr) {
-        const auto obj = count->process(ctx);
+      if (additional != nullptr) {
+        const auto obj = additional->process(ctx);
         max_count = obj.get<double>();
       }
 
@@ -637,7 +651,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto count_arg = count != nullptr ? count->compute(ctx, allocator) : nullptr;
+      auto count_arg = additional != nullptr ? additional->compute(ctx, allocator) : nullptr;
       local_state* first_child_state = nullptr;
       local_state* child_states = nullptr;
       for (auto cur = childs; cur != nullptr; cur = cur->next) {
@@ -694,8 +708,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     size_t sequence::get_type_id() const { return type_id<object>(); }
     std::string_view sequence::get_name() const { return commands::names[type_index]; }
 
-    overload::overload(const std::array<size_t, MAXIMUM_OVERLOADS> &overload_types, const interface* childs) noexcept : overload_types(overload_types), childs(childs) {}
-    overload::~overload() noexcept { for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } }
+    overload::overload(const std::array<size_t, MAXIMUM_OVERLOADS> &overload_types, const interface* childs) noexcept
+      : children_interface(childs), overload_types(overload_types) {}
+    overload::~overload() noexcept {
+      //for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
+    }
     struct object overload::process(context* ctx) const {
       // здесь к нам приходит какой то объект, по его типу нужно найти подходящего ребенка и вызвать его
       // как искать? нужно ввести еще парочку функций в интерфейс, например get_type, к сожалению придется делать их virtual
@@ -781,10 +798,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 //     }
 
     const size_t chance::type_index = commands::values::chance;
-    chance::chance(const size_t &state, const interface* value) noexcept : state(state), value(value) {}
-    chance::~chance() noexcept { value->~interface(); }
+    chance::chance(const size_t &state, const interface* value) noexcept : one_child_interface(value), state(state) {}
+    chance::~chance() noexcept {}
     object chance::process(context* ctx) const {
-      const auto obj = value->process(ctx);
+      const auto obj = child->process(ctx);
       if (obj.ignore()) return ignore_value;
       const double val = obj.get<double>();
       const uint64_t rnd_val = ctx->get_random_value(state);
@@ -797,7 +814,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto value_state = value->compute(ctx, allocator);
+      auto value_state = child->compute(ctx, allocator);
       value_state->argument_name = "value";
 
       ptr->local_rand_state = state;
@@ -864,10 +881,13 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     }
 
     const size_t weighted_random::type_index = commands::values::weighted_random;
-    weighted_random::weighted_random(const size_t &state, const interface* childs, const interface* weights) noexcept : state(state), childs(childs), weights(weights) {}
-    weighted_random::~weighted_random() noexcept { for (auto cur = childs, cur_w = weights; cur != nullptr; cur = cur->next, cur_w = cur_w->next) { cur->~interface(); cur_w->~interface(); } }
+    weighted_random::weighted_random(const size_t &state, const interface* childs, const interface* weights) noexcept
+      : children_interface(childs), additional_children_interface(weights), state(state) {}
+    weighted_random::~weighted_random() noexcept {
+      //for (auto cur = childs, cur_w = weights; cur != nullptr; cur = cur->next, cur_w = cur_w->next) { cur->~interface(); cur_w->~interface(); }
+    }
     object weighted_random::process(context* ctx) const {
-      auto choosed = get_random_child(ctx, state, childs, weights);
+      auto choosed = get_random_child(ctx, state, childs, additional_childs);
       return choosed->process(ctx);
     }
 
@@ -881,7 +901,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      for (auto cur_w = weights, cur = childs; cur_w != nullptr; cur_w = cur_w->next, cur = cur->next) {
+      for (auto cur_w = additional_childs, cur = childs; cur_w != nullptr; cur_w = cur_w->next, cur = cur->next) {
         if (cur == nullptr) throw std::runtime_error("Childs count less than weights");
         auto w_s = cur_w->compute(ctx, allocator);
         auto s = cur->compute(ctx, allocator);
@@ -955,12 +975,13 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view weighted_random::get_name() const { return commands::names[type_index]; }
 
     const size_t random_value::type_index = commands::values::random_value;
-    random_value::random_value(const size_t &state, const interface* maximum) noexcept : state(state), maximum(maximum) {}
-    random_value::~random_value() noexcept { if (maximum != nullptr) maximum->~interface(); }
+    random_value::random_value(const size_t &state, const interface* maximum) noexcept
+      : one_child_interface(maximum), state(state) {}
+    random_value::~random_value() noexcept {}
     struct object random_value::process(context* ctx) const {
       double max = 1.0;
-      if (maximum != nullptr) {
-        const auto obj = maximum->process(ctx);
+      if (child != nullptr) {
+        const auto obj = child->process(ctx);
         if (obj.ignore()) return ignore_value;
         max = obj.get<double>();
       }
@@ -977,8 +998,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto max = maximum != nullptr ? maximum->compute(ctx, allocator) : nullptr;
-      max->argument_name = "maximum_value";
+      auto max = child != nullptr ? child->compute(ctx, allocator) : nullptr;
+      if (max != nullptr) max->argument_name = "maximum_value";
 
       ptr->children = max;
       ptr->local_rand_state = state;
@@ -1097,15 +1118,16 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return false;
     }
 
-    number_comparator::number_comparator(const uint8_t op, const interface* lvalue, const interface* rvalue) noexcept : op(op), lvalue(lvalue), rvalue(rvalue) {}
+    number_comparator::number_comparator(const uint8_t op, const interface* lvalue, const interface* rvalue) noexcept
+      : additional_child_interface(lvalue), one_child_interface(rvalue), op(op) {}
     number_comparator::~number_comparator() noexcept {
-      lvalue->~interface();
-      rvalue->~interface();
+//      lvalue->~interface();
+//      rvalue->~interface();
     }
 
     object number_comparator::process(context* ctx) const {
-      const auto &num1 = lvalue->process(ctx);
-      const auto &num2 = rvalue->process(ctx);
+      const auto &num1 = additional->process(ctx);
+      const auto &num2 = child->process(ctx);
       const double num1_final = num1.get<double>();
       const double num2_final = num2.get<double>();
       return object(compare_func(op, num1_final, num2_final));
@@ -1116,9 +1138,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto l_state = rvalue->compute(ctx, allocator);
+      auto l_state = additional->compute(ctx, allocator);
       l_state->argument_name = "lvalue";
-      auto r_state = rvalue->compute(ctx, allocator);
+      auto r_state = child->compute(ctx, allocator);
       r_state->argument_name = "rvalue";
       l_state->next = r_state;
 
@@ -1144,14 +1166,15 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     size_t number_comparator::get_type_id() const { return type_id<object>(); }
     std::string_view number_comparator::get_name() const { return "number_comparator"; }
 
-    boolean_comparator::boolean_comparator(const interface* lvalue, const interface* rvalue) noexcept : lvalue(lvalue), rvalue(rvalue) {}
+    boolean_comparator::boolean_comparator(const interface* lvalue, const interface* rvalue) noexcept
+      : additional_child_interface(lvalue), one_child_interface(rvalue) {}
     boolean_comparator::~boolean_comparator() noexcept {
-      lvalue->~interface();
-      rvalue->~interface();
+//      lvalue->~interface();
+//      rvalue->~interface();
     }
     object boolean_comparator::process(context* ctx) const {
-      const auto &num1 = lvalue->process(ctx);
-      const auto &num2 = rvalue->process(ctx);
+      const auto &num1 = additional->process(ctx);
+      const auto &num2 = child->process(ctx);
       const bool num1_final = num1.get<bool>();
       const bool num2_final = num2.get<bool>();
       return object(num1_final == num2_final);
@@ -1162,9 +1185,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto l_state = rvalue->compute(ctx, allocator);
+      auto l_state = additional->compute(ctx, allocator);
       l_state->argument_name = "lvalue";
-      auto r_state = rvalue->compute(ctx, allocator);
+      auto r_state = child->compute(ctx, allocator);
       r_state->argument_name = "rvalue";
       l_state->next = r_state;
 
@@ -1190,10 +1213,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view boolean_comparator::get_name() const { return "boolean_comparator"; }
 
     const size_t equals_to::type_index = commands::values::equals_to;
-    equals_to::equals_to(const interface* get_obj) noexcept : get_obj(get_obj) {}
-    equals_to::~equals_to() noexcept { get_obj->~interface(); }
+    equals_to::equals_to(const interface* get_obj) noexcept : one_child_interface(get_obj) {}
+    equals_to::~equals_to() noexcept {}
     object equals_to::process(context* ctx) const {
-      const auto obj = get_obj->process(ctx);
+      const auto obj = child->process(ctx);
       return object(ctx->current == obj);
     }
 
@@ -1202,7 +1225,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       {
         change_function_name cfn(ctx, get_name());
         change_nesting cn(ctx, ctx->nest_level+1);
-        state = get_obj->compute(ctx, allocator);
+        state = child->compute(ctx, allocator);
       }
       auto ptr = allocator->create(ctx, get_name());
       ptr->children = state;
@@ -1229,10 +1252,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view equals_to::get_name() const { return commands::names[type_index]; }
 
     const size_t not_equals_to::type_index = commands::values::not_equals_to;
-    not_equals_to::not_equals_to(const interface* get_obj) noexcept : get_obj(get_obj) {}
-    not_equals_to::~not_equals_to() noexcept { get_obj->~interface(); }
+    not_equals_to::not_equals_to(const interface* get_obj) noexcept : one_child_interface(get_obj) {}
+    not_equals_to::~not_equals_to() noexcept {}
     object not_equals_to::process(context* ctx) const {
-      const auto obj = get_obj->process(ctx);
+      const auto obj = child->process(ctx);
       return object(ctx->current != obj);
     }
 
@@ -1241,7 +1264,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto state = get_obj->compute(ctx, allocator);
+      auto state = child->compute(ctx, allocator);
       ptr->children = state;
       ptr->func = [] (const local_state* s) -> object {
         if (s->children->value.unresolved()) return unresolved_value;
@@ -1266,8 +1289,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view not_equals_to::get_name() const { return commands::names[type_index]; }
 
     const size_t equality::type_index = commands::values::equality;
-    equality::equality(const interface* childs) noexcept : childs(childs) {}
-    equality::~equality() noexcept { for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } }
+    equality::equality(const interface* childs) noexcept : children_interface(childs) {}
+    equality::~equality() noexcept {}
     object equality::process(context* ctx) const {
       object obj = ignore_value;
       auto cur = childs;
@@ -1341,8 +1364,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view equality::get_name() const { return commands::names[type_index]; }
 
     const size_t type_equality::type_index = commands::values::type_equality;
-    type_equality::type_equality(const interface* childs) noexcept : childs(childs) {}
-    type_equality::~type_equality() noexcept { for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } }
+    type_equality::type_equality(const interface* childs) noexcept : children_interface(childs) {}
+    type_equality::~type_equality() noexcept {}
     object type_equality::process(context* ctx) const {
       object obj = ignore_value;
       auto cur = childs;
@@ -1416,8 +1439,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view type_equality::get_name() const { return commands::names[type_index]; }
 
     const size_t compare::type_index = commands::values::compare;
-    compare::compare(const uint8_t op, const interface* childs) noexcept : op(op), childs(childs) {}
-    compare::~compare() noexcept { for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } }
+    compare::compare(const uint8_t op, const interface* childs) noexcept : children_interface(childs), op(op) {}
+    compare::~compare() noexcept {}
     object compare::process(context* ctx) const {
       // возможно нужно сделать последовательное сравнение
       // тип 3 > 2 > 1, чем 3 > 2 и 3 > 1, но это открытый вопрос
@@ -1515,8 +1538,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     };
 
     const size_t keep_set::type_index = commands::keep_set;
-    keep_set::keep_set(const interface* child) noexcept : child(child) {}
-    keep_set::~keep_set() noexcept { child->~interface(); }
+    keep_set::keep_set(const interface* child) noexcept : one_child_interface(child) {}
+    keep_set::~keep_set() noexcept {}
     struct object keep_set::process(context* ctx) const {
       save_set_on_stack ssos(ctx);
       return child->process(ctx);
@@ -1559,11 +1582,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view keep_set::get_name() const { return commands::names[type_index]; }
 
     const size_t is_unique::type_index = commands::is_unique;
-    is_unique::is_unique(const interface* value) noexcept : value(value) {}
-    is_unique::~is_unique() noexcept { if (value != nullptr) value->~interface(); }
+    is_unique::is_unique(const interface* value) noexcept : one_child_interface(value) {}
+    is_unique::~is_unique() noexcept {}
     struct object is_unique::process(context* ctx) const {
       auto obj = ctx->current;
-      if (value != nullptr) obj = value->process(ctx);
+      if (child != nullptr) obj = child->process(ctx);
       if (!obj.valid() || obj.ignore()) return ignore_value;
       const auto itr = ctx->unique_objects.find(obj);
       return object(itr == ctx->unique_objects.end());
@@ -1574,7 +1597,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto value_s = value != nullptr ? value->compute(ctx, allocator) : nullptr;
+      auto value_s = child != nullptr ? child->compute(ctx, allocator) : nullptr;
       if (value_s != nullptr) value_s->argument_name = "value";
 
       object ret;
@@ -1613,11 +1636,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view is_unique::get_name() const { return commands::names[type_index]; }
 
     const size_t place_in_set::type_index = commands::place_in_set;
-    place_in_set::place_in_set(const interface* value) noexcept : value(value) {}
-    place_in_set::~place_in_set() noexcept { if (value != nullptr) value->~interface(); }
+    place_in_set::place_in_set(const interface* value) noexcept : one_child_interface(value) {}
+    place_in_set::~place_in_set() noexcept {}
     struct object place_in_set::process(context* ctx) const {
       auto obj = ctx->current;
-      if (value != nullptr) obj = value->process(ctx);
+      if (child != nullptr) obj = child->process(ctx);
       if (!obj.valid() || obj.ignore()) return ignore_value;
       ctx->unique_objects.insert(obj);
       return ignore_value;
@@ -1628,7 +1651,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto value_s = value != nullptr ? value->compute(ctx, allocator) : nullptr;
+      auto value_s = child != nullptr ? child->compute(ctx, allocator) : nullptr;
       if (value_s != nullptr) value_s->argument_name = "value";
 
       {
@@ -1664,11 +1687,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view place_in_set::get_name() const { return commands::names[type_index]; }
 
     const size_t place_in_set_if_unique::type_index = commands::place_in_set_if_unique;
-    place_in_set_if_unique::place_in_set_if_unique(const interface* value) noexcept : value(value) {}
-    place_in_set_if_unique::~place_in_set_if_unique() noexcept { if (value != nullptr) value->~interface(); }
+    place_in_set_if_unique::place_in_set_if_unique(const interface* value) noexcept : one_child_interface(value) {}
+    place_in_set_if_unique::~place_in_set_if_unique() noexcept {}
     struct object place_in_set_if_unique::process(context* ctx) const {
       auto obj = ctx->current;
-      if (value != nullptr) obj = value->process(ctx);
+      if (child != nullptr) obj = child->process(ctx);
       if (!obj.valid() || obj.ignore()) return ignore_value;
       const auto itr = ctx->unique_objects.find(obj);
       ctx->unique_objects.insert(obj);
@@ -1680,7 +1703,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto value_s = value != nullptr ? value->compute(ctx, allocator) : nullptr;
+      auto value_s = child != nullptr ? child->compute(ctx, allocator) : nullptr;
       if (value_s != nullptr) value_s->argument_name = "value";
 
       {
@@ -1720,10 +1743,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     // в последнем ребенке должен находиться интересующий нас объект
     // как можно проверить при создании? такое поведение задается с помощью строки
     // при парсинге строки будет видно что возвращается
-    complex_object::complex_object(const interface* childs) noexcept : childs(childs) {}
-    complex_object::~complex_object() noexcept {
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
-    }
+    complex_object::complex_object(const interface* childs) noexcept : children_interface(childs) {}
+    complex_object::~complex_object() noexcept {}
     object complex_object::process(context* ctx) const {
       change_scope sc(ctx, ctx->current, ctx->prev);
 
@@ -1879,8 +1900,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 //     }
 
     const size_t value::type_index = commands::value;
-    value::value(const interface* child) noexcept : child(child) {}
-    value::~value() noexcept { child->~interface(); }
+    value::value(const interface* child) noexcept : one_child_interface(child) {}
+    value::~value() noexcept {}
     struct object value::process(context* ctx) const { return child->process(ctx); }
     local_state* value::compute(context* ctx, local_state_allocator* allocator) const {
       auto ptr = allocator->create(ctx, get_name());
@@ -1925,12 +1946,14 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view get_context::get_name() const { return commands::names[type_index]; }
 
     const size_t save_local::type_index = commands::values::save_local;
-    save_local::save_local(const std::string name, const size_t index, const interface* var) noexcept : name(std::move(name)), index(index), var(var) {}
-    save_local::save_local(const std::string_view name, const size_t index, const interface* var) noexcept : name(name), index(index), var(var) {}
-    save_local::~save_local() noexcept { if (var != nullptr) var->~interface(); }
+    save_local::save_local(const std::string name, const size_t index, const interface* var) noexcept
+      : one_child_interface(var), name(std::move(name)), index(index) {}
+    save_local::save_local(const std::string_view name, const size_t index, const interface* var) noexcept
+      : one_child_interface(var), name(name), index(index) {}
+    save_local::~save_local() noexcept {}
     object save_local::process(context* ctx) const {
       auto obj = ctx->current;
-      if (var != nullptr) obj = var->process(ctx);
+      if (child != nullptr) obj = child->process(ctx);
 
       // неочевидно почему нельзя
       //if (obj.ignore()) throw std::runtime_error("Trying to save ignore value to local '" + name + "'");
@@ -1950,10 +1973,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
     local_state* save_local::compute(context* ctx, local_state_allocator* allocator) const {
       auto ptr = allocator->create(ctx, get_name());
-      auto val_s = var != nullptr ? var->compute(ctx, allocator) : nullptr;
+      auto val_s = child != nullptr ? child->compute(ctx, allocator) : nullptr;
 
       auto obj = ctx->current;
-      if (var != nullptr) {
+      if (child != nullptr) {
         obj = val_s->value;
         val_s->argument_name = "value";
       }
@@ -2077,13 +2100,13 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view get_local::get_name() const { return commands::names[type_index]; }
 
     const size_t save::type_index = commands::save;
-    save::save(const std::string str, const interface* var) noexcept : name(std::move(str)), var(var) {}
-    save::save(const std::string_view str, const interface* var) noexcept : name(str), var(var) {}
-    save::~save() noexcept { if (var != nullptr) var->~interface(); }
+    save::save(const std::string str, const interface* var) noexcept : one_child_interface(var), name(std::move(str)) {}
+    save::save(const std::string_view str, const interface* var) noexcept : one_child_interface(var), name(str) {}
+    save::~save() noexcept {}
     // перезапись?
     struct object save::process(context* ctx) const {
       auto obj = ctx->current;
-      if (var != nullptr) obj = var->process(ctx);
+      if (child != nullptr) obj = child->process(ctx);
       // можно ли вообще перезаписывать данные в контексте? вообще у нас строго заданы обычно root, prev, current и от них довольно сильно зависит скрипт
       // так что наверное почему нет
       if (const auto itr = ctx->map.find(name); itr != ctx->map.end()) {
@@ -2100,10 +2123,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      auto val_s = var != nullptr ? var->compute(ctx, allocator) : nullptr;
+      auto val_s = child != nullptr ? child->compute(ctx, allocator) : nullptr;
 
       auto obj = ctx->current;
-      if (var != nullptr) {
+      if (child != nullptr) {
         obj = val_s->value;
         val_s->argument_name = "value";
       }
@@ -2262,22 +2285,18 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view is_in_list::get_name() const { return commands::names[type_index]; }
 
     const size_t has_in_list::type_index = commands::has_in_list;
-    has_in_list::has_in_list(const std::string &name, const interface* max_count, const interface* percentage, const interface* childs) noexcept :
-      name(name), max_count(max_count), percentage(percentage), childs(childs)
+    has_in_list::has_in_list(const std::string &name, const interface* max_count, const interface* percentage, const interface* childs) noexcept
+      : additional_child_interface(max_count), one_child_interface(percentage), children_interface(childs), name(name)
     {}
 
-    has_in_list::~has_in_list() noexcept {
-      if (max_count != nullptr) max_count->~interface();
-      if (percentage != nullptr) percentage->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) {
-        cur->~interface();
-      }
-    }
+    has_in_list::~has_in_list() noexcept {}
 
     struct object has_in_list::process(context* ctx) const {
       const auto list_itr = ctx->object_lists.find(name);
       if (list_itr == ctx->object_lists.end()) return object(0.0);
 
+      auto percentage = child;
+      auto max_count = additional;
       size_t final_max_count = SIZE_MAX;
       if (percentage != nullptr) {
         const auto val = percentage->process(ctx);
@@ -2400,6 +2419,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           children = ptr;
         }
 
+        auto percentage = child;
+        auto max_count = additional;
         local_state* arg = nullptr;
         if (percentage != nullptr) {
           arg = percentage->compute(ctx, allocator);
@@ -2497,17 +2518,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view has_in_list::get_name() const { return commands::names[type_index]; }
 
     const size_t random_in_list::type_index = commands::random_in_list;
-    random_in_list::random_in_list(const std::string &name, const size_t &state, const interface* condition, const interface* weight, const interface* childs) noexcept :
-      name(name), state(state), condition(condition), weight(weight), childs(childs)
+    random_in_list::random_in_list(const std::string &name, const size_t &state, const interface* condition, const interface* weight, const interface* childs) noexcept
+      : condition_interface(condition), additional_child_interface(weight), children_interface(childs), name(name), state(state)
     {}
 
-    random_in_list::~random_in_list() noexcept {
-      if (condition != nullptr) condition->~interface();
-      if (weight != nullptr) weight->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) {
-        cur->~interface();
-      }
-    }
+    random_in_list::~random_in_list() noexcept {}
 
     static struct object get_rand_obj(context* ctx, const std::span<object> &view, const interface* condition, const interface* weight, const size_t state, const std::string_view &func_name) {
       change_indices ci(ctx, 0, ctx->index);
@@ -2554,7 +2569,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       if (list_itr == ctx->object_lists.end()) return ignore_value;
 
       change_scope cs(ctx, object(), ctx->current);
-      const auto obj = get_rand_obj(ctx, list_itr->second, condition, weight, state, get_name());
+      const auto obj = get_rand_obj(ctx, list_itr->second, condition, additional, state, get_name());
       ctx->current = obj;
       return !obj.ignore() ? childs->process(ctx) : ignore_value;
     }
@@ -2655,7 +2670,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             const auto &cur = list_itr->second[i];
             ctx->current = cur;
             ctx->index = i;
-            local_random_func(ctx, allocator, name, condition, weight, cur, &first_child, &children);
+            local_random_func(ctx, allocator, name, condition, additional, cur, &first_child, &children);
           }
         }
       }
@@ -2713,16 +2728,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view random_in_list::get_name() const { return commands::names[type_index]; }
 
     const size_t every_in_list_numeric::type_index = commands::every_in_list;
-    every_in_list_numeric::every_in_list_numeric(const std::string &name, const interface* condition, const interface* childs) noexcept :
-      name(name), condition(condition), childs(childs)
+    every_in_list_numeric::every_in_list_numeric(const std::string &name, const interface* condition, const interface* childs) noexcept
+      : condition_interface(condition), children_interface(childs), name(name)
     {}
 
-    every_in_list_numeric::~every_in_list_numeric() noexcept {
-      if (condition != nullptr) condition->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) {
-        cur->~interface();
-      }
-    }
+    every_in_list_numeric::~every_in_list_numeric() noexcept {}
 
     struct object every_in_list_numeric::process(context* ctx) const {
       const auto list_itr = ctx->object_lists.find(name);
@@ -2946,15 +2956,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
     const size_t every_in_list_logic::type_index = commands::every_in_list;
     every_in_list_logic::every_in_list_logic(const std::string &name, const interface* condition, const interface* childs) noexcept :
-      name(name), condition(condition), childs(childs)
+      condition_interface(condition), children_interface(childs), name(name)
     {}
 
-    every_in_list_logic::~every_in_list_logic() noexcept {
-      if (condition != nullptr) condition->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) {
-        cur->~interface();
-      }
-    }
+    every_in_list_logic::~every_in_list_logic() noexcept {}
 
     struct object every_in_list_logic::process(context* ctx) const {
       const auto list_itr = ctx->object_lists.find(name);
@@ -3052,13 +3057,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
     const size_t every_in_list_effect::type_index = commands::every_in_list;
     every_in_list_effect::every_in_list_effect(const std::string &name, const interface* condition, const interface* childs) noexcept :
-      name(name), condition(condition), childs(childs)
+      condition_interface(condition), children_interface(childs), name(name)
     {}
 
-    every_in_list_effect::~every_in_list_effect() noexcept {
-      if (condition != nullptr) condition->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
-    }
+    every_in_list_effect::~every_in_list_effect() noexcept {}
 
     struct object every_in_list_effect::process(context* ctx) const {
       const auto list_itr = ctx->object_lists.find(name);
@@ -3145,17 +3147,15 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view every_in_list_effect::get_name() const { return commands::names[type_index]; }
 
     const size_t list_view::type_index = commands::list_view;
-    list_view::list_view(const std::string &name, const interface* default_value, const interface* childs) noexcept : name(name), default_value(default_value), childs(childs) {}
-    list_view::~list_view() noexcept {
-      default_value->~interface();
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); }
-    }
+    list_view::list_view(const std::string &name, const interface* default_value, const interface* childs) noexcept
+      : one_child_interface(default_value), children_interface(childs), name(name) {}
+    list_view::~list_view() noexcept {}
 
     struct object list_view::process(context* ctx) const {
       const auto list_itr = ctx->object_lists.find(name);
       if (list_itr == ctx->object_lists.end()) return ignore_value;
 
-      const auto def_val = default_value != nullptr ? default_value->process(ctx) : object();
+      const auto def_val = child != nullptr ? child->process(ctx) : object();
 
       change_scope cs(ctx, object(), ctx->current);
       change_reduce_value crv(ctx, def_val);
@@ -3231,7 +3231,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
 
-      auto d_v = default_value != nullptr ? default_value->compute(ctx, allocator) : nullptr;
+      auto d_v = child != nullptr ? child->compute(ctx, allocator) : nullptr;
       change_reduce_value crv(ctx, d_v != nullptr ? d_v->value : object());
       local_state* first_child = nullptr;
       local_state* children = nullptr;
@@ -3279,14 +3279,14 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view list_view::get_name() const { return commands::names[type_index]; }
 
     const size_t transform::type_index = commands::transform;
-    transform::transform(const interface* changes) noexcept : changes(changes) {}
-    transform::~transform() noexcept { changes->~interface(); }
-    struct object transform::process(context* ctx) const { return changes->process(ctx); }
+    transform::transform(const interface* changes) noexcept : one_child_interface(changes) {}
+    transform::~transform() noexcept {}
+    struct object transform::process(context* ctx) const { return child->process(ctx); }
     local_state* transform::compute(context* ctx, local_state_allocator* allocator) const {
       auto ptr = allocator->create(ctx, get_name());
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      ptr->children = changes->compute(ctx, allocator);
+      ptr->children = child->compute(ctx, allocator);
       ptr->value = ptr->children->value;
       return ptr;
     }
@@ -3303,7 +3303,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view transform::get_name() const { return commands::names[type_index]; }
 
     const size_t filter::type_index = commands::filter;
-    filter::filter(const interface* condition) noexcept : condition(condition) {}
+    filter::filter(const interface* condition) noexcept : condition_interface(condition) {}
     filter::~filter() noexcept { condition->~interface(); }
     struct object filter::process(context* ctx) const {
       const auto obj = condition->process(ctx);
@@ -3335,10 +3335,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     std::string_view filter::get_name() const { return commands::names[type_index]; }
 
     const size_t reduce::type_index = commands::reduce;
-    reduce::reduce(const interface* value) noexcept : value(value) {}
-    reduce::~reduce() noexcept { value->~interface(); }
+    reduce::reduce(const interface* value) noexcept : one_child_interface(value) {}
+    reduce::~reduce() noexcept {}
     struct object reduce::process(context* ctx) const {
-      const auto obj = value->process(ctx);
+      const auto obj = child->process(ctx);
       assert(!obj.ignore());
       ctx->reduce_value = obj;
       return obj;
@@ -3347,7 +3347,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       auto ptr = allocator->create(ctx, get_name());
       change_function_name cfn(ctx, get_name());
       change_nesting cn(ctx, ctx->nest_level+1);
-      ptr->children = value->compute(ctx, allocator);
+      ptr->children = child->compute(ctx, allocator);
       ctx->reduce_value = ptr->children->value;
       ptr->value = ptr->children->value;
       return ptr;
@@ -3478,8 +3478,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     }
 
     const size_t assert_condition::type_index = commands::values::assert_condition;
-    assert_condition::assert_condition(const interface* condition, const interface* str) noexcept : condition(condition), str(str) {}
-    assert_condition::~assert_condition() noexcept { condition->~interface(); if (str != nullptr) str->~interface(); }
+    assert_condition::assert_condition(const interface* condition, const interface* str) noexcept
+      : condition_interface(condition), one_child_interface(str) {}
+    assert_condition::~assert_condition() noexcept {}
     object assert_condition::process(context* ctx) const {
       const auto obj = condition->process(ctx);
       if (obj.is<bool>() && obj.get<bool>()) return ignore_value;
@@ -3503,8 +3504,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       ctx->draw_function = func;
       // наверное тут создадим дефолтный аллокатор и вычислим кондишен
 //       condition->draw(ctx);
-      if (str != nullptr) {
-        const auto str_obj = str->process(ctx);
+      if (child != nullptr) {
+        const auto str_obj = child->process(ctx);
         const auto hint = str_obj.get<std::string_view>();
         throw std::runtime_error("Assertion failed in entity " + std::string(ctx->id) + " method " + std::string(ctx->method_name) + " hint: " + std::string(hint));
       } else {

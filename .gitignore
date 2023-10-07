@@ -36,3 +36,5 @@ Build/
 
 *.kdev4
 *.cppcheck
+
+*.user

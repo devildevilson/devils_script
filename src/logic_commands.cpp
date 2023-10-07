@@ -150,10 +150,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
 #define LOGIC_BLOCK_COMMAND_FUNC(func_name)                       \
     const size_t func_name::type_index = commands::values::func_name; \
-    func_name::func_name(const interface* childs) noexcept : childs(childs) {} \
-    func_name::~func_name() noexcept {                            \
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } \
-    }                                                             \
+    func_name::func_name(const interface* childs) noexcept : children_interface(childs) {} \
+    func_name::~func_name() noexcept {}                           \
     local_state* func_name::compute(context* ctx, local_state_allocator* allocator) const { \
       auto ptr = allocator->create(ctx, get_name());              \
       local_state* first = nullptr;                               \

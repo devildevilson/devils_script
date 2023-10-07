@@ -113,7 +113,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     public:
       struct init_func_data;
       struct init_context;
-      using init_function_t = std::function<interface*(system*, init_context*, const sol::object &, container*)>;
+      using init_function_t = std::function<const interface*(system*, init_context*, const sol::object &, container*)>;
       using get_info_func_t = std::function<std::string()>;
 
       // type_id<void>() не возвращает 0, желательно переделать
@@ -178,22 +178,22 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       public:
         inline view(system* sys, init_context* ctx, container* cont, const bool is_iterator) : sys(sys), ctx(ctx), cont(cont), is_iterator(is_iterator) {}
 
-        interface* make_scripted_conditional(const sol::object &obj);
-        interface* make_scripted_numeric(const sol::object &obj);
-        interface* make_scripted_string(const sol::object &obj);
-        interface* make_scripted_effect(const sol::object &obj);
-        interface* make_scripted_object(const size_t &id, const sol::object &obj);
+        const interface* make_scripted_conditional(const sol::object &obj);
+        const interface* make_scripted_numeric(const sol::object &obj);
+        const interface* make_scripted_string(const sol::object &obj);
+        const interface* make_scripted_effect(const sol::object &obj);
+        const interface* make_scripted_object(const size_t &id, const sol::object &obj);
 
         template <typename T>
-        interface* make_scripted_object(const sol::object &obj) {
+        const interface* make_scripted_object(const sol::object &obj) {
           return make_scripted_object(type_id<T>(), obj);
         }
 
-        interface* any_scripted_object(const sol::object &obj);
+        const interface* any_scripted_object(const sol::object &obj);
 
-        interface* traverse_children(const sol::object &obj);
-        interface* traverse_children_numeric(const sol::object &obj);
-        interface* traverse_children_condition(const sol::object &obj);
+        const interface* traverse_children(const sol::object &obj);
+        const interface* traverse_children_numeric(const sol::object &obj);
+        const interface* traverse_children_condition(const sol::object &obj);
 
         size_t get_random_state();
 
@@ -287,9 +287,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       void register_usertype();
 
       template <typename T>
-      interface* create_argument(const std::string_view &name, init_context* ctx, const sol::object &obj, container* cont);
+      const interface* create_argument(const std::string_view &name, init_context* ctx, const sol::object &obj, container* cont);
       template <typename T>
-      interface* create_default_argument(const std::string_view &name, const std::string_view &arg_name, const std::any &default_val, container* cont);
+      const interface* create_default_argument(const std::string_view &name, const std::string_view &arg_name, const std::any &default_val, container* cont);
 
       // к нам тут должна приходить таблица с входными данными
       // из нее по именам мы должны забрать нужные нам скрипты
@@ -309,22 +309,22 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       // зачем std::any если есть script::object? наверное не имеет смысла пытаться делать какие то особые входные данные которые не помещаются в script::object
       template <typename F, size_t N, size_t cur, bool first_arg>
-      interface* make_arguments(
+      const interface* make_arguments(
         const std::string_view &name, const std::vector<std::string> &args_name, const std::vector<std::any> &args_default_val,
         init_context* ctx, const sol::object &obj, container* cont,
-        interface* begin = nullptr, interface* current = nullptr
+        const interface* begin = nullptr, const interface* current = nullptr
       );
       template <typename F, size_t N, size_t cur, bool first_arg>
-      interface* make_arguments(
+      const interface* make_arguments(
         const std::string_view &name, const std::vector<std::any> &args_default_val,
         init_context* ctx, const sol::object &obj, container* cont,
-        interface* begin = nullptr, interface* current = nullptr
+        const interface* begin = nullptr, const interface* current = nullptr
       );
       template <typename F, size_t N, size_t cur, bool first_arg, const char* cur_arg, const char*... args_names>
-      interface* make_arguments(
+      const interface* make_arguments(
         const std::string_view &name, const std::vector<std::any> &args_default_val,
         init_context* ctx, const sol::object &obj, container* cont,
-        interface* begin = nullptr, interface* current = nullptr
+        const interface* begin = nullptr, const interface* current = nullptr
       );
 
       // вообще теперь можно убрать дефолтную функцию register_function и оставить только register_function_with_args (переименовав их собственно в register_function)
@@ -424,45 +424,45 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       bool function_exists(const std::string_view &name, size_t* return_type = nullptr, size_t* arg_count = nullptr);
       const init_func_data* get_init_function(const size_t &type_id, const std::string_view &name) const;
 
-      interface* make_raw_script_boolean(init_context* ctx, const sol::object &obj, container* cont);
-      interface* make_raw_script_number(init_context* ctx, const sol::object &obj, container* cont);
-      interface* make_raw_script_string(init_context* ctx, const sol::object &obj, container* cont);
-      interface* make_raw_script_effect(init_context* ctx, const sol::object &obj, container* cont);
-      interface* make_raw_script_object(init_context* ctx, const sol::object &obj, container* cont);
-      interface* make_raw_script_any(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* make_raw_script_boolean(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* make_raw_script_number(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* make_raw_script_string(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* make_raw_script_effect(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* make_raw_script_object(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* make_raw_script_any(init_context* ctx, const sol::object &obj, container* cont);
 
-      interface* find_common_function(init_context* ctx, const std::string_view &func_name, const sol::object &obj, container* cont);
-      interface* create_overload(init_context* ctx, const std::string_view &func_name, const sol::object &obj, container* cont);
+      const interface* find_common_function(init_context* ctx, const std::string_view &func_name, const sol::object &obj, container* cont);
+      const interface* create_overload(init_context* ctx, const std::string_view &func_name, const sol::object &obj, container* cont);
 
-      interface* make_effect_context(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
-      interface* make_string_context(init_context* ctx, const sol::object &rvalue, container* cont);
-      interface* make_object_context(init_context* ctx, const sol::object &rvalue, container* cont);
-      interface* make_context_change(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
+      const interface* make_effect_context(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
+      const interface* make_string_context(init_context* ctx, const sol::object &rvalue, container* cont);
+      const interface* make_object_context(init_context* ctx, const sol::object &rvalue, container* cont);
+      const interface* make_context_change(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
 
-      interface* make_raw_number_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont);
-      interface* make_raw_boolean_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont);
+      const interface* make_raw_number_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont);
+      const interface* make_raw_boolean_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont);
 
-      interface* make_number_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
-      interface* make_boolean_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
-      interface* make_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont, const size_t &return_type);
+      const interface* make_number_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
+      const interface* make_boolean_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
+      const interface* make_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont, const size_t &return_type);
 
-      interface* make_complex_object(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
-      interface* make_table_rvalue(init_context* ctx, const sol::object &obj, container* cont);
-      interface* make_table_lvalue(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
+      const interface* make_complex_object(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
+      const interface* make_table_rvalue(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* make_table_lvalue(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont);
 
-      interface* condition_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
-      interface* numeric_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
-      interface* string_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
-      interface* object_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
-      interface* effect_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
-      interface* table_traverse(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* condition_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* numeric_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* string_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* object_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* effect_table_traverse(init_context* ctx, const sol::object &obj, container* cont);
+      const interface* table_traverse(init_context* ctx, const sol::object &obj, container* cont);
 
-      interface* make_boolean_container(const bool val, container* cont);
-      interface* make_number_container(const double val, container* cont);
-      interface* make_string_container(const std::string_view val, container* cont);
-      interface* make_object_container(const object val, container* cont);
-      interface* make_invalid_producer(container* cont);
-      interface* make_ignore_producer(container* cont);
+      const interface* make_boolean_container(const bool val, container* cont);
+      const interface* make_number_container(const double val, container* cont);
+      const interface* make_string_container(const std::string_view val, container* cont);
+      const interface* make_object_container(const object val, container* cont);
+      const interface* make_invalid_producer(container* cont);
+      const interface* make_ignore_producer(container* cont);
 
       // наверное имеет смысл добавить предыдущий тип, если он есть
       using make_script_func_t = decltype(&system::make_raw_script_boolean);
@@ -572,8 +572,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     }
 
     template <typename T>
-    interface* system::create_argument(const std::string_view &name, init_context* ctx, const sol::object &obj, container* cont) {
-      interface* local = nullptr;
+    const interface* system::create_argument(const std::string_view &name, init_context* ctx, const sol::object &obj, container* cont) {
+      const interface* local = nullptr;
       static_assert(!std::is_void_v<T>, "Bad input type for function");
       // Santa Claus please bring static reflection to c++, I beg you
       if constexpr (std::is_enum_v<T>) {
@@ -623,8 +623,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     }
 
     template <typename T>
-    interface* system::create_default_argument(const std::string_view &, const std::string_view &arg_name, const std::any &default_val, container* cont) {
-      interface* local = nullptr;
+    const interface* system::create_default_argument(const std::string_view &, const std::string_view &arg_name, const std::any &default_val, container* cont) {
+      const interface* local = nullptr;
       if (!default_val.has_value()) throw std::runtime_error("Function argument '" + std::string(arg_name) + "' must be specified");
       static_assert(!std::is_void_v<T>, "Bad input type for function");
 //       if constexpr (utils::is_array_view_v<T>) {
@@ -639,11 +639,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
         // как тут? ожидаем видимо массив
         const auto val = std::any_cast<std::vector<final_arg>>(&default_val);
         if (val == nullptr) throw std::runtime_error("Expected '" + std::string(type_name<std::vector<final_arg>>()) + "' as default value");
-        interface* child = nullptr;
+        const interface* child = nullptr;
         for (auto &obj : *val) {
           auto cur = make_object_container(object(obj), cont);
           if (local == nullptr) local = cur;
-          if (child != nullptr) child->next = cur;
+          if (child != nullptr) child->dirty_set_next(cur);
           child = cur;
         }
       } else {
@@ -830,15 +830,15 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 //     }
 
     template <typename F, size_t N, size_t cur, bool first_arg>
-    interface* system::make_arguments(
+    const interface* system::make_arguments(
       const std::string_view &name,
       const std::vector<std::string> &args_name,
       const std::vector<std::any> &args_default_val,
       init_context* ctx,
       const sol::object &obj,
       container* cont,
-      interface* begin,
-      interface* current
+      const interface* begin,
+      const interface* current
     ) {
       if constexpr (cur == N) return begin;
       else {
@@ -863,7 +863,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           static_assert(cur+1 == N, "Forward list must be last argument");
         }
 
-        interface* local = nullptr;
+        const interface* local = nullptr;
         if constexpr (is_optional_v<input_type>) {
           using final_type = optional_type<input_type>;
           static_assert(is_valid_type_for_object_v<final_type>, "Argument type must be suitable for script::object");
@@ -877,7 +877,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           else throw std::runtime_error("Could not find argument " + args_name[cur] + " for function '" + std::string(name) + "'");
         }
 
-        if (current != nullptr) current->next = local;
+        if (current != nullptr) current->dirty_set_next(local);
         return make_arguments<F, N, cur+1, false>(name, args_name, args_default_val, ctx, input_is_table ? obj : sol::object(), cont, begin == nullptr ? local : begin, local);
       }
 
@@ -885,10 +885,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     }
 
     template <typename F, size_t N, size_t cur, bool first_arg>
-    interface* system::make_arguments(
+    const interface* system::make_arguments(
       const std::string_view &name, const std::vector<std::any> &args_default_val,
       init_context* ctx, const sol::object &obj, container* cont,
-      interface* begin, interface* current
+      const interface* begin, const interface* current
     ) {
       if constexpr (cur == N) return begin;
       else {
@@ -913,7 +913,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           static_assert(cur+1 == N, "Forward list must be last argument");
         }
 
-        interface* local = nullptr;
+        const interface* local = nullptr;
         if constexpr (is_optional_v<input_type>) {
           using final_type = optional_type<input_type>;
           static_assert(is_valid_type_for_object_v<final_type>, "Argument type must be suitable for script::object");
@@ -927,7 +927,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           else throw std::runtime_error("Could not find argument " + std::to_string(TO_LUA_INDEX(cur)) + " for function '" + std::string(name) + "'");
         }
 
-        if (current != nullptr) current->next = local;
+        if (current != nullptr) current->dirty_set_next(local);
         return make_arguments<F, N, cur+1, false>(name, args_default_val, ctx, input_is_table ? obj : sol::object(), cont, begin == nullptr ? local : begin, local);
       }
 
@@ -937,10 +937,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     // может быть таблица для одного аргумента, здесь у нас нет возможности проверить является ли первый аргумент тут объектом для которого запустится функция F
     // по идее достаточно только передать флаг первый ли это аргумент, любой рекурсивный вызов - false
     template <typename F, size_t N, size_t cur, bool first_arg, const char* cur_arg, const char*... args_names>
-    interface* system::make_arguments(
+    const interface* system::make_arguments(
       const std::string_view &name, const std::vector<std::any> &args_default_val,
       init_context* ctx, const sol::object &obj, container* cont,
-      interface* begin, interface* current
+      const interface* begin, const interface* current
     ) {
       static_assert(cur + sizeof...(args_names) + 1 == N);
       if constexpr (cur == N) return begin;
@@ -966,7 +966,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           static_assert(cur+1 == N, "Forward list must be last argument");
         }
 
-        interface* local = nullptr;
+        const interface* local = nullptr;
         if constexpr (is_optional_v<input_type>) {
           using final_type = optional_type<input_type>;
           static_assert(is_valid_type_for_object_v<final_type>, "Argument type must be suitable for script::object");
@@ -980,7 +980,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           else throw std::runtime_error("Could not find argument '" + std::string(cur_arg) + "' for function '" + std::string(name) + "'");
         }
 
-        if (current != nullptr) current->next = local;
+        if (current != nullptr) current->dirty_set_next(local);
         return make_arguments<F, N, cur+1, false, args_names...>(name, args_default_val, ctx, input_is_table ? obj : sol::object(), cont, begin == nullptr ? local : begin, local);
       }
 
@@ -1010,7 +1010,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       init_func_data ifd{
         script_type, type_id<Th>(), type_id<output_type>(), func_arg_count,
-        [args_name, args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> interface* {
+        [args_name, args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> const interface* {
           constexpr size_t script_type = get_script_type<output_type>();
           check_script_types(name, ctx->script_type, script_type);
           change_current_function_name ccfn(ctx, name);
@@ -1024,7 +1024,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
             ctx->add_function<function_type>();
             // теперь можно передать container по-умолчанию и избавиться от проверок указателя
-            interface* cur = nullptr;
+            const interface* cur = nullptr;
             if (cont != nullptr) { cur = cont->add<function_type>(); }
             if (obj.valid()) {
               if constexpr (std::is_same_v<output_type, bool>) {
@@ -1086,7 +1086,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       init_func_data ifd{
         script_type, type_id<Th>(), type_id<output_type>(), func_arg_count,
-        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> interface* {
+        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> const interface* {
           constexpr size_t script_type = get_script_type<output_type>();
           check_script_types(name, ctx->script_type, script_type);
           change_current_function_name ccfn(ctx, name);
@@ -1100,7 +1100,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
             ctx->add_function<function_type>();
             // теперь можно передать container по-умолчанию и избавиться от проверок указателя
-            interface* cur = nullptr;
+            const interface* cur = nullptr;
             if (cont != nullptr) { cur = cont->add<function_type>(); }
             if (obj.valid()) {
               if constexpr (std::is_same_v<output_type, bool>) {
@@ -1163,7 +1163,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       init_func_data ifd{
         script_type, type_id<Th>(), type_id<output_type>(), func_arg_count,
-        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> interface* {
+        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> const interface* {
           constexpr size_t script_type = get_script_type<output_type>();
           check_script_types(name, ctx->script_type, script_type);
           change_current_function_name ccfn(ctx, name);
@@ -1177,7 +1177,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
             ctx->add_function<function_type>();
             // теперь можно передать container по-умолчанию и избавиться от проверок указателя
-            interface* cur = nullptr;
+            const interface* cur = nullptr;
             if (cont != nullptr) { cur = cont->add<function_type>(); }
             if (obj.valid()) {
               if constexpr (std::is_same_v<output_type, bool>) {
@@ -1319,7 +1319,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       init_func_data ifd{
         script_type, SCRIPT_SYSTEM_ANY_TYPE, type_id<output_type>(), func_arg_count,
-        [args_name, args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> interface* {
+        [args_name, args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> const interface* {
           constexpr size_t func_arg_count = get_function_argument_count<F>();
           constexpr size_t script_type = get_script_type<output_type>();
           check_script_types(name, ctx->script_type, script_type);
@@ -1330,7 +1330,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             using function_type = basic_function_no_arg<F, f, name, react>;
             // создадим сравнение?
             ctx->add_function<function_type>();
-            interface* ret = nullptr;
+            const interface* ret = nullptr;
             if (cont != nullptr) ret = cont->add<function_type>();
             if (obj.valid()) {
               if constexpr (std::is_same_v<output_type, bool>) {
@@ -1385,7 +1385,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       init_func_data ifd{
         script_type, SCRIPT_SYSTEM_ANY_TYPE, type_id<output_type>(), func_arg_count,
-        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> interface* {
+        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> const interface* {
           constexpr size_t func_arg_count = get_function_argument_count<F>();
           constexpr size_t script_type = get_script_type<output_type>();
           check_script_types(name, ctx->script_type, script_type);
@@ -1396,7 +1396,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             using function_type = basic_function_no_arg<F, f, name, react>;
             // создадим сравнение?
             ctx->add_function<function_type>();
-            interface* ret = nullptr;
+            const interface* ret = nullptr;
             if (cont != nullptr) ret = cont->add<function_type>();
             if (obj.valid()) {
               if constexpr (std::is_same_v<output_type, bool>) {
@@ -1421,7 +1421,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
             auto args = sys->make_arguments<F, func_arg_count, 0, true>(name, args_default_val, ctx, obj, cont);
 
-            interface* cur = nullptr;
+            const interface* cur = nullptr;
             if (cont != nullptr) {
               auto init = cont->get_init<function_type>(offset);
               cur = init.init(args);
@@ -1453,7 +1453,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       init_func_data ifd{
         script_type, SCRIPT_SYSTEM_ANY_TYPE, type_id<output_type>(), func_arg_count,
-        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> interface* {
+        [args_default_val] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> const interface* {
           constexpr size_t func_arg_count = get_function_argument_count<F>();
           constexpr size_t script_type = get_script_type<output_type>();
           check_script_types(name, ctx->script_type, script_type);
@@ -1464,7 +1464,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             using function_type = basic_function_no_arg<F, f, name, react>;
             // создадим сравнение?
             ctx->add_function<function_type>();
-            interface* ret = nullptr;
+            const interface* ret = nullptr;
             if (cont != nullptr) ret = cont->add<function_type>();
             if (obj.valid()) {
               if constexpr (std::is_same_v<output_type, bool>) {
@@ -1489,7 +1489,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
             auto args = sys->make_arguments<F, func_arg_count, 0, true, first_arg, args_names...>(name, args_default_val, ctx, obj, cont);
 
-            interface* cur = nullptr;
+            const interface* cur = nullptr;
             if (cont != nullptr) {
               auto init = cont->get_init<function_type>(offset);
               cur = init.init(args);
@@ -1518,14 +1518,14 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       init_func_data ifd{
         script_type, type_id<Th>(), type_id<output_type>(), arg_count,
-        [] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> interface* {
+        [] (system* sys, init_context* ctx, const sol::object &obj, container* cont) -> const interface* {
           using function_type = scripted_function_const_args<Th, F, f, name, react, head, args...>;
 
           constexpr size_t script_type = get_script_type<output_type>();
           check_script_types(name, ctx->script_type, script_type);
 
           ctx->add_function<function_type>();
-          interface* cur = nullptr;
+          const interface* cur = nullptr;
           if (cont != nullptr) cur = cont->add<function_type>();
           if (obj.valid()) {
             if constexpr (std::is_same_v<output_type, bool>) {
@@ -1797,7 +1797,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     const size_t offset = cont->add_delayed<function_type>(); \
     init = cont->get_init<function_type>(offset);    \
   }                                                  \
-  interface* cond = nullptr;                         \
+  const interface* cond = nullptr;                         \
   const sol::table t = obj.as<sol::table>();         \
   if (const auto proxy = t["condition"]; proxy.valid()) { \
     cond = sys->make_raw_script_boolean(ctx, proxy, cont); \
@@ -1942,8 +1942,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 //           change_block_name cbn(ctx, name);
           change_current_function_name ccfn(ctx, name);
 
-          interface* percentage = nullptr;
-          interface* max_count = nullptr;
+          const interface* percentage = nullptr;
+          const interface* max_count = nullptr;
           const sol::table t = obj.as<sol::table>();
           if (const auto proxy = t["percentage"]; proxy.valid()) {
             percentage = sys->make_raw_script_number(ctx, proxy, cont);
@@ -1953,7 +1953,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
           auto childs = sys->table_traverse(ctx, obj, cont);
 
-          interface* cur = nullptr;
+          const interface* cur = nullptr;
           if (init.valid()) cur = init.init(max_count, percentage, childs);
           return cur;
         }, [] () {
@@ -2018,8 +2018,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 //           change_block_name cbn(ctx, name);
           change_current_function_name ccfn(ctx, name);
 
-          interface* condition = nullptr;
-          interface* weight = nullptr;
+          const interface* condition = nullptr;
+          const interface* weight = nullptr;
           sol::table t = obj.as<sol::table>();
           if (const auto proxy = t["condition"]; proxy.valid()) {
             condition = sys->make_raw_script_boolean(ctx, proxy, cont);
@@ -2106,9 +2106,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           // может вообще везде сократить количество ошибок? все таки это не ФАТАЛ эррор, хотя с другой стороны
           // банальная ошибка которую мы можем не заметить
           change_current_function_name ccfn(ctx, name);
-          interface* default_value = nullptr;
-          interface* begin_childs = nullptr;
-          interface* cur_child = nullptr;
+          const interface* default_value = nullptr;
+          const interface* begin_childs = nullptr;
+          const interface* cur_child = nullptr;
           const auto t = obj.as<sol::table>();
           for (const auto &pair : t) {
             if (pair.first.get_type() == sol::type::string) {
@@ -2133,7 +2133,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
                 if (counter >= 1) throw std::runtime_error("Function '" + std::string(name) + "' expects inner table to consist of one function ");
 
-                interface* local = nullptr;
+                const interface* local = nullptr;
                 if (ctx->script_type != script_types::effect && pair.first.get_type() != sol::type::string)
                   throw std::runtime_error("Unexpected lvalue of type '" + std::string(detail::get_sol_type_name(pair.first.get_type())) + "' in function '" + std::string(name) + "', expected string ");
 
@@ -2162,7 +2162,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
                 ++counter;
                 if (begin_childs == nullptr) begin_childs = local;
-                if (cur_child != nullptr) cur_child->next = local;
+                if (cur_child != nullptr) cur_child->dirty_set_next(local);
                 cur_child = local;
               }
               continue;

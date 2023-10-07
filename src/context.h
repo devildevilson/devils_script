@@ -34,11 +34,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view function_name;
       std::string_view prev_function_name;
       std::string_view argument_name;
-      size_t id_hash, method_hash, seed, type, operator_type, nest_level; // что такое type?
+      size_t id_hash, method_hash, seed, type, operator_type, nest_level; // что такое type? тип функции может быть? эффект, смена стейта и проч
       size_t index, prev_index, local_rand_state;
       object current, prev, value, original;
       // аргументов строго говоря может быть больше чем 16 да и их проще задать через указатели
       //std::array<std::pair<std::string_view, object>, arguments_count> arguments;
+      // нужно отдельно указать кондишен наверное и может быть смену стейта тоже, чтобы не смешивать и было удобно сделать итератор
       local_state* children;
       local_state* next;
       void* user_data;
@@ -62,6 +63,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       local_state & operator=(local_state &&move) noexcept = default;
 
       uint64_t get_random_value(const size_t &static_state) const noexcept;
+
+      // имеет смысл добавить функцию обхода, в ней рекурсивно запустим другие функции
+      //void traverse(const std::function<void(local_state*)> &f);
+      void for_each(const std::function<void(local_state*)> &f);
+      // наверное лучше сделать итератор для луа
     };
 
     class local_state_allocator {
@@ -75,6 +81,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       void traverse_and_free(local_state* data);
     };
 
+    // есть возможность посчитать заранее размер памяти для стейтов
     struct default_local_state_allocator final : public local_state_allocator {
       static const size_t default_local_state_pool_element_count = 100;
 
@@ -124,10 +131,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t locals_offset; // используем оффсет для того чтобы аккуратно войти в новый скрипт
       std::vector<object> locals;
 
-      draw_function_t draw_function;
+//      draw_function_t draw_function; // это нужно убрать
       std::bitset<attributes_count> attributes;
-      void* vector_ptr;
-      add_to_list_t add_func_ptr;
+//      void* vector_ptr;
+//      add_to_list_t add_func_ptr;
       void* user_data;
 
       static double normalize_value(const uint64_t value);
@@ -146,9 +153,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       inline bool get_attribute(const size_t &index) const noexcept { return attributes.test(index); }
       inline void set_attribute(const size_t &index, const bool value) noexcept { attributes.set(index, value); }
 
-      bool draw_state() const noexcept;
-      bool draw(const local_state* data) const;
-      void traverse_and_draw(const local_state* data) const;
+//      bool draw_state() const noexcept;
+//      bool draw(const local_state* data) const;
+//      void traverse_and_draw(const local_state* data) const;
 
       uint64_t get_random_value(const size_t &static_state) const noexcept;
 
@@ -249,20 +256,20 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       inline ~change_reduce_value() noexcept { ctx->reduce_value = reduce_value; }
     };
 
-    struct change_vector_and_func {
-      context* ctx;
-      void* old_ptr;
-      add_to_list_t old_func;
-      inline change_vector_and_func(context* ctx, void* ptr, add_to_list_t func) noexcept : ctx(ctx), old_ptr(ctx->vector_ptr), old_func(ctx->add_func_ptr) {
-        ctx->vector_ptr = ptr;
-        ctx->add_func_ptr = func;
-      }
+//    struct change_vector_and_func {
+//      context* ctx;
+//      void* old_ptr;
+//      add_to_list_t old_func;
+//      inline change_vector_and_func(context* ctx, void* ptr, add_to_list_t func) noexcept : ctx(ctx), old_ptr(ctx->vector_ptr), old_func(ctx->add_func_ptr) {
+//        ctx->vector_ptr = ptr;
+//        ctx->add_func_ptr = func;
+//      }
 
-      inline ~change_vector_and_func() {
-        ctx->vector_ptr = old_ptr;
-        ctx->add_func_ptr = old_func;
-      }
-    };
+//      inline ~change_vector_and_func() {
+//        ctx->vector_ptr = old_ptr;
+//        ctx->add_func_ptr = old_func;
+//      }
+//    };
   }
 
 #ifdef DEVILS_SCRIPT_OUTER_NAMESPACE

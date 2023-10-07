@@ -105,43 +105,43 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       lists.clear();
     }
 
-    interface* system::view::make_scripted_conditional(const sol::object &obj) {
+    const interface* system::view::make_scripted_conditional(const sol::object &obj) {
       return sys->make_raw_script_boolean(ctx, obj, cont);
     }
 
-    interface* system::view::make_scripted_numeric(const sol::object &obj) {
+    const interface* system::view::make_scripted_numeric(const sol::object &obj) {
       return sys->make_raw_script_number(ctx, obj, cont);
     }
 
-    interface* system::view::make_scripted_string(const sol::object &obj) {
+    const interface* system::view::make_scripted_string(const sol::object &obj) {
       return sys->make_raw_script_string(ctx, obj, cont);
     }
 
-    interface* system::view::make_scripted_effect(const sol::object &obj) {
+    const interface* system::view::make_scripted_effect(const sol::object &obj) {
       return sys->make_raw_script_effect(ctx, obj, cont);
     }
 
-    interface* system::view::make_scripted_object(const size_t &id, const sol::object &obj) {
+    const interface* system::view::make_scripted_object(const size_t &id, const sol::object &obj) {
       change_expected_type cet(ctx, id);
       return sys->make_raw_script_object(ctx, obj, cont);
     }
 
-    interface* system::view::any_scripted_object(const sol::object &obj) {
+    const interface* system::view::any_scripted_object(const sol::object &obj) {
       return sys->make_raw_script_any(ctx, obj, cont);
     }
 
-    interface* system::view::traverse_children(const sol::object &obj) {
+    const interface* system::view::traverse_children(const sol::object &obj) {
       if (!is_iterator) throw std::runtime_error("Table traverse can be done only in iterator functions");
       return sys->table_traverse(ctx, obj, cont);
     }
 
-    interface* system::view::traverse_children_numeric(const sol::object &obj) {
+    const interface* system::view::traverse_children_numeric(const sol::object &obj) {
       if (!is_iterator) throw std::runtime_error("Table traverse can be done only in iterator functions");
       change_script_type cst(ctx, script_types::numeric);
       return sys->numeric_table_traverse(ctx, obj, cont);
     }
 
-    interface* system::view::traverse_children_condition(const sol::object &obj) {
+    const interface* system::view::traverse_children_condition(const sol::object &obj) {
       if (!is_iterator) throw std::runtime_error("Table traverse can be done only in iterator functions");
       change_script_type cst(ctx, script_types::condition);
       return sys->condition_table_traverse(ctx, obj, cont);
@@ -397,11 +397,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return cur;
     }
 
-    interface* system::make_raw_script_boolean(init_context* ctx, const sol::object &obj, container* cont) {
+    const interface* system::make_raw_script_boolean(init_context* ctx, const sol::object &obj, container* cont) {
       change_script_type cst(ctx, script_types::condition);
       const sol::object nil = sol::make_object(obj.lua_state(), sol::nil);
 
-      interface* cur = nullptr;
+      const interface* cur = nullptr;
       const auto sol_type = obj.get_type();
       switch (sol_type) {
         case sol::type::boolean: cur = create_boolean_container(ctx, obj.as<bool>(), cont); break;
@@ -426,12 +426,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return cur;
     }
 
-    interface* system::make_raw_script_number(init_context* ctx, const sol::object &obj, container* cont) {
+    const interface* system::make_raw_script_number(init_context* ctx, const sol::object &obj, container* cont) {
       change_script_type cst(ctx, script_types::numeric);
 
       const sol::object nil = sol::make_object(obj.lua_state(), sol::nil);
 
-      interface* cur = nullptr;
+      const interface* cur = nullptr;
       const auto sol_type = obj.get_type();
       switch (sol_type) {
         case sol::type::boolean: cur = create_boolean_container(ctx, obj.as<bool>(), cont); break;
@@ -464,10 +464,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return cur;
     }
 
-    interface* system::make_raw_script_string(init_context* ctx, const sol::object &obj, container* cont) {
+    const interface* system::make_raw_script_string(init_context* ctx, const sol::object &obj, container* cont) {
       change_script_type cst(ctx, script_types::string);
 
-      interface* cur = nullptr;
+      const interface* cur = nullptr;
       const auto sol_type = obj.get_type();
       switch (sol_type) {
         case sol::type::string: cur = create_string_container(ctx, obj.as<std::string_view>(), cont); break;
@@ -498,12 +498,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return cur;
     }
 
-    interface* system::make_raw_script_effect(init_context* ctx, const sol::object &obj, container* cont) {
+    const interface* system::make_raw_script_effect(init_context* ctx, const sol::object &obj, container* cont) {
       change_script_type cst(ctx, script_types::effect);
 
       const sol::object nil = sol::make_object(obj.lua_state(), sol::nil);
 
-      interface* cur = nullptr;
+      const interface* cur = nullptr;
       const auto sol_type = obj.get_type();
       switch (sol_type) {
         case sol::type::string: {
@@ -540,12 +540,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return cur;
     }
 
-    interface* system::make_raw_script_object(init_context* ctx, const sol::object &obj, container* cont) {
+    const interface* system::make_raw_script_object(init_context* ctx, const sol::object &obj, container* cont) {
       change_script_type cst(ctx, script_types::object);
 
       const sol::object nil = sol::make_object(obj.lua_state(), sol::nil);
 
-      interface* cur = nullptr;
+      const interface* cur = nullptr;
       const auto sol_type = obj.get_type();
       switch (sol_type) {
         case sol::type::string: {
@@ -584,8 +584,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return cur;
     }
 
-    interface* system::make_raw_script_any(init_context* ctx, const sol::object &obj, container* cont) {
-      interface* child = nullptr;
+    const interface* system::make_raw_script_any(init_context* ctx, const sol::object &obj, container* cont) {
+      const interface* child = nullptr;
       switch (ctx->script_type) {
         case script_types::condition: child = make_raw_script_boolean(ctx, obj, cont); break;
         case script_types::numeric:   child = make_raw_script_number(ctx, obj, cont);  break;
@@ -598,20 +598,20 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return child;
     }
 
-    interface* system::make_raw_number_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont) {
+    const interface* system::make_raw_number_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont) {
       const uint8_t compare_op = ctx->compare_operator;
       ctx->current_size += sizeof(number_comparator);
       if (cont != nullptr) return cont->add<number_comparator>(compare_op, lvalue, rvalue);
       return nullptr;
     }
 
-    interface* system::make_raw_boolean_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont) {
+    const interface* system::make_raw_boolean_compare(init_context* ctx, const interface* lvalue, const interface* rvalue, container* cont) {
       ctx->current_size += sizeof(boolean_comparator);
       if (cont != nullptr) return cont->add<boolean_comparator>(lvalue, rvalue);
       return nullptr;
     }
 
-    interface* system::make_number_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
+    const interface* system::make_number_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
       size_t offset = SIZE_MAX;
       if (cont != nullptr) offset = cont->add_delayed<number_comparator>();
       ctx->add_function<number_comparator>();
@@ -621,7 +621,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       auto r_part = make_raw_script_number(ctx, rvalue, cont);
       const uint8_t compare_op = ctx->compare_operator;
 
-      interface* ret = nullptr;
+      const interface* ret = nullptr;
       if (cont != nullptr) {
         auto init = cont->get_init<number_comparator>(offset);
         ret = init.init(compare_op, l_part, r_part);
@@ -630,7 +630,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return ret;
     }
 
-    interface* system::make_boolean_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
+    const interface* system::make_boolean_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
       size_t offset = SIZE_MAX;
       if (cont != nullptr) offset = cont->add_delayed<boolean_comparator>();
       ctx->add_function<boolean_comparator>();
@@ -638,7 +638,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       auto l_part = create_overload(ctx, lvalue, sol::object(), cont);
       auto r_part = make_raw_script_boolean(ctx, rvalue, cont);
 
-      interface* ret = nullptr;
+      const interface* ret = nullptr;
       if (cont != nullptr) {
         auto init = cont->get_init<boolean_comparator>(offset);
         ret = init.init(l_part, r_part);
@@ -647,18 +647,18 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return ret;
     }
 
-    interface* system::make_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont, const size_t &return_type) {
+    const interface* system::make_compare(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont, const size_t &return_type) {
       assert(return_type == type_id<double>() || return_type == type_id<bool>());
       const bool compare_numbers = return_type == type_id<double>();
       if (compare_numbers) return make_number_compare(ctx, lvalue, rvalue, cont);
       return make_boolean_compare(ctx, lvalue, rvalue, cont);
     }
 
-    interface* system::find_common_function(init_context* ctx, const std::string_view &func_name, const sol::object &obj, container* cont) {
+    const interface* system::find_common_function(init_context* ctx, const std::string_view &func_name, const sol::object &obj, container* cont) {
       const size_t types[] = { type_id<void>(), type_id<bool>(), type_id<double>(), type_id<std::string_view>(), type_id<object>() };
       const size_t count = sizeof(types) / sizeof(types[0]);
 
-      interface* ret = nullptr;
+      const interface* ret = nullptr;
       for (size_t i = 0; i < count; ++i) {
         const auto func_itr = func_map.find(types[i]);
         assert(func_itr != func_map.end());
@@ -683,12 +683,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return ret;
     }
 
-    interface* system::create_overload(init_context* ctx, const std::string_view &func_name, const sol::object &data, container* cont) {
+    const interface* system::create_overload(init_context* ctx, const std::string_view &func_name, const sol::object &data, container* cont) {
       if (ctx->current_type == type_id<object>()) { // ctx->current_type == SIZE_MAX
         size_t new_obj_type = SIZE_MAX;
         size_t new_arg_count = SIZE_MAX;
-        interface* o_begin = nullptr;
-        interface* o_current = nullptr;
+        const interface* o_begin = nullptr;
+        const interface* o_current = nullptr;
         size_t counter = 0;
         std::array<size_t, MAXIMUM_OVERLOADS> overload_types = {0};
         for (const auto &pair : func_map) {
@@ -700,7 +700,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           ++counter;
           auto local = itr->second.func(this, ctx, data, cont);
           if (o_begin == nullptr) o_begin = local;
-          if (o_current != nullptr) o_current->next = local;
+          if (o_current != nullptr) o_current->dirty_set_next(local);
           o_current = local;
 
           new_obj_type = new_obj_type == SIZE_MAX ? itr->second.return_type : new_obj_type;
@@ -749,7 +749,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return ret_type != SCRIPT_SYSTEM_ANY_TYPE && !(type_id<void>() == ret_type || type_id<bool>() == ret_type || type_id<double>() == ret_type || type_id<std::string_view>() == ret_type) && arg_count == 0;
     }
 
-    interface* system::make_effect_context(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
+    const interface* system::make_effect_context(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
       const bool has_condition = table_has_condition(rvalue);
       if (!has_condition && lvalue.empty()) return table_traverse(ctx, rvalue, cont);
       if (!has_condition && ctx->block_name == lvalue) return table_traverse(ctx, rvalue, cont);
@@ -768,14 +768,14 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       if (cont != nullptr) offset = cont->add_delayed<change_scope_effect>();
       ctx->current_size += sizeof(change_scope_effect);
 
-      interface* scope = nullptr;
+      const interface* scope = nullptr;
       {
         change_script_type cst(ctx, script_types::object);
         if (complex_lvalue) scope = make_complex_object(ctx, lvalue, rvalue, cont);
         else if (func_exists) scope = create_overload(ctx, lvalue, sol::object(), cont);
       }
 
-      interface* cond = nullptr;
+      const interface* cond = nullptr;
       if (const auto type = rvalue.get_type(); type == sol::type::table) {
         const auto table = rvalue.as<sol::table>();
         if (const auto proxy = table["condition"]; proxy.valid()) {
@@ -786,7 +786,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       auto childs = table_traverse(ctx, rvalue, cont);
 
-      interface* ret = nullptr;
+      const interface* ret = nullptr;
       if (cont != nullptr) {
         auto init = cont->get_init<change_scope_effect>(offset);
         ret = init.init(scope, cond, childs);
@@ -795,7 +795,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return ret;
     }
 
-    interface* system::make_string_context(init_context* ctx, const sol::object &rvalue, container* cont) {
+    const interface* system::make_string_context(init_context* ctx, const sol::object &rvalue, container* cont) {
       // тут если кондишена нет, то нечего и делать то особо
       const bool has_condition = table_has_condition(rvalue);
       if (!has_condition) return table_traverse(ctx, rvalue, cont);
@@ -804,7 +804,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       if (cont != nullptr) offset = cont->add_delayed<compute_string>();
       ctx->add_function<compute_string>();
 
-      interface* cond = nullptr;
+      const interface* cond = nullptr;
       if (const auto type = rvalue.get_type(); type == sol::type::table) {
         const auto table = rvalue.as<sol::table>();
         if (const auto proxy = table["condition"]; proxy.valid()) {
@@ -815,7 +815,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       auto childs = table_traverse(ctx, rvalue, cont);
 
-      interface* ret = nullptr;
+      const interface* ret = nullptr;
       if (cont != nullptr) {
         auto init = cont->get_init<compute_string>(offset);
         ret = init.init(cond, childs);
@@ -824,7 +824,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return ret;
     }
 
-    interface* system::make_object_context(init_context* ctx, const sol::object &rvalue, container* cont) {
+    const interface* system::make_object_context(init_context* ctx, const sol::object &rvalue, container* cont) {
       // тут если кондишена нет, то нечего и делать то особо
       const bool has_condition = table_has_condition(rvalue);
       if (!has_condition) return table_traverse(ctx, rvalue, cont);
@@ -833,7 +833,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       if (cont != nullptr) offset = cont->add_delayed<compute_object>();
       ctx->add_function<compute_object>();
 
-      interface* cond = nullptr;
+      const interface* cond = nullptr;
       if (const auto type = rvalue.get_type(); type == sol::type::table) {
         const auto table = rvalue.as<sol::table>();
         if (const auto proxy = table["condition"]; proxy.valid()) {
@@ -844,7 +844,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       auto childs = table_traverse(ctx, rvalue, cont);
 
-      interface* ret = nullptr;
+      const interface* ret = nullptr;
       if (cont != nullptr) {
         auto init = cont->get_init<compute_object>(offset);
         ret = init.init(cond, childs);
@@ -858,7 +858,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 //     }
 
     // такая же функция может быть еще и другими типами контекста
-    interface* system::make_context_change(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
+    const interface* system::make_context_change(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
       // сюда вообще то может придти еще SIZE_MAX по идее, например чтобы положить предыдущий объект в прев
       // что делать? я более менее понимаю что делать со сложным контекстом
       // тут 3 варианта: либо lvalue не задано, либо lvalue - сложная строка, либо lvalue - обычная существующая функция
@@ -883,7 +883,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 //         return make_compare(ctx, lvalue, rvalue, cont, ret_type);
 //       }
 
-      interface* cur = nullptr;
+      const interface* cur = nullptr;
 
       size_t offset = SIZE_MAX;
       if (cont != nullptr) offset = cont->add_delayed<change_scope_condition>();
@@ -892,7 +892,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       change_computed_type cct(ctx, SCRIPT_SYSTEM_ANY_TYPE);
 
       // отсюда я должен получить новый тип
-      interface* scope = nullptr;
+      const interface* scope = nullptr;
       {
         change_script_type cst(ctx, script_types::object);
         if (func_exists) scope = create_overload(ctx, lvalue, sol::object(), cont);
@@ -902,7 +902,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       //const size_t new_type = scope != nullptr ? ctx->computed_type : ctx->current_type;
       change_context_types cst(ctx, scope == nullptr ? ctx->current_type : ctx->computed_type, scope == nullptr ? ctx->prev_type : ctx->current_type);
 
-      interface* cond = nullptr;
+      const interface* cond = nullptr;
       if (const auto type = rvalue.get_type(); type == sol::type::table) {
         const auto table = rvalue.as<sol::table>();
         if (const auto proxy = table["condition"]; proxy.valid()) {
@@ -996,13 +996,13 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
     // нужно разделить комплекс обжект и комплекс намбер, ожидаем сравнение только во втором
     // разделять к сожалению не особо удобно,
-    interface* system::make_complex_object(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
+    const interface* system::make_complex_object(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
       //assert(is_complex_object(lvalue));
 
       sol::state_view s = rvalue.lua_state();
 
-      interface* begin = nullptr;
-      interface* current = nullptr;
+      const interface* begin = nullptr;
+      const interface* current = nullptr;
       size_t counter = 0;
 
       // нужно еще вернуть ожидаемый тип
@@ -1095,7 +1095,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             auto local = create_overload(ctx, func_id, arg, cont);
             ctx->current_type = ctx->computed_type;
             if (begin == nullptr) begin = local;
-            if (current != nullptr) current->next = local;
+            if (current != nullptr) current->dirty_set_next(local);
             current = local;
             ++counter;
             j += 1;
@@ -1109,7 +1109,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           auto local = create_overload(ctx, func_id, sol::object(), cont);
           ctx->current_type = ctx->computed_type;
           if (begin == nullptr) begin = local;
-          if (current != nullptr) current->next = local;
+          if (current != nullptr) current->dirty_set_next(local);
           current = local;
           ++counter;
         }
@@ -1144,7 +1144,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return type != type_id<void>() && type != type_id<bool>() && type != type_id<double>() && type != type_id<std::string_view>();
     }
 
-    interface* system::make_table_lvalue(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
+    const interface* system::make_table_lvalue(init_context* ctx, const std::string_view &lvalue, const sol::object &rvalue, container* cont) {
       // тут мы должны понять что за lvalue к нам пришло, это может быть сложный объект или просто функция
       // сложный объект должен просто возвращать какой то объект
       //if (is_complex_object(lvalue)) return make_complex_object(name, ctx, lvalue, rvalue, cont);
@@ -1156,15 +1156,15 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return make_context_change(ctx, lvalue, rvalue, cont);
     }
 
-    interface* system::condition_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
+    const interface* system::condition_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
       assert(compare_script_types(ctx->script_type, script_types::condition));
-      interface* begin = nullptr;
-      interface* cur = nullptr;
+      const interface* begin = nullptr;
+      const interface* cur = nullptr;
       sol::state_view s = data.lua_state();
       const auto table = data.as<sol::table>();
 
       for (const auto &pair : table) {
-        interface* next = nullptr;
+        const interface* next = nullptr;
         const auto first_type = pair.first.get_type();
         switch (first_type) {
           case sol::type::boolean:
@@ -1186,7 +1186,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
                      ", supported only boolean, number and string");
         }
 
-        if (cur != nullptr) cur->next = next;
+        if (cur != nullptr) cur->dirty_set_next(next);
         if (begin == nullptr) begin = next;
         while (next != nullptr) { cur = next; next = next->next; }
       }
@@ -1194,15 +1194,15 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return begin;
     }
 
-    interface* system::numeric_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
+    const interface* system::numeric_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
       assert(compare_script_types(ctx->script_type, script_types::numeric));
-      interface* begin = nullptr;
-      interface* cur = nullptr;
+      const interface* begin = nullptr;
+      const interface* cur = nullptr;
       sol::state_view s = data.lua_state();
       const auto table = data.as<sol::table>();
 
       for (const auto &pair : table) {
-        interface* next = nullptr;
+        const interface* next = nullptr;
         const auto first_type = pair.first.get_type();
         switch (first_type) {
           case sol::type::boolean:
@@ -1225,7 +1225,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
                      ", supported only boolean, number and string, context " + std::string(ctx->function_name));
         }
 
-        if (cur != nullptr) cur->next = next;
+        if (cur != nullptr) cur->dirty_set_next(next);
         if (begin == nullptr) begin = next;
         while (next != nullptr) { cur = next; next = next->next; }
       }
@@ -1233,16 +1233,16 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return begin;
     }
 
-    interface* system::string_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
+    const interface* system::string_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
       // здесь может придти таблица с перечислением строк + таблицы с кондишенем
       assert(compare_script_types(ctx->script_type, script_types::string));
-      interface* begin = nullptr;
-      interface* cur = nullptr;
+      const interface* begin = nullptr;
+      const interface* cur = nullptr;
       sol::state_view s = data.lua_state();
       const auto table = data.as<sol::table>();
 
       for (const auto &pair : table) {
-        interface* next = nullptr;
+        const interface* next = nullptr;
         const auto first_type = pair.first.get_type();
         switch (first_type) {
           //case sol::type::boolean: // ???
@@ -1258,7 +1258,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
                      ", supported only number, context " + std::string(ctx->function_name));
         }
 
-        if (cur != nullptr) cur->next = next;
+        if (cur != nullptr) cur->dirty_set_next(next);
         if (begin == nullptr) begin = next;
         while (next != nullptr) { cur = next; next = next->next; }
       }
@@ -1266,10 +1266,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return begin;
     }
 
-    interface* system::object_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
+    const interface* system::object_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
       assert(compare_script_types(ctx->script_type, script_types::object));
-      interface* begin = nullptr;
-      interface* cur = nullptr;
+      const interface* begin = nullptr;
+      const interface* cur = nullptr;
       sol::state_view s = data.lua_state();
       const auto table = data.as<sol::table>();
 
@@ -1278,7 +1278,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       // а может тут быть lvalue строкой для того чтобы сменить контекс и искать объект в измененном контексте?
       // хороший вопрос
       for (const auto &pair : table) {
-        interface* next = nullptr;
+        const interface* next = nullptr;
         const auto first_type = pair.first.get_type();
         switch (first_type) {
           //case sol::type::boolean: // ???
@@ -1300,7 +1300,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
                      ", supported only number, context " + std::string(ctx->function_name));
         }
 
-        if (cur != nullptr) cur->next = next;
+        if (cur != nullptr) cur->dirty_set_next(next);
         if (begin == nullptr) begin = next;
         while (next != nullptr) { cur = next; next = next->next; }
       }
@@ -1308,17 +1308,17 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return begin;
     }
 
-    interface* system::effect_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
+    const interface* system::effect_table_traverse(init_context* ctx, const sol::object &data, container* cont) {
       assert(compare_script_types(ctx->script_type, script_types::effect));
-      interface* begin = nullptr;
-      interface* cur = nullptr;
+      const interface* begin = nullptr;
+      const interface* cur = nullptr;
       sol::state_view s = data.lua_state();
       const auto table = data.as<sol::table>();
 
       const sol::object nil = sol::make_object(data.lua_state(), sol::nil);
 
       for (const auto &pair : table) {
-        interface* next = nullptr;
+        const interface* next = nullptr;
         const auto first_type = pair.first.get_type();
         switch (first_type) {
           // что сюда может придти? сюда приходят либо просто имена функций без аргументов либо имена функций и аргументы к ним + кондишен
@@ -1349,7 +1349,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
                      ", supported only boolean, number and string, context " + std::string(ctx->function_name));
         }
 
-        if (cur != nullptr) cur->next = next;
+        if (cur != nullptr) cur->dirty_set_next(next);
         if (begin == nullptr) begin = next;
         while (next != nullptr) { cur = next; next = next->next; }
       }
@@ -1357,7 +1357,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return begin;
     }
 
-    interface* system::table_traverse(init_context* ctx, const sol::object &obj, container* cont) {
+    const interface* system::table_traverse(init_context* ctx, const sol::object &obj, container* cont) {
       switch (ctx->script_type) {
         case script_types::condition: return condition_table_traverse(ctx, obj, cont);
         case script_types::numeric:   return numeric_table_traverse(ctx, obj, cont);
@@ -1370,32 +1370,32 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return nullptr;
     }
 
-    interface* system::make_boolean_container(const bool val, container* cont) {
+    const interface* system::make_boolean_container(const bool val, container* cont) {
       if (cont == nullptr) return nullptr;
       return cont->add<boolean_container>(val);
     }
 
-    interface* system::make_number_container(const double val, container* cont) {
+    const interface* system::make_number_container(const double val, container* cont) {
       if (cont == nullptr) return nullptr;
       return cont->add<number_container>(val);
     }
 
-    interface* system::make_string_container(const std::string_view val, container* cont) {
+    const interface* system::make_string_container(const std::string_view val, container* cont) {
       if (cont == nullptr) return nullptr;
       return cont->add<string_container>(val);
     }
 
-    interface* system::make_object_container(const object val, container* cont) {
+    const interface* system::make_object_container(const object val, container* cont) {
       if (cont == nullptr) return nullptr;
       return cont->add<object_container>(val);
     }
 
-    interface* make_invalid_producer(container* cont) {
+    const interface* make_invalid_producer(container* cont) {
       if (cont == nullptr) return nullptr;
       return cont->add<invalid>();
     }
 
-    interface* make_ignore_producer(container* cont) {
+    const interface* make_ignore_producer(container* cont) {
       if (cont == nullptr) return nullptr;
       return cont->add<ignore>();
     }
@@ -1440,7 +1440,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     const size_t offset = cont->add_delayed<function_type>(); \
     init = cont->get_init<function_type>(offset);    \
   }                                                  \
-  interface* cond = nullptr;                         \
+  const interface* cond = nullptr;                         \
   const sol::table t = obj.as<sol::table>();         \
   if (const auto proxy = t["condition"]; proxy.valid()) { \
     cond = sys->make_raw_script_boolean(ctx, proxy, cont); \
@@ -1817,9 +1817,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
         const auto f = [] (view v, const sol::object &obj, container::delayed_initialization<sequence> init) {
           if (obj.get_type() != sol::type::table) throw std::runtime_error("Function 'sequence' expects table as input");
 
-          interface* count_val = nullptr;
-          interface* begin = nullptr;
-          interface* current = nullptr;
+          const interface* count_val = nullptr;
+          const interface* begin = nullptr;
+          const interface* current = nullptr;
           const auto t = obj.as<sol::table>();
           for (const auto &pair : t) {
             if (pair.first.get_type() == sol::type::string) {
@@ -1838,7 +1838,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             // тут нужно создать блочные функции
             auto cur = v.any_scripted_object(pair.second);
             if (begin == nullptr) begin = cur;
-            if (current != nullptr) current->next = cur;
+            if (current != nullptr) current->dirty_set_next(cur);
             current = cur;
           }
 
@@ -1851,8 +1851,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
         const auto f = [] (view v, const sol::object &obj, container::delayed_initialization<selector> init) {
           if (obj.get_type() != sol::type::table) throw std::runtime_error("Function 'selector' expects table as input");
 
-          interface* begin = nullptr;
-          interface* current = nullptr;
+          const interface* begin = nullptr;
+          const interface* current = nullptr;
           const auto t = obj.as<sol::table>();
           for (const auto &pair : t) {
             if (pair.first.get_type() == sol::type::string) {
@@ -1866,7 +1866,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             // тут нужно создать блочные функции
             auto cur = v.any_scripted_object(pair.second);
             if (begin == nullptr) begin = cur;
-            if (current != nullptr) current->next = cur;
+            if (current != nullptr) current->dirty_set_next(cur);
             current = cur;
           }
 
@@ -1886,7 +1886,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       {
         const auto f = [] (view v, const sol::object &obj, container::delayed_initialization<random_value> init) -> interface* {
-          interface* val = nullptr;
+          const interface* val = nullptr;
           if (obj.valid()) val = v.make_scripted_numeric(obj);
           const size_t state = v.get_random_state();
           return init.init(state, val);
@@ -1896,10 +1896,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
       {
         const auto f = [] (view v, const sol::object &obj, container::delayed_initialization<weighted_random> init) -> interface* {
-          interface* begin_childs = nullptr;
-          interface* cur_child = nullptr;
-          interface* begin_weights = nullptr;
-          interface* cur_weight = nullptr;
+          const interface* begin_childs = nullptr;
+          const interface* cur_child = nullptr;
+          const interface* begin_weights = nullptr;
+          const interface* cur_weight = nullptr;
           const auto table = obj.as<sol::table>();
           for (const auto &pair : table) {
             if (pair.second.get_type() != sol::type::table) continue;
@@ -1914,7 +1914,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
               if (!proxy.valid()) throw std::runtime_error("'weighted_random' expects array of lua tables with weight number script field");
               auto ret = v.make_scripted_numeric(proxy);
               if (begin_weights == nullptr) begin_weights = ret;
-              if (cur_weight != nullptr) cur_weight->next = ret;
+              if (cur_weight != nullptr) cur_weight->dirty_set_next(ret);
               cur_weight = ret;
             }
 
@@ -1925,7 +1925,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
             {
               auto cur = v.any_scripted_object(pair.second);
               if (begin_childs == nullptr) begin_childs = cur;
-              if (cur_child != nullptr) cur_child->next = cur;
+              if (cur_child != nullptr) cur_child->dirty_set_next(cur);
               cur_child = cur;
             }
           }
@@ -2013,8 +2013,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           if (!name_proxy.valid() || name_proxy.get_type() != sol::type::string) throw std::runtime_error("'has_in_list' expects field 'name' with list name");
           const auto name = name_proxy.get<std::string_view>();
 
-          interface* percentage = nullptr;
-          interface* max_count = nullptr;
+          const interface* percentage = nullptr;
+          const interface* max_count = nullptr;
           if (const auto proxy = t["percentage"]; proxy.valid()) {
             percentage = v.make_scripted_numeric(proxy);
           } else if (const auto proxy = t["max_count"]; proxy.valid()) {
@@ -2037,8 +2037,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           if (!name_proxy.valid() || name_proxy.get_type() != sol::type::string) throw std::runtime_error("'random_in_list' expects field 'name' with list name");
           const auto name = name_proxy.get<std::string_view>();
 
-          interface* condition = nullptr;
-          interface* weight = nullptr;
+          const interface* condition = nullptr;
+          const interface* weight = nullptr;
           if (const auto proxy = t["condition"]; proxy.valid()) {
             condition = v.make_scripted_numeric(proxy);
           }
@@ -2106,7 +2106,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           auto cond = v.make_scripted_conditional(cond_proxy);
 
           const auto text_proxy = t["text"];
-          interface* str = nullptr;
+          const interface* str = nullptr;
           if (text_proxy.valid()) str = v.make_scripted_string(text_proxy);
 
           return init.init(cond, str);
@@ -2122,7 +2122,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
         const auto f = [] (view v, const sol::object &obj, container::delayed_initialization<transform> init) -> interface* {
           // тут мы ожидаем что? на самом деле скорее всего все что угодно, но тут может быть и таблица
           // из таблицы по умолчанию ожидаем число? наверное
-          interface* changes = nullptr;
+          const interface* changes = nullptr;
           if (obj.get_type() == sol::type::string) {
             // это скорее всего сложное лвалуе: ожидаем любой объект
             changes = v.make_scripted_object<object>(obj);
@@ -2149,7 +2149,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
           // тут что? вот тут было бы неплохо сделать скрипт-объект, то есть тут бы мы например выбрали бы самый крутой город по какой-нибудь метрике
           // да, и число тут было бы тоже неплохо ожидать, как тут это число можно вычислить? действительно нужно сделать функцию value
           // которая тупо вычислит число
-          interface* red = nullptr;
+          const interface* red = nullptr;
           const size_t script_type = v.get_context()->script_type;
           if (script_type == script_types::condition) {
             red = v.make_scripted_conditional(obj);

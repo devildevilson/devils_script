@@ -2,7 +2,7 @@
 #define DEVILS_ENGINE_SCRIPT_LOGIC_COMMANDS_H
 
 #include "logic_commands_macro.h"
-#include "interface.h"
+#include "core_interface.h"
 #include "object.h"
 
 #ifndef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -17,7 +17,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     struct context;
 
 #define LOGIC_BLOCK_COMMAND_FUNC(func_name)               \
-    class func_name final : public interface {            \
+    class func_name final : public children_interface {   \
     public:                                               \
       static const size_t type_index;                     \
       func_name(const interface* childs) noexcept;        \
@@ -27,7 +27,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       /*void draw(context* ctx) const override;*/         \
       std::string_view get_name() const;                  \
     private:                                              \
-      const interface* childs;                            \
+      /*const interface* childs;*/                        \
     };                                                    \
 
     LOGIC_BLOCK_COMMANDS_LIST

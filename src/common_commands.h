@@ -1,7 +1,7 @@
 #ifndef DEVILS_ENGINE_SCRIPT_COMMON_COMMANDS_H
 #define DEVILS_ENGINE_SCRIPT_COMMON_COMMANDS_H
 
-#include "interface.h"
+#include "core_interface.h"
 
 #define MAXIMUM_OVERLOADS 16
 
@@ -14,7 +14,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #endif // DEVILS_SCRIPT_OUTER_NAMESPACE
 
   namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-    class change_scope_condition final : public interface {
+    class change_scope_condition final : public scope_interface, public condition_interface, public one_child_interface  {
     public:
       change_scope_condition(const interface* scope, const interface* condition, const interface* child) noexcept;
       ~change_scope_condition() noexcept;
@@ -24,12 +24,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* scope;
-      const interface* condition;
-      const interface* child;
+      //const interface* scope;
+      //const interface* condition;
+      //const interface* child;
     };
 
-    class change_scope_effect final : public interface {
+    class change_scope_effect final : public scope_interface, public condition_interface, public children_interface {
     public:
       change_scope_effect(const interface* scope, const interface* condition, const interface* childs) noexcept;
       ~change_scope_effect() noexcept;
@@ -39,12 +39,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* scope;
-      const interface* condition;
-      const interface* childs;
+//      const interface* scope;
+//      const interface* condition;
+//      const interface* childs;
     };
 
-    class compute_string final : public interface {
+    class compute_string final : public condition_interface, public children_interface {
     public:
       compute_string(const interface* condition, const interface* childs) noexcept;
       ~compute_string() noexcept;
@@ -54,11 +54,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* condition;
-      const interface* childs;
+      //const interface* condition;
+      //const interface* childs;
     };
 
-    class compute_object final : public interface {
+    class compute_object final : public condition_interface, public children_interface {
     public:
       compute_object(const interface* condition, const interface* childs) noexcept;
       ~compute_object() noexcept;
@@ -68,11 +68,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* condition;
-      const interface* childs;
+      //const interface* condition;
+      //const interface* childs;
     };
 
-    class compute_number final : public interface {
+    class compute_number final : public scope_interface, public condition_interface, public one_child_interface {
     public:
       compute_number(const interface* scope, const interface* condition, const interface* child) noexcept;
       ~compute_number() noexcept;
@@ -82,12 +82,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* scope;
-      const interface* condition;
-      const interface* child;
+      //const interface* scope;
+      //const interface* condition;
+      //const interface* child;
     };
 
-    class selector final : public interface {
+    class selector final : public children_interface {
     public:
       static const size_t type_index;
       selector(const interface* childs) noexcept;
@@ -98,10 +98,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* childs;
+      //const interface* childs;
     };
 
-    class sequence final : public interface {
+    class sequence final : public additional_child_interface, public children_interface {
     public:
       static const size_t type_index;
       sequence(const interface* count, const interface* childs) noexcept;
@@ -112,11 +112,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* count;
-      const interface* childs;
+//      const interface* count;
+//      const interface* childs;
     };
 
-    class overload final : public interface {
+    class overload final : public children_interface {
     public:
       overload(const std::array<size_t, MAXIMUM_OVERLOADS> &overload_types, const interface* childs) noexcept;
       ~overload() noexcept;
@@ -127,10 +127,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       std::array<size_t, MAXIMUM_OVERLOADS> overload_types;
-      const interface* childs;
+      //const interface* childs;
     };
 
-    class chance final : public interface {
+    class chance final : public one_child_interface {
     public:
       static const size_t type_index;
       chance(const size_t &state, const interface* value) noexcept;
@@ -142,11 +142,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       size_t state;
-      const interface* value;
+      //const interface* value;
     };
 
     // нужно сделать рандом по весам, как он должен выглядеть?
-    class weighted_random final : public interface {
+    class weighted_random final : public children_interface, public additional_children_interface {
     public:
       static const size_t type_index;
       weighted_random(const size_t &state, const interface* childs, const interface* weights) noexcept;
@@ -158,11 +158,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       size_t state;
-      const interface* childs;
-      const interface* weights;
+      //const interface* childs;
+      //const interface* weights;
     };
 
-    class random_value final : public interface {
+    class random_value final : public one_child_interface {
     public:
       static const size_t type_index;
       random_value(const size_t &state, const interface* maximum) noexcept;
@@ -174,7 +174,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       size_t state;
-      const interface* maximum;
+      //const interface* maximum;
     };
 
     class boolean_container final : public interface {
@@ -229,7 +229,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
     // нужно еще сравниватель объектов сделать
 
-    class number_comparator final : public interface {
+    class number_comparator final : public additional_child_interface, public one_child_interface {
     public:
       number_comparator(const uint8_t op, const interface* lvalue, const interface* rvalue) noexcept;
       ~number_comparator() noexcept;
@@ -240,11 +240,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       uint8_t op;
-      const interface* lvalue;
-      const interface* rvalue;
+      //const interface* lvalue;
+      //const interface* rvalue;
     };
 
-    class boolean_comparator final : public interface {
+    class boolean_comparator final : public additional_child_interface, public one_child_interface {
     public:
       boolean_comparator(const interface* lvalue, const interface* rvalue) noexcept;
       ~boolean_comparator() noexcept;
@@ -254,11 +254,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* lvalue;
-      const interface* rvalue;
+      //const interface* lvalue;
+      //const interface* rvalue;
     };
 
-    class equals_to final : public interface {
+    class equals_to final : public one_child_interface {
     public:
       static const size_t type_index;
       equals_to(const interface* get_obj) noexcept;
@@ -269,10 +269,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* get_obj;
+      //const interface* get_obj;
     };
 
-    class not_equals_to final : public interface {
+    class not_equals_to final : public one_child_interface {
     public:
       static const size_t type_index;
       not_equals_to(const interface* get_obj) noexcept;
@@ -283,11 +283,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* get_obj;
+      //const interface* get_obj;
     };
 
     // если добавится функция compare, то тут наверное было бы неплохо сделать по умолчанию объект
-    class equality final : public interface {
+    class equality final : public children_interface {
     public:
       static const size_t type_index;
       equality(const interface* childs) noexcept;
@@ -298,10 +298,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* childs;
+      //const interface* childs;
     };
 
-    class type_equality final : public interface {
+    class type_equality final : public children_interface {
     public:
       static const size_t type_index;
       type_equality(const interface* childs) noexcept;
@@ -312,12 +312,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* childs;
+      //const interface* childs;
     };
 
     // эта функция может ответить на вопрос является ли первое число самым маленьким
     // или быстрая проверка нескольких чисел на то что они больше нуля
-    class compare final : public interface {
+    class compare final : public children_interface {
     public:
       static const size_t type_index;
       compare(const uint8_t op, const interface* childs) noexcept;
@@ -329,10 +329,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       uint8_t op;
-      const interface* childs;
+      //const interface* childs;
     };
 
-    class keep_set final : public interface {
+    class keep_set final : public one_child_interface {
     public:
       static const size_t type_index;
       keep_set(const interface* child) noexcept;
@@ -343,10 +343,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* child;
+      //const interface* child;
     };
 
-    class is_unique final : public interface {
+    class is_unique final : public one_child_interface {
     public:
       static const size_t type_index;
       is_unique(const interface* value) noexcept;
@@ -357,10 +357,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* value;
+      //const interface* value;
     };
 
-    class place_in_set final : public interface {
+    class place_in_set final : public one_child_interface {
     public:
       static const size_t type_index;
       place_in_set(const interface* value) noexcept;
@@ -371,10 +371,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* value;
+      //const interface* value;
     };
 
-    class place_in_set_if_unique final : public interface {
+    class place_in_set_if_unique final : public one_child_interface {
     public:
       static const size_t type_index;
       place_in_set_if_unique(const interface* value) noexcept;
@@ -385,10 +385,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* value;
+      //const interface* value;
     };
 
-    class complex_object final : public interface {
+    class complex_object final : public children_interface {
     public:
       complex_object(const interface* childs) noexcept;
       ~complex_object() noexcept;
@@ -398,7 +398,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* childs;
+      //const interface* childs;
     };
 
     class invalid final : public interface {
@@ -468,7 +468,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     };
 
     // в этом классе необходимость отсутствует, это должен быть просто "указатель" что дальше пойдет вычисление числа
-    class value final : public interface {
+    class value final : public one_child_interface {
     public:
       static const size_t type_index;
       value(const interface* child) noexcept;
@@ -479,7 +479,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* child;
+      //const interface* child;
     };
 
     class get_context final : public interface {
@@ -497,7 +497,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string name;
     };
 
-    class save_local final : public interface {
+    class save_local final : public one_child_interface {
     public:
       static const size_t type_index;
       explicit save_local(const std::string name, const size_t index, const interface* var) noexcept;
@@ -511,7 +511,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     private:
       std::string name;
       size_t index;
-      const interface* var; // если вар не задан, то сохраняем куррент
+      //const interface* var; // если вар не задан, то сохраняем куррент
     };
 
     class has_local final : public interface {
@@ -560,7 +560,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t index;
     };
 
-    class save final : public interface {
+    class save final : public one_child_interface {
     public:
       static const size_t type_index;
       explicit save(const std::string str, const interface* var) noexcept;
@@ -573,7 +573,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       std::string name;
-      const interface* var;
+      //const interface* var;
     };
 
     class remove final : public interface {
@@ -649,7 +649,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string name;
     };
 
-    class has_in_list final : public interface {
+    class has_in_list final : public additional_child_interface, public one_child_interface, public children_interface {
     public:
       static const size_t type_index;
       has_in_list(const std::string &name, const interface* max_count, const interface* percentage, const interface* childs) noexcept;
@@ -661,12 +661,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       std::string name;
-      const interface* max_count;
-      const interface* percentage;
-      const interface* childs;
+//      const interface* max_count;
+//      const interface* percentage;
+//      const interface* childs;
     };
 
-    class random_in_list final : public interface {
+    class random_in_list final : public condition_interface, public additional_child_interface, public children_interface {
     public:
       static const size_t type_index;
       random_in_list(const std::string &name, const size_t &state, const interface* condition, const interface* weight, const interface* childs) noexcept;
@@ -679,12 +679,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     private:
       std::string name;
       size_t state;
-      const interface* condition;
-      const interface* weight;
-      const interface* childs;
+      //const interface* condition;
+      //const interface* weight;
+      //const interface* childs;
     };
 
-    class every_in_list_numeric final : public interface {
+    class every_in_list_numeric final : public condition_interface, public children_interface {
     public:
       static const size_t type_index;
       every_in_list_numeric(const std::string &name, const interface* condition, const interface* childs) noexcept;
@@ -696,11 +696,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       std::string name;
-      const interface* condition;
-      const interface* childs;
+//      const interface* condition;
+//      const interface* childs;
     };
 
-    class every_in_list_logic final : public interface {
+    class every_in_list_logic final : public condition_interface, public children_interface {
     public:
       static const size_t type_index;
       every_in_list_logic(const std::string &name, const interface* condition, const interface* childs) noexcept;
@@ -712,11 +712,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       std::string name;
-      const interface* condition;
-      const interface* childs;
+//      const interface* condition;
+//      const interface* childs;
     };
 
-    class every_in_list_effect final : public interface {
+    class every_in_list_effect final : public condition_interface, public children_interface {
     public:
       static const size_t type_index;
       every_in_list_effect(const std::string &name, const interface* condition, const interface* childs) noexcept;
@@ -728,11 +728,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       std::string name;
-      const interface* condition;
-      const interface* childs;
+//      const interface* condition;
+//      const interface* childs;
     };
 
-    class list_view final : public interface {
+    class list_view final : public one_child_interface, public children_interface {
     public:
       static const size_t type_index;
       list_view(const std::string &name, const interface* default_value, const interface* childs) noexcept;
@@ -744,12 +744,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       std::string_view get_name() const;
     private:
       std::string name;
-      const interface* default_value;
-      const interface* childs;
+      //const interface* default_value;
+      //const interface* childs;
     };
 
     // по идее тут просто все: делаем действия возращаем объект, это скорее со стороны инициализации вопрсо
-    class transform final : public interface {
+    class transform final : public one_child_interface {
     public:
       static const size_t type_index;
       transform(const interface* changes) noexcept;
@@ -760,10 +760,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* changes;
+      //const interface* changes;
     };
 
-    class filter final : public interface {
+    class filter final : public condition_interface {
     public:
       static const size_t type_index;
       filter(const interface* condition) noexcept;
@@ -774,10 +774,10 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* condition;
+      //const interface* condition;
     };
 
-    class reduce final : public interface {
+    class reduce final : public one_child_interface {
     public:
       static const size_t type_index;
       reduce(const interface* value) noexcept;
@@ -788,7 +788,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* value;
+      //const interface* value;
     };
 
     class take final : public interface {
@@ -832,10 +832,11 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     private:
       const std::string_view name;
       const script_data* script;
+      // лист из интерфейсов?
       std::vector<const interface*> new_locals;
     };
 
-    class assert_condition final : public interface {
+    class assert_condition final : public condition_interface, public one_child_interface {
     public:
       static const size_t type_index;
       assert_condition(const interface* condition, const interface* str) noexcept;
@@ -846,8 +847,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       size_t get_type_id() const;
       std::string_view get_name() const;
     private:
-      const interface* condition;
-      const interface* str;
+      //const interface* condition;
+      //const interface* str;
     };
 
     // TODO: add 'debug_log'

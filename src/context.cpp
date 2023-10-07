@@ -51,6 +51,12 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       return get_value(advance(s));
     }
 
+    void local_state::for_each(const std::function<void(local_state*)> &f) {
+      for (auto child = children; child != nullptr; child = child->next) {
+        f(child);
+      }
+    }
+
 //     void draw_data::set_arg(const uint32_t &index, const std::string_view &name, const object &obj) {
 //       arguments[index].first = name;
 //       arguments[index].second = obj;
@@ -106,8 +112,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     context::context() noexcept :
       type(SIZE_MAX), operator_type(SIZE_MAX), nest_level(0),
       id_hash(0), method_hash(0), seed(0),
-      index(0), prev_index(0), locals_offset(0),
-      vector_ptr(nullptr), add_func_ptr(nullptr), user_data(nullptr)
+      index(0), prev_index(0), locals_offset(0)
+//      vector_ptr(nullptr), add_func_ptr(nullptr), user_data(nullptr)
     {}
     context::context(const std::string_view &id, const std::string_view &method_name, const size_t &seed) noexcept :
       id(id), method_name(method_name),
@@ -115,7 +121,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       id_hash(murmur_hash64A(id, hash_seed)), // используем свою реализацию, вообще имеет смысл придумать какой то сид
       method_hash(murmur_hash64A(method_name, hash_seed)),
       seed(mix_value(seed)),
-      index(0), prev_index(0), locals_offset(0), vector_ptr(nullptr), add_func_ptr(nullptr), user_data(nullptr)
+      index(0), prev_index(0), locals_offset(0)
+//      vector_ptr(nullptr), add_func_ptr(nullptr), user_data(nullptr)
     {}
 
     void context::set_data(const std::string_view &id, const std::string_view &method_name, const size_t &seed) noexcept {
@@ -133,20 +140,20 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
       method_hash = murmur_hash64A(method_name, hash_seed);
     }
 
-    bool context::draw_state() const noexcept { return bool(draw_function); }
-    bool context::draw(const local_state* data) const {
-      if (!draw_state()) return true;
-      return draw_function(data);
-    }
+//    bool context::draw_state() const noexcept { return bool(draw_function); }
+//    bool context::draw(const local_state* data) const {
+//      if (!draw_state()) return true;
+//      return draw_function(data);
+//    }
 
-    // по идее рекурсивный метод достаточно быстрый
-    void context::traverse_and_draw(const local_state* data) const {
-      if (!draw_state()) throw std::runtime_error("Context does not have draw function");
-      if (!draw(data)) return;
-      for (auto child = data->children; child != nullptr; child = child->next) {
-        traverse_and_draw(child);
-      }
-    }
+//    // по идее рекурсивный метод достаточно быстрый
+//    void context::traverse_and_draw(const local_state* data) const {
+//      if (!draw_state()) throw std::runtime_error("Context does not have draw function");
+//      if (!draw(data)) return;
+//      for (auto child = data->children; child != nullptr; child = child->next) {
+//        traverse_and_draw(child);
+//      }
+//    }
 
     uint64_t context::get_random_value(const size_t &static_state) const noexcept {
       // хеши наверное тоже нужно замиксить, вряд ли, там получаются неплохие значения

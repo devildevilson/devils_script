@@ -177,10 +177,8 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
 #define NUMERIC_COMMAND_BLOCK_FUNC(name) \
     const size_t name::type_index = commands::values::name; \
-    name::name(const interface* childs) noexcept : childs(childs) {} \
-    name::~name() noexcept {                          \
-      for (auto cur = childs; cur != nullptr; cur = cur->next) { cur->~interface(); } \
-    }                                                 \
+    name::name(const interface* childs) noexcept : children_interface(childs) {} \
+    name::~name() noexcept {}                         \
     local_state* name::compute(context* ctx, local_state_allocator* allocator) const { \
       auto ptr = allocator->create(ctx, get_name());  \
       local_state* first = nullptr;                   \

@@ -2,7 +2,7 @@
 #define DEVILS_ENGINE_SCRIPT_NUMERIC_FUNCTIONS_H
 
 #include "numeric_commands_macro.h"
-#include "interface.h"
+#include "core_interface.h"
 
 #ifndef DEVILS_SCRIPT_INNER_NAMESPACE
 #  define DEVILS_SCRIPT_INNER_NAMESPACE devils_script
@@ -23,7 +23,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 
 
 #define NUMERIC_COMMAND_BLOCK_FUNC(func_name)                \
-  class func_name final : public interface {                 \
+  class func_name final : public children_interface {        \
   public:                                                    \
     static const size_t type_index;                          \
     func_name(const interface* childs) noexcept;             \
@@ -33,7 +33,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
     /*void draw(context* ctx) const override;*/              \
     std::string_view get_name() const;                       \
   private:                                                   \
-    const interface* childs;                                 \
+    /*const interface* childs;*/                             \
   };                                                         \
 
     NUMERIC_COMMANDS_LIST2
