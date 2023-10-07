@@ -45,7 +45,7 @@ int main(int argc, char const *argv[]) {
     const sol::object o = ret;
     const auto num_script = sys.create_number<devils_script::object>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
-    const double num = num_script.compute(&ctx);
+    const double num = num_script.process(&ctx);
     std::cout << "script1 " << num << "\n"; // 20
   }
   
@@ -56,7 +56,7 @@ int main(int argc, char const *argv[]) {
     const sol::object o = ret;
     const auto num_script = sys.create_number<devils_script::object>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
-    const double num = num_script.compute(&ctx);
+    const double num = num_script.process(&ctx);
     std::cout << "script2 " << num << "\n"; // 21
   }
   
@@ -67,7 +67,7 @@ int main(int argc, char const *argv[]) {
     const sol::object o = ret;
     const auto num_script = sys.create_number<devils_script::object>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
-    const double num = num_script.compute(&ctx);
+    const double num = num_script.process(&ctx);
     std::cout << "script3 " << num << "\n"; // 15
   }
   
@@ -78,7 +78,7 @@ int main(int argc, char const *argv[]) {
     const sol::object o = ret;
     const auto num_script = sys.create_number<devils_script::object>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
-    const double num = num_script.compute(&ctx);
+    const double num = num_script.process(&ctx);
     const double ans = std::sin(5.0) + std::cos(5.0) + mix(1.0, 2.0, 0.5);
     std::cout << "script4 " << num << " ans " << ans << "\n";
   }
@@ -89,7 +89,7 @@ int main(int argc, char const *argv[]) {
     const sol::object o = ret;
     const auto num_script = sys.create_condition<devils_script::object>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
-    const bool num = num_script.compute(&ctx);
+    const bool num = num_script.process(&ctx);
     const bool ans = true && true && false;
     std::cout << std::boolalpha << "script5 " << num << " ans " << ans << "\n";
   }
@@ -101,7 +101,7 @@ int main(int argc, char const *argv[]) {
     const sol::object o = ret;
     const auto num_script = sys.create_number<devils_script::object>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
-    const double num = num_script.compute(&ctx);
+    const double num = num_script.process(&ctx);
     const double ans = double(true) + double(true) + double(false);
     std::cout << std::boolalpha << "script5 " << num << " ans " << ans << "\n";
   }
@@ -112,7 +112,7 @@ int main(int argc, char const *argv[]) {
     const sol::object o = ret;
     const auto num_script = sys.create_condition<devils_script::object>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
-    const double num = num_script.compute(&ctx);
+    const double num = num_script.process(&ctx);
     const double ans = bool(1.0) && bool(1.0) && bool(0.0);
     std::cout << std::boolalpha << "script51 " << num << " ans " << ans << "\n";
   }
@@ -136,7 +136,7 @@ int main(int argc, char const *argv[]) {
     const auto num_script = sys.create_number<test_t>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
     ctx.current = devils_script::object(&t);
-    const double num = num_script.compute(&ctx);
+    const double num = num_script.process(&ctx);
     std::cout << "script6 " << num << " test::get_val() " << t.get_val() << "\n";
   }
 
@@ -148,7 +148,7 @@ int main(int argc, char const *argv[]) {
     const auto cond_script = sys.create_condition<test_t>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
     ctx.current = devils_script::object(&t);
-    const bool num = cond_script.compute(&ctx);
+    const bool num = cond_script.process(&ctx);
     std::cout << std::boolalpha << "script7 " << num << " test::more_then_ten() " << t.more_then_ten() << "\n";
   }
 
@@ -160,7 +160,7 @@ int main(int argc, char const *argv[]) {
     const auto eff_script = sys.create_effect<test_t>(o, "basic script");
     devils_script::context ctx("basic script", "num_script", 1);
     ctx.current = devils_script::object(&t);
-    eff_script.compute(&ctx);
+    eff_script.process(&ctx);
     std::cout << "script8 test::get_val() " << t.get_val() << "\n";
   }
 
