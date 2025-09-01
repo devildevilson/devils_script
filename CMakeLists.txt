@@ -57,24 +57,6 @@ else()
   )
 endif()
 
-add_executable (devils_script_main main.cpp)
-set_property(TARGET devils_script_main PROPERTY CXX_STANDARD 20)
-target_link_libraries(devils_script_main devils_script)
-if (MSVC)
-  target_compile_options(devils_script_main PRIVATE
-    /permissive-
-    $<$<CONFIG:Debug>:/Od /Zi /GR- /Wall>
-    $<$<CONFIG:Release>:/O2 /DNDEBUG /GR- /Wall>
-    $<$<CONFIG:RelWithDebInfo>:/O2 /Zi /DNDEBUG /GR- /Wall>
-  )
-else()
-  target_compile_options(devils_script_main PRIVATE
-    $<$<CONFIG:Debug>:-Wall -Wextra -g -fno-rtti>
-    $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
-    $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
-  )
-endif()
-
 if (DS_BUILD_TESTS) 
   FetchContent_Declare(
     Catch2
