@@ -600,7 +600,6 @@ namespace utils {
     );
   };
 
-  // add element to the front:
   template<typename... Types>
   struct tuple_cat_type {
     using type = decltype(std::tuple_cat(std::declval<Types>()...));
@@ -681,7 +680,6 @@ using tuple_cat_t = typename detail::tuple_cat_type<Ts...>::type;
 template <typename T>
 constexpr std::string_view type_name() { return detail::get_type_name<T>(); }
 
-// тут это не должно быть
 constexpr uint64_t default_murmur_seed = 14695981039346656037ull;
 constexpr uint64_t murmur_hash64A(const std::string_view &in_str, const uint64_t seed) {
   return detail::murmur_hash64A(in_str, seed);

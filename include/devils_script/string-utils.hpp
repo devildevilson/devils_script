@@ -17,9 +17,8 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 namespace utils {
 namespace string {
 
-// возвращает итоговый размер полученных кусочков строк или SIZE_MAX если не хватило массива
-// если массива не хватило то остаток строки помещается в последнюю переменную
-// можем посчитать количество если передадим пустой массив последним аргументом (ну или вообще ничего не передадим)
+// returns sub strings count or SIZE_MAX is not enougth memory in arr
+// if SIZE_MAX last str in arr is remaining part of the input
 constexpr size_t split(const std::string_view &input, const std::string_view &token, std::span<std::string_view> &arr) {
   if (input.empty()) return 0;
 
@@ -70,8 +69,6 @@ constexpr std::tuple<std::string_view, std::string_view> substr_split_alt(const 
   return std::make_tuple(str.substr(0, index), str.substr(index));
 }
 
-// должен возвращать размер массива + SIZE_MAX если больше max_arr, 
-// если SIZE_MAX то последним аргументом должна быть оставшаяся строка
 constexpr size_t split2(const std::string_view &input, const std::string_view &token, std::string_view *arr, const size_t max_arr) {
   size_t count = 0;
   size_t prev_pos = 0;
@@ -90,7 +87,6 @@ constexpr size_t split2(const std::string_view &input, const std::string_view &t
   return count;
 }
 
-// инсайд бы лучше переписать со стэком
 constexpr std::string_view inside(const std::string_view &input, const std::string_view &right, const std::string_view &left) {
   const size_t start = input.find(right);
   const size_t end = input.rfind(left);
@@ -101,7 +97,6 @@ constexpr std::string_view inside(const std::string_view &input, const std::stri
 }
 
 
-// еще может быть запись вида { {},{}
 constexpr std::string_view inside2(const std::string_view& input, const std::string_view& right, const std::string_view& left, std::vector<size_t> &stack) {
   size_t start = input.find(right);
   if (start == std::string_view::npos) return std::string_view();
@@ -201,7 +196,6 @@ constexpr size_t find_ci(const std::string_view& str1, const char* str2, const s
 }
 
 constexpr bool parse_dice(const std::string_view& str, size_t& count, size_t& upper_bound) noexcept {
-  // к нам приходит строка вида: 20d20, d30, 100
   std::array<std::string_view, 2> data;
   auto sp = std::span(data.data(), data.size());
   const size_t c = string::split(str, "d", sp);
