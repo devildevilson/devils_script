@@ -1,9 +1,0 @@
-[submodule "include/span"]
-	path = include/span
-	url = https://github.com/tcbrindle/span.git
-[submodule "include/parallel-hashmap"]
-	path = include/parallel-hashmap
-	url = https://github.com/greg7mdp/parallel-hashmap.git
-[submodule "include/sol2"]
-	path = include/sol2
-	url = https://github.com/ThePhD/sol2.git
