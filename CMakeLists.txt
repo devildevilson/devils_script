@@ -83,6 +83,24 @@ if (DS_BUILD_TESTS)
       $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
     )
   endif()
+
+  add_executable (devils_script_benchs tests/case1_bench.cpp)
+  set_property(TARGET devils_script_benchs PROPERTY CXX_STANDARD 20)
+  target_link_libraries(devils_script_benchs devils_script Catch2::Catch2WithMain)
+  if (MSVC)
+    target_compile_options(devils_script_benchs PRIVATE
+      /permissive-
+      $<$<CONFIG:Debug>:/Od /Zi /GR- /Wall>
+      $<$<CONFIG:Release>:/O2 /DNDEBUG /GR- /Wall>
+      $<$<CONFIG:RelWithDebInfo>:/O2 /Zi /DNDEBUG /GR- /Wall>
+    )
+  else()
+    target_compile_options(devils_script_benchs PRIVATE
+      $<$<CONFIG:Debug>:-Wall -Wextra -g -fno-rtti>
+      $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
+      $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
+    )
+  endif()
 endif()
 
 # optional lua converter? or another project?

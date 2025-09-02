@@ -69,7 +69,7 @@ uint16_t person_age(handle<person> p) { return (*p).age; }
 int person_charisma(handle<person> p) { return (*p).charisma; }
 
 // iterator
-double each_city(country* c, const std::function<double(city*)> &fn) {
+double each_city(country* c, const std::function<double(city*)>& fn) {
   double val = 0.0;
   for (auto city : c->cities) {
     val += fn(city);
@@ -79,7 +79,7 @@ double each_city(country* c, const std::function<double(city*)> &fn) {
 
 double each_notable_person(city* c, const std::function<bool(handle<person>)>& filter, const std::function<double(handle<person>)>& fn) {
   double val = 0.0;
-  for (const auto &p : c->notable_people) {
+  for (const auto& p : c->notable_people) {
     if (filter && !filter(p)) continue;
     val += fn(p);
   }
@@ -164,48 +164,69 @@ TEST_CASE("Real usage 1", "[usage]") {
   sys.RFI(each_city)("each_city", { "value" });
   sys.RFI(each_notable_person)("each_notable_person", { "filter", "value" });
 
-  SECTION("script1") {
+  BENCHMARK("script1 parse") { return sys.parse<double, handle<person>>(scripts[0]); };
+  BENCHMARK("script2 parse") { return sys.parse<double, handle<person>>(scripts[1]); };
+  BENCHMARK("script3 parse") { return sys.parse<double, handle<person>>(scripts[2]); };
+  BENCHMARK("script4 parse") { return sys.parse<double, handle<person>>(scripts[3]); };
+  BENCHMARK("script5 parse") { return sys.parse<double, handle<person>>(scripts[4]); };
+
+  BENCHMARK_ADVANCED("script1 execution")(Catch::Benchmark::Chronometer meter) {
     const auto cont = sys.parse<double, handle<person>>(scripts[0]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(p3.age));
-  }
 
-  SECTION("script2") {
+    meter.measure([&ctx, &cont] {
+      ctx.clear();
+      cont.process(&ctx);
+      return ctx.get_return<double>();
+      });
+  };
+
+  BENCHMARK_ADVANCED("script2 execution")(Catch::Benchmark::Chronometer meter) {
     const auto cont = sys.parse<double, handle<person>>(scripts[1]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(c1.population + c2.population + c3.population));
-  }
 
-  SECTION("script3") {
+    meter.measure([&ctx, &cont] {
+      ctx.clear();
+      cont.process(&ctx);
+      return ctx.get_return<double>();
+      });
+  };
+
+  BENCHMARK_ADVANCED("script3 execution")(Catch::Benchmark::Chronometer meter) {
     const auto cont = sys.parse<double, handle<person>>(scripts[2]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(p1.charisma + p2.charisma + p3.charisma + p4.charisma + p5.charisma));
-  }
 
-  SECTION("script4") {
+    meter.measure([&ctx, &cont] {
+      ctx.clear();
+      cont.process(&ctx);
+      return ctx.get_return<double>();
+      });
+  };
+
+  BENCHMARK_ADVANCED("script4 execution")(Catch::Benchmark::Chronometer meter) {
     const auto cont = sys.parse<double, handle<person>>(scripts[3]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE((std::abs(ctx.get_return<double>()) - double(city_notable_people_count(&c1) / c1.notable_people[0].ptr->age + c1.notable_people[1].ptr->age)) < 0.0000001);
-  }
 
-  SECTION("script5") {
+    meter.measure([&ctx, &cont] {
+      ctx.clear();
+      cont.process(&ctx);
+      return ctx.get_return<double>();
+      });
+  };
+
+  BENCHMARK_ADVANCED("script5 execution")(Catch::Benchmark::Chronometer meter) {
     const auto cont = sys.parse<double, handle<person>>(scripts[4]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(p2.age));
-  }
+
+    meter.measure([&ctx, &cont] {
+      ctx.clear();
+      cont.process(&ctx);
+      return ctx.get_return<double>();
+      });
+  };
 }
