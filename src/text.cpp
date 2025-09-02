@@ -165,6 +165,18 @@ bool is_special_operator(const std::string_view& str) noexcept {
   });
 }
 
+bool has_special_symbols(const std::string_view& str) noexcept {
+  return std::any_of(str.begin(), str.end(), [](const char c) {
+    return is_special(c);
+  });
+}
+
+bool has_common_symbols(const std::string_view& str) noexcept {
+  return std::any_of(str.begin(), str.end(), [](const char c) {
+    return is_common_english(c) || is_number(c);
+  });
+}
+
 bool is_in_ignore_list(const std::string_view& str) noexcept {
   return std::any_of(tokens_ignore_list, tokens_ignore_list + tokens_ignore_list_size, [&str](const std::string_view& reserv) { return reserv == str; });
 }

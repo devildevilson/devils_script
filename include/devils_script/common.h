@@ -162,6 +162,17 @@ bool type_is_any_object(const std::string_view& type) noexcept;
 bool type_is_any_type_object(const std::string_view& type) noexcept;
 bool type_is_any_type(const std::string_view& type) noexcept;
 
+template <typename T>
+constexpr std::string_view scope_type_name() {
+  using T2 = std::remove_cvref_t<T>;
+  if constexpr (utils::is_void_v<T2>) {
+    return utils::type_name<void>();
+  } else if constexpr (std::is_pointer_v<T2>) {
+    using T3 = std::remove_cvref_t<std::remove_pointer_t<T2>>;
+    return utils::type_name<T3*>();
+  } else return utils::type_name<T2>();
+}
+
 // тут бы тип добавить рядом с памятью
 struct alignas(MAXIMUM_STACK_VAL_SIZE) stack_element {
   struct view {
@@ -289,18 +300,20 @@ using member_of_or_first = std::remove_cvref_t<std::conditional_t<is_member_func
 
 template <typename T>
 using valid_scope_t_or_void = std::conditional_t<
-  utils::is_void_v<T>, utils::void_t,
+  utils::is_void_v<std::remove_cvref_t<T>>, utils::void_t,
     std::conditional_t<
-    is_typeless_v<T>, utils::void_t,
+    is_typeless_v<std::remove_cvref_t<T>>, utils::void_t,
       std::conditional_t<
-      std::is_fundamental_v<T>, utils::void_t,
+      std::is_fundamental_v<std::remove_cvref_t<T>>, utils::void_t,
         std::conditional_t<
-        std::is_enum_v<T>, utils::void_t,
+        std::is_enum_v<std::remove_cvref_t<T>>, utils::void_t,
           std::conditional_t<
-          std::is_same_v<std::string_view, T>, utils::void_t,
+          std::is_same_v<std::string_view, std::remove_cvref_t<T>>, utils::void_t,
             std::conditional_t<
-            valid_stack_el_type_v<T>, T, T*
-  >>>>>>;
+            std::is_same_v<ignore_value, std::remove_cvref_t<T>>, utils::void_t,
+              std::conditional_t<
+              valid_stack_el_type_v<std::remove_cvref_t<T>>, std::remove_cvref_t<T>, std::remove_cvref_t<T>*
+  >>>>>>>;
 
 template <typename F>
 using scope_t = valid_scope_t_or_void<member_of_or_first<F>>;

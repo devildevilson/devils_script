@@ -36,6 +36,8 @@ bool is_valid_rvalue(const std::string_view& str) noexcept;
 bool is_valid_function_name(const std::string_view& str) noexcept;
 bool is_valid_operator_name(const std::string_view& str) noexcept;
 bool is_special_operator(const std::string_view& str) noexcept;
+bool has_special_symbols(const std::string_view& str) noexcept;
+bool has_common_symbols(const std::string_view& str) noexcept;
 
 bool is_in_ignore_list(const std::string_view& str) noexcept;
 

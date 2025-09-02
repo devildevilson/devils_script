@@ -287,6 +287,8 @@ public:
     requires(utils::is_function_v<F>)
   void register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f = nullptr);
 
+  void register_function(command_data data);
+
   template <typename T>
     requires (std::is_enum_v<T>)
   void register_enum(const std::span<std::tuple<std::string, T>>& values);
@@ -319,9 +321,20 @@ private:
   err_fn warning;
   mutable rpn_conversion_ctx rpn_ctx;
   mutable prng::xoshiro256starstar::state prng_s;
-  std::unordered_map<std::string, command_data> mfuncs;
+  // function name first + scope type second, no scope == void
+  std::unordered_map<std::string, std::unordered_map<std::string, command_data>> mfuncs;
   std::unordered_map<std::string, std::unordered_map<std::string, size_t>> enums;
 };
+
+// перегруз по скоупам как? у нас есть текущий тип скоупа, который по идее НЕ может быть element_view, но может быть void
+// при поиске функции сначала ищем тип скоупа, а потом void... и все? да вроде довольно просто
+// если нас интересует запись вида 'func1(a)' где func1 может быть как функцией без скоупа так и функцией с скоупом?
+// как мы в принципе должны понять на этапе разбора какую использовать? да и среди скоупов вряд ли поймем...
+// проблема в чем? не совпадают характеристики функции? да, при совпадении нам все равно
+// то есть и тут наверное нужно обеспечить проверку по количеству аргументов
+// нет, для разбора можно максимальное количество у функции взять в качестве ответа на вопрос по арности + запретить менять арноси у операторов
+// + запретить объявлять функции и операторы с одним именем... звучит как план
+
 
 
 
@@ -784,11 +797,6 @@ void system::register_function(std::string name, std::vector<std::string> func_a
 template <typename F, F f, typename HT, on_effect_t<F, HT> eff, is_valid_t<HT> vf>
   requires(valid_function_type<F> && valid_stack_type_v<HT>)
 void system::register_function(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
-  const auto name_view = std::string_view(name);
-  if (!text::is_valid_function_name(name_view)) raise_error(std::format("'{}' is not valid function name", name_view));
-
-  const auto itr = mfuncs.find(name);
-  if (itr != mfuncs.end()) raise_error(std::format("Function '{}' is already registered", name));
 
   auto func = [func_args_names = std::move(func_args_names), init_f = std::move(init_f)]
     (const system* sys, parse_ctx* ctx, container* scr, const command_block& args) -> size_t 
@@ -808,13 +816,13 @@ void system::register_function(std::string name, std::vector<std::string> func_a
       std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_argument_type<F, first_argument_index + 1>>>&&
       std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_result_type<F>>>;
       //&& std::is_fundamental_v<utils::function_argument_type<F, first_argument_index>>; // more types?
-    constexpr auto scope_type_name = utils::type_name<scope_type>();
+    constexpr auto stn = scope_type_name<scope_type>();
     const auto curfname = ctx->function_names.back();
 
     const bool expected_void = ctx->expected_type == utils::type_name<void>();
     if (uftype == user_function_type::effect && !expected_void) sys->raise_error(std::format("Function effect '{}' called in not effect context", curfname));
     if (!utils::is_void_v<scope_type> && !ctx->is_scope<scope_type>())
-      sys->raise_error(std::format("Trying to call function '{}' in wrong scope context: {} != {}", curfname, ctx->current_scope_type(), scope_type_name));
+      sys->raise_error(std::format("Trying to call function '{}' in wrong scope context: {} != {}", curfname, ctx->current_scope_type(), stn));
 
     // standart function when '!init_f' ?
     if (!init_f) {
@@ -836,10 +844,10 @@ void system::register_function(std::string name, std::vector<std::string> func_a
       if constexpr (requires_scope) {
         scope_index = ctx->scope_stack.back();
         if (ctx->current_scope_type() != utils::type_name<element_view>() && !ctx->is_scope<scope_type>())
-          sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->stack_types[scope_index], curfname, scope_type_name));
+          sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->stack_types[scope_index], curfname, stn));
         if (ctx->current_scope_type() == utils::type_name<element_view>()) {
-          if (!ctx->scope_type_upvalue.empty() && ctx->scope_type_upvalue != scope_type_name) sys->raise_error(std::format("Several functions with different scopes found? prev: '{}' cur: '{}'", ctx->scope_type_upvalue, scope_type_name));
-          ctx->scope_type_upvalue = scope_type_name;
+          if (!ctx->scope_type_upvalue.empty() && ctx->scope_type_upvalue != stn) sys->raise_error(std::format("Several functions with different scopes found? prev: '{}' cur: '{}'", ctx->scope_type_upvalue, stn));
+          ctx->scope_type_upvalue = stn; // for context saved and context args
         }
       }
 
@@ -884,7 +892,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         for (size_t i = 0; i < args_count; ++i) { ctx->pop(); }
 
         const size_t stack_size = ctx->stack_types.size();
-        if constexpr (!utils::is_void_v<ret_type>) ctx->push<ret_type>();
+        if constexpr (!utils::is_void_v<ret_type>) ctx->push<ret_type>(); // make plain pointer or pass type name as is
         //const auto remaining = command_block(args, offset);
         if constexpr (uftype == user_function_type::object) {
           // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
@@ -921,7 +929,6 @@ void system::register_function(std::string name, std::vector<std::string> func_a
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
   constexpr auto uftype = get_user_function_type<F>();
-  constexpr auto scope_type_name = utils::type_name<scope_type>();
   constexpr auto parse_ftype = command_data::ftype::function_t;
   constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
   constexpr bool unlimited_args = args_count == 2 &&
@@ -929,13 +936,15 @@ void system::register_function(std::string name, std::vector<std::string> func_a
     std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_result_type<F>>>;
   //&& std::is_fundamental_v<utils::function_argument_type<F, first_argument_index>>;
 
+  constexpr auto stn = scope_type_name<scope_type>();
+
   command_data mcd{
-    name, scope_type_name, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), 
-    15, unlimited_args ? -1 : int32_t(args_count), command_data::associativity::right, parse_ftype,
+    name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(),
+    15, unlimited_args ? INT32_MAX : int32_t(args_count), command_data::associativity::right, parse_ftype,
     std::move(func)
   };
 
-  mfuncs[name] = std::move(mcd);
+  register_function(std::move(mcd));
 }
 
 template <typename F, F f, on_effect_t<F, scope_t<F>> eff>
@@ -950,11 +959,12 @@ template <typename F, F f, typename HT, is_valid_t<HT> vf>
 void system::register_operator(std::string name, const std::string_view& properties_as, custom_init_fn_t init_f) {
   const auto itr = mfuncs.find(std::string(properties_as));
   if (itr == mfuncs.end()) raise_error(std::format("Could not find function '{}'", properties_as));
+  if (itr->second.empty()) raise_error(std::format("Could not find function '{}'", properties_as));
 
   operator_props ps;
-  ps.priority = itr->second.priority;
-  ps.assoc = itr->second.assoc;
-  ps.mtype = static_cast<decltype(ps.mtype)>(itr->second.arg_count);
+  ps.priority = itr->second.begin()->priority;
+  ps.assoc = itr->second.begin()->assoc;
+  ps.mtype = static_cast<decltype(ps.mtype)>(itr->second.begin()->arg_count);
 
   register_operator<F, f, HT, vf>(std::move(name), ps, std::move(init_f));
 }
@@ -972,7 +982,6 @@ void system::register_operator(std::string name, const operator_props& ps, custo
   using scope_type = std::remove_cvref_t<HT>;
   using ret_type = final_stack_el_t<utils::function_result_type<F>>;
   constexpr bool is_not_member_func = utils::is_void_v<utils::function_member_of<F>>;
-  constexpr auto scope_type_name = utils::type_name<scope_type>();
   constexpr auto uftype = get_user_function_type<F>();
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
   constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
@@ -986,24 +995,17 @@ void system::register_operator(std::string name, const operator_props& ps, custo
     std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_result_type<F>>>;
     //std::is_fundamental_v<utils::function_argument_type<F, first_argument_index>>;
 
+  constexpr auto stn = scope_type_name<scope_type>();
+
   static_assert(args_count == 1 || args_count == 2, "Operators must have only 1 or 2 arguments");
   static_assert(!utils::is_void_v<ret_type> && !std::is_same_v<ret_type, ignore_value>, "Operators must have a proper return value");
   // is args must be fundamental? i think not
   // is args must be same type? probably not
 
-  const auto name_view = std::string_view(name);
-  const bool valid_name = text::is_valid_operator_name(name_view);
-  if (!valid_name) raise_error(std::format("'{}' is not valid function name", name_view));
-  if (text::is_valid_function_name(name_view) && text::is_special_operator(name_view)) 
-    raise_error(std::format("Do not mix math operator symbols and common function name"));
-
-  const auto itr = mfuncs.find(name);
-  if (itr != mfuncs.end()) raise_error(std::format("Function '{}' is already registered", name));
-
   command_data mcd{
-    name, scope_type_name, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
+    name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
     [init_f = std::move(init_f)](const system* sys, parse_ctx* ctx, container* scr, const command_block& args) -> size_t {
-      constexpr auto scope_type_name = utils::type_name<scope_type>();
+      constexpr auto stn = scope_type_name<scope_type>();
       const auto curfname = ctx->function_names.back();
 
       const bool expected_void = ctx->expected_type == utils::type_name<void>();
@@ -1065,7 +1067,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
     }
   };
 
-  mfuncs[name] = std::move(mcd);
+  register_function(std::move(mcd));
 }
 
 template <typename F, F f>
@@ -1080,25 +1082,20 @@ template<typename F, F f, typename HT, is_valid_t<HT> vf>
   requires(utils::is_function_v<F> && valid_stack_type_v<HT>)
 void system::register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
   using scope_type = std::remove_cvref_t<HT>;
-  constexpr auto scope_type_name = utils::type_name<scope_type>();
   constexpr auto uftype = get_user_function_type<F, utils::function_result_type<F>, true>();
   constexpr auto parse_ftype = command_data::ftype::function_t;
   using ret_type = final_stack_el_t<utils::function_result_type<F>>;
 
-  const auto name_view = std::string_view(name);
-  if (!text::is_valid_function_name(name_view)) raise_error(std::format("'{}' is not valid function name", name_view));
-  const auto itr = mfuncs.find(name);
-  if (itr != mfuncs.end()) raise_error(std::format("Function '{}' is already registered", name));
+  constexpr auto stn = scope_type_name<scope_type>();
 
   command_data cd{
-    name, scope_type_name, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), 15, 50, command_data::associativity::right, parse_ftype,
+    name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), 15, 50, command_data::associativity::right, parse_ftype,
     [func_args_names = std::move(func_args_names), init_f = std::move(init_f)]
       (const system* sys, parse_ctx* ctx, container* scr, const command_block& args)
     {
       constexpr bool is_not_member_func = is_not_member_function<F>;
       using scope_type = HT;
       constexpr bool requires_scope = !utils::is_void_v<scope_type>;
-      constexpr auto scope_type_name = utils::type_name<scope_type>();
       constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
       using first_argument = std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>;
       constexpr auto uftype = get_user_function_type<F, utils::function_result_type<F>, true>();
@@ -1113,7 +1110,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
       if (!init_f) {
         if constexpr (requires_scope) {
           scope_index = ctx->scope_stack.back();
-          if (scope_type_name != ctx->stack_types[scope_index]) sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->stack_types[scope_index], curfname, scope_type_name));
+          if (!ctx->is_scope<scope_type>()) sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->current_scope_type(), curfname, scope_type_name<scope_type>()));
         }
       }
 
@@ -1175,7 +1172,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
     }
   };
 
-  mfuncs[name] = std::move(cd);
+  register_function(std::move(cd));
 }
 
 template <typename F, F f>
@@ -1245,20 +1242,20 @@ container system::parse(std::string text) {
 
   ctx.unlimited_func_index = 0;
   ctx.nest_level = 0;
-  ctx.expected_type = utils::type_name<ret_type>();
+  ctx.expected_type = scope_type_name<ret_type>();
   set_function_type sft(&ctx, function_type::lvalue);
 
   auto script_cmds = command_block(std::span<rpn_conversion_ctx::block>(output));
 
   if constexpr (!utils::is_void_v<root_type>) {
-    constexpr auto root_name = utils::type_name<root_type>();
+    constexpr auto root_name = scope_type_name<root_type>();
     scr.args.push_back({ { static_cast<size_t>(basicf::root), SIZE_MAX }, root_name});
     push_basic_function(&ctx, &scr, basicf::pushroot, 0);
     ctx.scope_stack.push_back(ctx.stack_types.size()-1);
   }
 
   {
-    set_expected_type set(&ctx, utils::type_name<ret_type>());
+    set_expected_type set(&ctx, scope_type_name<ret_type>());
     parse_block(&ctx, &scr, script_cmds);
   }
 
@@ -1270,8 +1267,7 @@ container system::parse(std::string text) {
   }
 
   if constexpr (!utils::is_void_v<ret_type>) {
-    constexpr auto return_name = utils::type_name<ret_type>();
-    if (ctx.top() != return_name) raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", ctx.stack_types.back(), return_name, ctx.stack_types.size()));
+    if (!ctx.is<ret_type>()) raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", ctx.stack_types.back(), scope_type_name<ret_type>(), ctx.stack_types.size()));
     push_basic_function(&ctx, &scr, basicf::pushreturn, 0);
   }
 
@@ -1283,29 +1279,35 @@ container system::parse(std::string text) {
 template <typename T>
 bool system::parse_ctx::is_scope() const {
   using basic_T = final_stack_el_t<T>;
-  if constexpr (std::is_pointer_v<basic_T>) {
+  /*if constexpr (std::is_pointer_v<basic_T>) {
     using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
     return current_scope_type() == utils::type_name<no_ptr_t*>() || current_scope_type() == utils::type_name<const no_ptr_t*>();
   } else {
     return current_scope_type() == utils::type_name<basic_T>();
-  }
+  }*/
+
+  return current_scope_type() == scope_type_name<basic_T>();
 }
 
 template <typename T>
 bool system::parse_ctx::is() const {
   using basic_T = final_stack_el_t<T>;
-  if constexpr (std::is_pointer_v<basic_T>) {
-    using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
-    return top() == utils::type_name<no_ptr_t*>() || top() == utils::type_name<const no_ptr_t*>();
-  } else {
-    return top() == utils::type_name<basic_T>();
-  }
+  //if constexpr (std::is_pointer_v<basic_T>) {
+  //  using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
+  //  return top() == utils::type_name<no_ptr_t*>() || top() == utils::type_name<const no_ptr_t*>();
+  //} else {
+  //  return top() == utils::type_name<basic_T>();
+  //}
+
+  return top() == scope_type_name<basic_T>();
 }
 
 template <typename T>
 void system::parse_ctx::push() {
   using basic_T = final_stack_el_t<T>;
-  push(utils::type_name<basic_T>());
+  constexpr auto stn = scope_type_name<basic_T>();
+  push(stn);
+  //push(utils::type_name<basic_T>());
 }
 
 // not needed anymore?

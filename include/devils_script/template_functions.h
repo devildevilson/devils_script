@@ -973,15 +973,15 @@ template <typename F, F f, typename HT, is_valid_t<HT> vt>
 int64_t compute_count_and_mul(int64_t arg, context* ctx, const container* scr) {
   size_t count = 0;
   if constexpr (!utils::is_void_v<HT>) {
-    auto c = ctx->stack.DEVILS_SCRIPT_STACK_GET<HT>(arg);
+    auto c = ctx->stack.safe_get<HT>(arg);
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<HT>(), ctx->current_index));
     count = std::invoke(f, c);
   } else {
     count = std::invoke(f);
   }
 
-  const double v = ctx->stack.DEVILS_SCRIPT_STACK_POP<double>();
-  ctx->stack.DEVILS_SCRIPT_STACK_PUSH(v * double(count));
+  const double v = ctx->stack.safe_pop<double>();
+  ctx->stack.push(v * double(count));
   return 0;
 }
 

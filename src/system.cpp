@@ -341,7 +341,8 @@ void system::rpn_conversion_ctx::convert(const system* sys, const std::string_vi
           // found a function on left side of brackets
           if (is_function) {
             callstack.back() += 1;
-            if (arg_count != -1 && arg_count != callstack.back()) sys->raise_error(std::format("Function '{}' expects {} arguments but {} is provided", stack.back().token, arg_count, callstack.back()));
+            // useless check?
+            //if (arg_count != INT32_MAX && arg_count < callstack.back()) sys->raise_error(std::format("Function '{}' expects {} arguments but {} is provided", stack.back().token, arg_count, callstack.back()));
 
             const size_t size = compute_argument_size(output, callstack.back()) + 1;
             output.push_back(stack.back());
@@ -392,7 +393,8 @@ void system::rpn_conversion_ctx::convert(const system* sys, const std::string_vi
       if (callstack.empty()) sys->raise_error(std::format("Parsing error: found function '{}' without callstack", top.token));
       const size_t callstack_args_count = callstack.back();
       callstack.pop_back();
-      if (arg_count != -1 && top.args_count != callstack_args_count) sys->raise_error(std::format("Function '{}' expects {} arguments but {} is provided", top.token, top.args_count, callstack_args_count));
+      // useless check?
+      //if (arg_count != INT32_MAX && top.args_count < callstack_args_count) sys->raise_error(std::format("Function '{}' expects {} arguments but {} is provided", top.token, top.args_count, callstack_args_count));
     }
 
     const bool is_valid = ftype != system::command_data::ftype::invalid;
@@ -1453,6 +1455,43 @@ void system::scope_exit(parse_ctx* ctx, container* scr, const size_t count) cons
   }
 }
 
+void system::register_function(command_data data) {
+  if (data.type == command_data::ftype::invalid) raise_error(std::format("Cannot register '{}' with function type 'invalid'", data.name));
+
+  if (data.type == command_data::ftype::function_t) {
+    if (!text::is_valid_function_name(data.name)) raise_error(std::format("'{}' is not valid function name", data.name));
+  } else {
+    if (!text::is_valid_operator_name(data.name)) raise_error(std::format("'{}' is not valid function name", data.name));
+    if (text::has_common_symbols(data.name) && text::has_special_symbols(data.name))
+      raise_error(std::format("Do not mix math operator symbols and common function name"));
+  }
+
+  using cont_t = std::unordered_map<std::string, command_data>;
+  auto itr = mfuncs.find(data.name);
+  if (itr == mfuncs.end()) {
+    itr = mfuncs.emplace(std::make_pair(data.name, cont_t{})).first;
+  } else {
+    if (itr->second.empty()) raise_error(std::format("'{}' empty?", data.name));
+    if (data.type != itr->second.begin()->second.type) 
+      raise_error(std::format("Cannot register several functions '{}' with defferent types", data.name));
+    if (data.type == command_data::ftype::operator_t) {
+      const auto& another = itr->second.begin()->second;
+      const bool invalid_state = 
+        data.priority != another.priority || 
+        data.arg_count != another.arg_count ||
+        data.assoc != another.assoc;
+
+      if (invalid_state) 
+        raise_error(std::format("Operators props must be the same for all overloaded operators ({},{},{}) != ({},{},{})", data.priority, data.arg_count, static_cast<uint32_t>(data.assoc), another.priority, another.arg_count, static_cast<uint32_t>(another.assoc)));
+    }
+  }
+
+  const auto scope_itr = itr->second.find(std::string(data.expected_scope));
+  if (scope_itr != itr->second.end()) raise_error(std::format("'{}' is already registered for scope '{}'", data.name, data.expected_scope));
+
+  itr->second[std::string(data.expected_scope)] = std::move(data);
+}
+
 void system::setup_block_description(parse_ctx* ctx, container* scr, const std::string_view& token, const std::string_view& custom_desc, const size_t start) const {
   using sv_t = container::command_description::global_string_view;
   sv_t tok{};
@@ -1609,7 +1648,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
   if (block.empty()) return 0;
 
   const auto exp_t = ctx->expected_type;
-  const bool any_type_expected = exp_t == utils::type_name<element_view>();
+  const bool any_type_expected = type_is_any_type(exp_t);
   
   auto funcname = block.name();
   if (block.args_count() == 0 && block.size() == 1) { // rvalue
@@ -1648,17 +1687,21 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
 
       if (count == 0) {
         const auto& itr = mfuncs.find(std::string(block.name()));
-        if (itr == mfuncs.end()) {
+        if (itr == mfuncs.end() && any_type_expected) {
           set_function_type sft(ctx, function_type::rvalue);
           push_string(ctx, scr, block.name());
           setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
           return 1;
-        }
+        } else if (itr == mfuncs.end()) raise_error(std::format("Could not find function '{}'", block.name()));
 
         set_function_type sft(ctx, function_type::rvalue);
         function_name_changer fnc(ctx, block.name());
 
-        const size_t count = std::invoke(itr->second.init, this, ctx, scr, block);
+        auto scope_itr = itr->second.find(std::string(ctx->current_scope_type()));
+        if (scope_itr == itr->second.end()) { scope_itr = itr->second.find(std::string(scope_type_name<void>())); }
+        if (scope_itr == itr->second.end()) raise_error(std::format("Could not find function '{}' for scope type '{}'", block.name(), ctx->current_scope_type()));
+
+        const size_t count = std::invoke(scope_itr->second.init, this, ctx, scr, block);
         setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
         return count;
       }
@@ -1738,7 +1781,11 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
   set_function_type sft(ctx, function_type::lvalue); // probably function_type is meaningless
   const auto& itr = mfuncs.find(std::string(funcname));
   if (itr == mfuncs.end()) raise_error(std::format("Could not find function '{}'", funcname));
-  std::invoke(itr->second.init, this, ctx, scr, block);
+  auto scope_itr = itr->second.find(std::string(ctx->current_scope_type()));
+  if (scope_itr == itr->second.end()) { scope_itr = itr->second.find(std::string(scope_type_name<void>())); }
+  if (scope_itr == itr->second.end()) raise_error(std::format("Could not find function '{}' for scope type '{}'", block.name(), ctx->current_scope_type()));
+
+  std::invoke(scope_itr->second.init, this, ctx, scr, block);
 
   if (is_subblock || is_condition || is_not_overriden) {
     const auto cd = block.find(custom_description_constant);
@@ -1930,13 +1977,22 @@ std::vector<std::string_view> system::make_operators_list() const {
 system::command_data::ftype system::get_token_type(const std::string_view& name) const {
   const auto itr = mfuncs.find(std::string(name)); // such a pain
   if (itr == mfuncs.end()) return command_data::ftype::invalid;
-  return itr->second.type;
+  if (itr->second.empty()) return command_data::ftype::invalid;
+  return itr->second.begin()->second.type;
 }
 
 std::tuple<int32_t, int32_t, system::command_data::associativity, system::command_data::ftype> system::get_token_caps(const std::string_view& name) const {
-  const auto itr = mfuncs.find(std::string(name));
+  const auto itr = mfuncs.find(std::string(name)); // such a pain
   if (itr == mfuncs.end()) return std::make_tuple(0, 0, system::command_data::associativity::left, command_data::ftype::invalid);
-  return std::make_tuple(itr->second.priority, itr->second.arg_count, itr->second.assoc, itr->second.type);
+  if (itr->second.empty()) return std::make_tuple(0, 0, system::command_data::associativity::left, command_data::ftype::invalid);
+
+  int32_t args_count = 0;
+  for (auto it = itr->second.begin(); it != itr->second.end(); ++it) {
+    args_count = std::max(args_count, it->second.arg_count);
+  }
+
+  auto it = itr->second.begin();
+  return std::make_tuple(it->second.priority, args_count, it->second.assoc, it->second.type);
 }
 
 size_t system::patch_prev_functions_descriptions(container* scr, const size_t start) const {

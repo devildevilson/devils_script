@@ -97,7 +97,7 @@ int64_t andjump_unsafe(int64_t arg, context* ctx, const container* scr) {
   const bool b2 = ctx->stack.pop<bool>();
   const bool b1 = ctx->stack.pop<bool>();
   const bool res = b1 && b2;
-  ctx->stack.DEVILS_SCRIPT_STACK_PUSH(res); // должно остаться последнее значение
+  ctx->stack.push(res); // должно остаться последнее значение
   if (!res) ctx->current_index = arg - 1;
   return -1;
 }
@@ -106,7 +106,7 @@ int64_t orjump_unsafe(int64_t arg, context* ctx, const container* scr) {
   const bool b2 = ctx->stack.pop<bool>();
   const bool b1 = ctx->stack.pop<bool>();
   const bool res = b1 || b2;
-  ctx->stack.DEVILS_SCRIPT_STACK_PUSH(res);
+  ctx->stack.push(res);
   if (res) ctx->current_index = arg - 1;
   return -1;
 }
