@@ -9,7 +9,8 @@ Do I need to put here more text?
 
 # TODO:
 1. different functions depending on scope (+) (tests?)
-2. assert (?)
-3. better callable for iterators (subblock in common.h ?)
-4. another file for benchmark
-5. container::make_table does not work
+2. 'this' and 'prev' blocks fixes (+)
+3. assert (?)
+4. better callable for iterators (subblock in common.h ?)
+5. another file for benchmark (+)
+6. container::make_table does not work

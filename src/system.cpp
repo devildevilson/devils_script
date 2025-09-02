@@ -774,12 +774,12 @@ void system::init_basic_functions() {
     sys->push_basic_function(ctx, scr, basicf::pushthis, ctx->current_scope_index());
     ctx->push(ctx->current_scope_type());
 
-    const auto nextblock = command_block(args, 1);
-    if (!nextblock.empty()) {
-      ctx->scope_stack.push_back(ctx->stack_types.size()-1);
-      sys->parse_block(ctx, scr, nextblock);
-      sys->scope_exit(ctx, scr, 1);
-    }
+    if (args.size() == 1) return args.size();
+
+    // sys->parse_block(ctx, scr, args, basicf::invalid); - doesnt produce description
+    ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->scope_exit(ctx, scr, 1);
 
     return args.size();
   });
@@ -792,13 +792,12 @@ void system::init_basic_functions() {
     sys->push_basic_function(ctx, scr, basicf::pushprev, scope_index);
     ctx->push(ctx->stack_types[scope_index]);
 
+    if (args.size() == 1) return args.size();
+
     change_chain_index cci(ctx);
-    const auto nextblock = command_block(args, 1);
-    if (!nextblock.empty()) {
-      ctx->scope_stack.push_back(ctx->stack_types.size()-1);
-      sys->parse_block(ctx, scr, nextblock);
-      sys->scope_exit(ctx, scr, 1);
-    }
+    ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->scope_exit(ctx, scr, 1);
 
     return args.size();
   });
@@ -826,14 +825,14 @@ void system::init_basic_functions() {
     sys->push_basic_function(ctx, scr, basicf::pushprev, fin_index);
     ctx->push(ctx->stack_types[fin_index]);
 
+    if (args.size() == 1) return args.size();
+
     const size_t prev_value = ctx->prev_chaining;
     ctx->prev_chaining += counter; // ???
-    const auto nextblock = command_block(args, 1);
-    if (!nextblock.empty()) {
-      ctx->scope_stack.push_back(ctx->stack_types.size()-1);
-      sys->parse_block(ctx, scr, nextblock);
-      sys->scope_exit(ctx, scr, 1);
-    }
+    
+    ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->scope_exit(ctx, scr, 1);
 
     ctx->prev_chaining = prev_value;
 
@@ -1193,12 +1192,11 @@ void system::init_basic_functions() {
 
   RFI(internal::ctx)("ctx", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
     sys->push_basic_function(ctx, scr, basicf::context, 0);
-    const auto nextblock = command_block(args, 1);
-    if (!nextblock.empty()) {
-      ctx->scope_stack.push_back(ctx->stack_types.size()-1);
-      sys->parse_block(ctx, scr, nextblock);
-      sys->scope_exit(ctx, scr, 1);
-    }
+    if (args.size() == 1) return args.size();
+    
+    ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->scope_exit(ctx, scr, 1);
 
     return args.size();
   });
@@ -1220,11 +1218,16 @@ void system::init_basic_functions() {
     }
 
     sys->push_basic_function(ctx, scr, basicf::pushctxvalue, index); // push
-    if (!nextblock.empty()) {
-      ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-      sys->parse_block(ctx, scr, nextblock);
-      sys->scope_exit(ctx, scr, 1);
-    }
+    if (nextblock.empty()) return args.size();
+
+    const size_t desc_start = scr->block_descs.size();
+
+    ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+    sys->parse_block(ctx, scr, nextblock, basicf::invalid);
+    sys->scope_exit(ctx, scr, 1);
+
+    const auto desc_name = nextblock.find(custom_description_constant).name();
+    sys->setup_block_description(ctx, scr, nextblock.name(), desc_name, desc_start);
 
     return args.size();
   });
@@ -1424,11 +1427,18 @@ void system::init_basic_functions() {
     sys->push_basic_function(ctx, scr, basicf::pushlist, index);
     if (ctx->ftype != function_type::lvalue) sys->raise_error(std::format("Trying to use function 'list' as rvalue"));
 
+    // if this block has 1 arg with str, then next child would be __empty_lvalue
+    // description?
+    //const size_t desc_start = scr->block_descs.size();
+
     push_list_index_upvalue pliu(ctx, index);
     const auto nextblock = command_block(args, 1 + child.size());
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->parse_block(ctx, scr, nextblock, basicf::invalid);
+    sys->parse_block(ctx, scr, nextblock);
     sys->scope_exit(ctx, scr, 1);
+
+    //const auto desc_name = nextblock.find(custom_description_constant).name();
+    //sys->setup_block_description(ctx, scr, nextblock.name(), desc_name, desc_start);
 
     size_t counter = start;
     while (counter < ctx->stack_types.size()) {
@@ -1940,6 +1950,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
   }
 
   for (const auto i : jumps) { scr->cmds[i].arg = scr->cmds.size(); }
+  if (current_stack_size == ctx->stack_types.size()) ctx->push<ignore_value>(); // no value
 
   return block.size();
 }

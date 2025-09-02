@@ -376,7 +376,6 @@ size_t system::parse_args(
 
   size_t next_size = 0;
   {
-    std::string_view override_lvalue;
     command_block arg_block;
     if (!func_args_names.empty()) {
       if (index >= func_args_names.size()) return offset;
@@ -397,12 +396,13 @@ size_t system::parse_args(
     }
 
     const auto& name = !func_args_names.empty() ? func_args_names[index] : std::string();
-    next_size = parse_arg<Arg>(ctx, scr, arg_block, index, std::string_view(), override_lvalue, name, fn);
+    next_size = parse_arg<Arg>(ctx, scr, arg_block, index, std::string_view(), std::string_view(), name, fn);
   }
 
   if (next_size == 0) return 0;
   if (ctx->is_ignore()) {
-    if (command_block cb(block, offset + next_size); cb.empty() && index == 0) raise_error(std::format("Seems like there is no data except block that returns 'ignore_value' - it is very dangerous in this language design, function: '{}'", block.name()));
+    if (command_block cb(block, offset + next_size); cb.empty() && index == 0) 
+      raise_error(std::format("Seems like there is no data except block that returns 'ignore_value' - it is very dangerous in this language design, function: '{}'", block.name()));
     while (ctx->pop_while_ignore()) {}
     return parse_args<Arg>(ctx, scr, block, offset + next_size, index, func_args_names, fn);
   } else {
@@ -466,7 +466,8 @@ size_t system::parse_args(parse_ctx* ctx, container* scr, const command_block& b
     }
 
     if (ctx->is_ignore()) {
-      if (command_block cb(block, offset + next_size); cb.empty() && LI == 0) raise_error(std::format("Seems like there is no data except block that returns 'ignore_value' - it is very dangerous in this language design, function: '{}'", block.name()));
+      if (command_block cb(block, offset + next_size); cb.empty() && LI == 0) 
+        raise_error(std::format("Seems like there is no data except block that returns 'ignore_value' - it is very dangerous in this language design, function: '{}'", block.name()));
       while (ctx->pop_while_ignore()) {}
       return parse_args<I, LI, F>(ctx, scr, block, offset + next_size, func_args_names, fn);
     } else {
@@ -893,20 +894,25 @@ void system::register_function(std::string name, std::vector<std::string> func_a
 
         const size_t stack_size = ctx->stack_types.size();
         if constexpr (!utils::is_void_v<ret_type>) ctx->push<ret_type>(); // make plain pointer or pass type name as is
-        //const auto remaining = command_block(args, offset);
         if constexpr (uftype == user_function_type::object) {
           // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
           // parse scope block AFTER the scope function 
-          if (offset < args.size() && ctx->ftype == function_type::lvalue) {
-            ctx->scope_stack.push_back(ctx->stack_types.size()-1);
-            while (offset < args.size()) {
-              const auto remaining = command_block(args, offset);
-              offset += remaining.size();
-
-              sys->parse_block(ctx, scr, remaining);
-              while (ctx->pop_while_ignore()) {}
-            }
+          // after parsing there are 2 types of scope functions - with argument and without
+          // when no argument provided we can use parse_block
+          // bad design?
+          if (offset < args.size() && offset == 1) { // no args
+            ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+            sys->parse_block(ctx, scr, args, basicf::invalid);
             sys->scope_exit(ctx, scr, 1);
+          } else if (offset < args.size() && ctx->ftype == function_type::lvalue) { // was args
+            const auto remaining = command_block(args, offset);
+            ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+            sys->parse_block(ctx, scr, remaining);
+            sys->scope_exit(ctx, scr, 1);
+
+            offset += remaining.size();
+            if (offset < args.size()) 
+              sys->raise_warning(std::format("Found dead code in function '{}', this block '{}' would be ignored", curfname, command_block(args, offset).name()));
           }
         }
 
@@ -1049,11 +1055,24 @@ void system::register_operator(std::string name, const operator_props& ps, custo
           for (size_t i = 0; i < args_count; ++i) { ctx->pop(); }
           ctx->push<ret_type>();
           if constexpr (uftype == user_function_type::object) {
+            // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
             // parse scope block AFTER the scope function 
-            if (ctx->ftype == function_type::lvalue) {
+            // after parsing there are 2 types of scope functions - with argument and without
+            // when no argument provided we can use parse_block
+            // bad design?
+            if (offset < args.size() && offset == 1) { // no args
               ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-              sys->parse_block(ctx, scr, command_block(args, offset));
+              sys->parse_block(ctx, scr, args, basicf::invalid);
               sys->scope_exit(ctx, scr, 1);
+            } else if (offset < args.size() && ctx->ftype == function_type::lvalue) { // was args
+              const auto remaining = command_block(args, offset);
+              ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+              sys->parse_block(ctx, scr, remaining);
+              sys->scope_exit(ctx, scr, 1);
+
+              offset += remaining.size();
+              if (offset < args.size()) 
+                sys->raise_warning(std::format("Found dead code in function '{}', this block '{}' would be ignored", curfname, command_block(args, offset).name()));
             }
           }
         }
