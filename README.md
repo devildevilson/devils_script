@@ -16,7 +16,9 @@ Register any function with **devils_script**'s system's `register_function` call
 Scope type T can be anything that 
 1) sizeof(T) <= 16
 2) T is trivially destructable
+
 See tests/case1.cpp for handle type example
+
 For example:
 ```
 int func1(int a, int b) { return a + b; }
@@ -51,7 +53,7 @@ sys.register_function_iter<decltype(&each_soldier), &each_soldier>("each_soldier
 6. Script container fully copyable and movable
 7. Script context consists of stack, stack has types for each values on it
 8. Save and load any value in context
-9. Script arguments can be used and script and overwritten with new value
+9. Script arguments can be used in script and be overwritten with new value
 10. I made everything I can to register any arbitrary functions you can imagine, but for some logic you may need to provide custom init function
 
 ## TODO:
