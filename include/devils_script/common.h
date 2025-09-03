@@ -214,7 +214,7 @@ struct alignas(MAXIMUM_STACK_VAL_SIZE) any_stack {
   std::string_view _type;
 
   any_stack() noexcept;
-  template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view>)
+  template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
   any_stack(const T& val) noexcept;
   any_stack(const char* _mem, const std::string_view& _type) noexcept;
 
@@ -223,9 +223,9 @@ struct alignas(MAXIMUM_STACK_VAL_SIZE) any_stack {
   std::string_view type() const;
   stack_element::view view() const;
 
-  template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view>)
+  template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
   bool is() const;
-  template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view>)
+  template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
   auto get() const -> final_stack_el_t<T>;
 };
 
@@ -483,19 +483,19 @@ void stack_element::set(const T& val) {
   } else *reinterpret_cast<basic_T*>(&mem[0]) = val;
 }
 
-template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view>)
+template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
 any_stack::any_stack(const T& val) noexcept : _type(utils::type_name<final_stack_el_t<T>>()) {
   using basic_T = final_stack_el_t<T>;
-  if constexpr (is_el_view_v<basic_T>) {
+  if constexpr (is_typeless_v<basic_T>) {
     _type = val.type();
     memcpy(_mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
   } else *reinterpret_cast<basic_T*>(_mem[0]) = val;
 }
 
-template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view>)
+template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
 bool any_stack::is() const {
   using basic_T = final_stack_el_t<T>;
-  if constexpr (is_el_view_v<basic_T>) {
+  if constexpr (is_typeless_v<basic_T>) {
     return true;
   } else if constexpr (std::is_pointer_v<basic_T>) {
     using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
@@ -503,11 +503,11 @@ bool any_stack::is() const {
   } else return _type == utils::type_name<basic_T>();
 }
 
-template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view>)
+template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
 auto any_stack::get() const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   if (!is<basic_T>()) throw std::runtime_error(std::format("Stack value view contains '{}' type, but '{}' is requested", _type, utils::type_id<basic_T>()));
-  if constexpr (is_el_view_v<basic_T>) {
+  if constexpr (is_typeless_v<basic_T>) {
     return stack_element::view(_mem, _type);
   } else return *reinterpret_cast<const basic_T*>(&_mem[0]);
 }

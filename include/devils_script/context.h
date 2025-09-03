@@ -137,6 +137,7 @@ struct context {
   void set_return(const T& val);
 
   inline void set_return(const std::string_view& type, const stack_element& el) { _return_value = any_stack(el.mem, type); }
+  inline std::string_view arg_type(const int64_t index) const { return args_stack.type(index); }
   inline std::string_view saved_type(const int64_t index) const { return saved_stack.type(index); }
   inline std::string_view return_type() const { return _return_value.type(); }
   inline void clear() { current_index = 0; stack.resize(0); /*saved_stack.resize(0);*/ }

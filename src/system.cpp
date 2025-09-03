@@ -1607,8 +1607,8 @@ size_t system::push_basic_function(parse_ctx* ctx, container* scr, const basicf 
   }
 
   container::command_description desc(
-    { static_cast<size_t>(id), SIZE_MAX },
-    arg_count, false, true, has_return, ctx->nest_level, SIZE_MAX
+    { static_cast<size_t>(id), SIZE_MAX }, arg_count, 
+    false, true, has_return, false, ctx->nest_level, SIZE_MAX
   );
   scr->descs.emplace_back(desc);
 
@@ -1931,8 +1931,8 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
 
     scr->cmds.push_back(cmd);
     container::command_description desc(
-      { static_cast<size_t>(curid), SIZE_MAX },
-      2, false, true, curid != basicf::effect_block, ctx->nest_level, SIZE_MAX
+      { static_cast<size_t>(curid), SIZE_MAX }, 2, 
+      false, true, curid != basicf::effect_block, curid != basicf::effect_block, ctx->nest_level, SIZE_MAX
     );
     scr->descs.emplace_back(desc);
 

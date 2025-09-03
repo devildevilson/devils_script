@@ -24,8 +24,8 @@ struct node_view {
   std::vector<std::tuple<any_stack, any_stack>> table;
   std::vector<size_t> stack;
 
-  bool traverse(container* scr, const size_t offset, const size_t nest_level, const fn_t& fn);
-  bool traverse(container* scr, const fn_t &fn);
+  bool traverse(const container* scr, const size_t offset, const size_t nest_level, const fn_t& fn);
+  bool traverse(const container* scr, const fn_t &fn);
 };
 
 struct container {
@@ -52,6 +52,7 @@ struct container {
     bool requires_scope;
     bool is_not_member_function;
     bool has_return;
+    bool effect;
     size_t nest_level; // is it needed? dont think so
     size_t parent;
 
@@ -62,6 +63,7 @@ struct container {
       bool requires_scope,
       bool is_not_member_function,
       bool has_return,
+      bool effect,
       size_t nest_level,
       size_t parent
     ) noexcept;
@@ -96,7 +98,6 @@ struct container {
 
   container() noexcept;
   void process(context* ctx) const; // dont forget 'ctx->clear()' and 'ctx->create_lists(this)'
-  //void describe(context* ctx, const description_output_t& f) const;
   void make_table(context* ctx, std::vector<std::tuple<any_stack, any_stack>> &table) const;
   void make_table(context* ctx, node_view& viewer) const;
   std::string_view get_string(const size_t start, const size_t count) const;

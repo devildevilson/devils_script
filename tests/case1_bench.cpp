@@ -57,19 +57,19 @@ struct person {
   struct city* living_in() const { return live_in; }
 };
 
-int city_population(const city* c) { return c->population; }
-double city_wealth(const city* c) { return c->wealth; }
-country* city_owner(const city* c) { return c->owner; }
-size_t city_notable_people_count(const city* c) { return c->notable_people.size(); }
+static int city_population(const city* c) { return c->population; }
+static double city_wealth(const city* c) { return c->wealth; }
+static country* city_owner(const city* c) { return c->owner; }
+static size_t city_notable_people_count(const city* c) { return c->notable_people.size(); }
 
-void add_city_population(city* c, int pop) { c->population += pop; }
-void add_city_wealth(city* c, double w) { c->wealth += w; }
+static void add_city_population(city* c, int pop) { c->population += pop; }
+static void add_city_wealth(city* c, double w) { c->wealth += w; }
 
-uint16_t person_age(handle<person> p) { return (*p).age; }
-int person_charisma(handle<person> p) { return (*p).charisma; }
+static uint16_t person_age(handle<person> p) { return (*p).age; }
+static int person_charisma(handle<person> p) { return (*p).charisma; }
 
 // iterator
-double each_city(country* c, const std::function<double(city*)>& fn) {
+static double each_city(country* c, const std::function<double(city*)>& fn) {
   double val = 0.0;
   for (auto city : c->cities) {
     val += fn(city);
@@ -77,7 +77,7 @@ double each_city(country* c, const std::function<double(city*)>& fn) {
   return val;
 }
 
-double each_notable_person(city* c, const std::function<bool(handle<person>)>& filter, const std::function<double(handle<person>)>& fn) {
+static double each_notable_person(city* c, const std::function<bool(handle<person>)>& filter, const std::function<double(handle<person>)>& fn) {
   double val = 0.0;
   for (const auto& p : c->notable_people) {
     if (filter && !filter(p)) continue;
@@ -143,7 +143,7 @@ TEST_CASE("Real usage 1", "[usage]") {
   sys.init_basic_functions();
   sys.init_math();
 
-  // unfortunately no unique fns in unique scope type yet
+  // unfortunately no unique fns in unique scope type yet (fixed. see examples/desc.cpp)
   sys.RF(country::get_population)("country_population");
   sys.RF(country::get_gdp)("country_gdp");
   sys.RF(country::add_population)("country_add_population");

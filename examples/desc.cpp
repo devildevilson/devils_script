@@ -1,5 +1,3 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/benchmark/catch_benchmark.hpp>
 #include "devils_script/system.h"
 
 #include <string>
@@ -57,19 +55,19 @@ struct person {
   struct city* living_in() const { return live_in; }
 };
 
-static int city_population(const city* c) { return c->population; }
-static double city_wealth(const city* c) { return c->wealth; }
-static country* city_owner(const city* c) { return c->owner; }
-static size_t city_notable_people_count(const city* c) { return c->notable_people.size(); }
+int city_population(const city* c) { return c->population; }
+double city_wealth(const city* c) { return c->wealth; }
+country* city_owner(const city* c) { return c->owner; }
+size_t city_notable_people_count(const city* c) { return c->notable_people.size(); }
 
-static void add_city_population(city* c, int pop) { c->population += pop; }
-static void add_city_wealth(city* c, double w) { c->wealth += w; }
+void add_city_population(city* c, int pop) { c->population += pop; }
+void add_city_wealth(city* c, double w) { c->wealth += w; }
 
-static uint16_t person_age(handle<person> p) { return (*p).age; }
-static int person_charisma(handle<person> p) { return (*p).charisma; }
+uint16_t person_age(handle<person> p) { return (*p).age; }
+int person_charisma(handle<person> p) { return (*p).charisma; }
 
 // iterator
-static double each_city(country* c, const std::function<double(city*)> &fn) {
+double each_city(country* c, const std::function<double(city*)>& fn) {
   double val = 0.0;
   for (auto city : c->cities) {
     val += fn(city);
@@ -77,9 +75,9 @@ static double each_city(country* c, const std::function<double(city*)> &fn) {
   return val;
 }
 
-static double each_notable_person(city* c, const std::function<bool(handle<person>)>& filter, const std::function<double(handle<person>)>& fn) {
+double each_notable_person(city* c, const std::function<bool(handle<person>)>& filter, const std::function<double(handle<person>)>& fn) {
   double val = 0.0;
-  for (const auto &p : c->notable_people) {
+  for (const auto& p : c->notable_people) {
     if (filter && !filter(p)) continue;
     val += fn(p);
   }
@@ -87,8 +85,8 @@ static double each_notable_person(city* c, const std::function<bool(handle<perso
 }
 
 const std::string scripts[] = {
-  "country.country_leader:age",
-  "country = { each_city = { value = city_population } }",
+  "country.leader:age",
+  "country = { each_city = { value = population } }",
   "country = { each_city = { value = { each_notable_person = { value = charisma } } } }",
   "this:living_in = { ctx_save = { val1 = { each_notable_person = { value = age } } }, notable_people_count / ctx:saved:val1 }",
   "{ ctx_save = { cur_player = this }, this:living_in = { each_notable_person = { filter = this != ctx:saved:cur_player, value = age } } }",
@@ -106,7 +104,25 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 #define RFI(fn) register_function_iter<decltype(&fn), &fn>
 #define RFIH(fn, handle) register_function_iter<decltype(&fn), &fn, handle>
 
-TEST_CASE("Real usage 1", "[usage]") {
+bool print(const std::string_view& name, const std::string_view& desc, const size_t nest, const ds::any_stack& value, const ds::any_stack& scope) {
+  for (size_t i = 0; i < nest; ++i) {
+    std::cout << "  ";
+  }
+
+  std::cout << "'" << name << "' value: '";
+  if (value.is<double>()) {
+    std::cout << value.get<double>();
+  } else if (value.is<int64_t>()) {
+    std::cout << value.get<int64_t>();
+  } else if (value.is<bool>()) {
+    std::cout << value.get<bool>();
+  } else std::cout << (value.type().empty() ? "no value" : value.type());
+  std::cout << "' scope: '" << (scope.type().empty() ? "no scope" : scope.type()) << "'\n";
+
+  return true;
+}
+
+int main() {
   person p1{ "Mary", 20, 5, nullptr, nullptr };
   person p2{ "Alaska", 13, 2, nullptr, nullptr };
   person p3{ "Alexey", 26, 7, nullptr, nullptr };
@@ -143,18 +159,18 @@ TEST_CASE("Real usage 1", "[usage]") {
   sys.init_basic_functions();
   sys.init_math();
 
-  // unfortunately no unique fns in unique scope type yet (fixed. see examples/desc.cpp)
-  sys.RF(country::get_population)("country_population");
-  sys.RF(country::get_gdp)("country_gdp");
-  sys.RF(country::add_population)("country_add_population");
-  sys.RF(country::add_gdp)("country_add_gdp");
-  sys.RF(country::leader)("country_leader");
-  sys.RF(city_population)("city_population");
-  sys.RF(city_wealth)("city_wealth");
-  sys.RF(city_owner)("city_owner");
+  // Function with unique scope type can have same names
+  sys.RF(country::get_population)("population");
+  sys.RF(country::get_gdp)("gdp");
+  sys.RF(country::add_population)("add_population");
+  sys.RF(country::add_gdp)("add_gdp");
+  sys.RF(country::leader)("leader");
+  sys.RF(city_population)("population");
+  sys.RF(city_wealth)("wealth");
+  sys.RF(city_owner)("owner");
   sys.RF(city_notable_people_count)("notable_people_count");
-  sys.RF(add_city_population)("city_add_population");
-  sys.RF(add_city_wealth)("city_add_wealth");
+  sys.RF(add_city_population)("add_population");
+  sys.RF(add_city_wealth)("add_wealth");
   sys.RF(person_age)("age");
   sys.RF(person_charisma)("charisma");
   sys.RFH(person::inc_age, handle<person>)("inc_age");
@@ -164,48 +180,54 @@ TEST_CASE("Real usage 1", "[usage]") {
   sys.RFI(each_city)("each_city", { "value" });
   sys.RFI(each_notable_person)("each_notable_person", { "filter", "value" });
 
-  SECTION("script1") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[0]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(p3.age));
+  const auto cont1 = sys.parse<double, handle<person>>(scripts[0]);
+  const auto cont2 = sys.parse<double, handle<person>>(scripts[1]);
+  const auto cont3 = sys.parse<double, handle<person>>(scripts[2]);
+  const auto cont4 = sys.parse<double, handle<person>>(scripts[3]);
+  const auto cont5 = sys.parse<double, handle<person>>(scripts[4]);
+
+  ds::context ctx;
+  ctx.set_arg(0, p1h);
+
+  {
+    ctx.clear();
+    ds::node_view v;
+    cont1.make_table(&ctx, v);
+    v.traverse(&cont1, &print);
+    std::cout << "\n";
   }
 
-  SECTION("script2") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[1]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(c1.population + c2.population + c3.population));
+  {
+    ds::node_view v;
+    ctx.clear();
+    cont2.make_table(&ctx, v);
+    v.traverse(&cont2, &print);
+    std::cout << "\n";
   }
 
-  SECTION("script3") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[2]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(p1.charisma + p2.charisma + p3.charisma + p4.charisma + p5.charisma));
+  {
+    ds::node_view v;
+    ctx.clear();
+    cont3.make_table(&ctx, v);
+    v.traverse(&cont3, &print);
+    std::cout << "\n";
   }
 
-  SECTION("script4") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[3]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE((std::abs(ctx.get_return<double>()) - double(city_notable_people_count(&c1) / c1.notable_people[0].ptr->age + c1.notable_people[1].ptr->age)) < 0.0000001);
+  {
+    ds::node_view v;
+    ctx.clear();
+    cont4.make_table(&ctx, v);
+    v.traverse(&cont4, &print);
+    std::cout << "\n";
   }
 
-  SECTION("script5") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[4]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-    cont.process(&ctx);
-    REQUIRE(ctx.is_return<double>());
-    REQUIRE(ctx.get_return<double>() == double(p2.age));
+  {
+    ds::node_view v;
+    ctx.clear();
+    cont5.make_table(&ctx, v);
+    v.traverse(&cont5, &print);
+    std::cout << "\n";
   }
+
+  return 0;
 }

@@ -11,6 +11,7 @@ project(devils_script)
 enable_language(CXX)
 
 option(DS_BUILD_TESTS "Build tests for devils_script" ON)
+option(DS_BUILD_EXAMPLES "Build examples for devils_script" ON)
 
 include_directories(
   include/
@@ -55,6 +56,26 @@ else()
     $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
     $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
   )
+endif()
+
+if (DS_BUILD_EXAMPLES)
+  add_executable (devils_script_example_desc examples/desc.cpp)
+  set_property(TARGET devils_script_example_desc PROPERTY CXX_STANDARD 20)
+  target_link_libraries(devils_script_example_desc devils_script)
+  if (MSVC)
+    target_compile_options(devils_script_example_desc PRIVATE
+      /permissive-
+      $<$<CONFIG:Debug>:/Od /Zi /GR- /Wall>
+      $<$<CONFIG:Release>:/O2 /DNDEBUG /GR- /Wall>
+      $<$<CONFIG:RelWithDebInfo>:/O2 /Zi /DNDEBUG /GR- /Wall>
+    )
+  else()
+    target_compile_options(devils_script_example_desc PRIVATE
+      $<$<CONFIG:Debug>:-Wall -Wextra -g -fno-rtti>
+      $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
+      $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
+    )
+  endif()
 endif()
 
 if (DS_BUILD_TESTS) 

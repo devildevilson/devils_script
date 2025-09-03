@@ -732,6 +732,9 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
   std::string_view name = token;
   if (name == "__empty_lvalue") name = ctx->function_names.back();
 
+  const bool is_effect = utils::is_void_v<ret_type>;
+  const bool has_return = !utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>;
+
   //const auto curfname = ctx->function_names.back();
   if (!check_is_str_part_of(scr->globals[0], name)) {
     const auto id = find_basicf(name);
@@ -739,7 +742,7 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
 
     container::command_description desc(
       { static_cast<size_t>(id), SIZE_MAX }, args_count,
-      requires_scope, is_not_member_func, !utils::is_void_v<ret_type>, ctx->nest_level, SIZE_MAX
+      requires_scope, is_not_member_func, has_return, is_effect, ctx->nest_level, SIZE_MAX
     );
     scr->descs.emplace_back(desc);
   } else {
@@ -750,7 +753,7 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
 
     container::command_description desc(
       { fname_start, fname_size }, args_count,
-      requires_scope, is_not_member_func, !utils::is_void_v<ret_type>, ctx->nest_level, SIZE_MAX
+      requires_scope, is_not_member_func, has_return, is_effect, ctx->nest_level, SIZE_MAX
     );
     scr->descs.emplace_back(desc);
   }
@@ -772,7 +775,7 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
 
   container::command_description desc(
     { static_cast<size_t>(basicf::conversion), SIZE_MAX},
-    1, false, true, true, ctx->nest_level, SIZE_MAX
+    1, false, true, true, false, ctx->nest_level, SIZE_MAX
   );
   scr->descs.emplace_back(desc);
 
