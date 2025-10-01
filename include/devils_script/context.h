@@ -165,11 +165,11 @@ bool context::stack_t<N>::is(const int64_t index) const {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   if constexpr (is_typeless_v<basic_T>) {
-    return final_index >= 0 && final_index < _size;
+    return final_index >= 0 && final_index < int64_t(_size);
   } else if constexpr (std::is_pointer_v<basic_T>) {
     using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
-    return final_index >= 0 && final_index < _size && (_types[final_index] == utils::type_name<no_ptr_t*>() || _types[final_index] == utils::type_name<const no_ptr_t*>());
-  } else return final_index >= 0 && final_index < _size && _types[final_index] == utils::type_name<basic_T>();
+    return final_index >= 0 && final_index < int64_t(_size) && (_types[final_index] == utils::type_name<no_ptr_t*>() || _types[final_index] == utils::type_name<const no_ptr_t*>());
+  } else return final_index >= 0 && final_index < int64_t(_size) && _types[final_index] == utils::type_name<basic_T>();
 }
 
 template <size_t N>
@@ -235,7 +235,7 @@ template <typename T> requires(valid_stack_type<T>)
 void context::stack_t<N>::set(const int64_t index, const T& val) {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  if (final_index >= _size) throw std::runtime_error("Stack overflow");
+  if (final_index >= int64_t(_size)) throw std::runtime_error("Stack overflow");
   if constexpr (is_typeless_v<basic_T>) {
     //_data[final_index].set(std::forward<basic_T>(val));
     memcpy(_data[final_index].mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
@@ -278,7 +278,7 @@ auto context::stack_t<N>::get_view() const -> stack_element::view {
 template <size_t N>
 auto context::stack_t<N>::get_view(const int64_t index) const -> stack_element::view {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  if (final_index >= _size) return stack_element::view();
+  if (final_index >= int64_t(_size)) return stack_element::view();
   return stack_element::view(_data[final_index].mem, _types[final_index]);
 }
 
@@ -290,8 +290,8 @@ void context::stack_t<N>::erase() {
 template <size_t N>
 void context::stack_t<N>::erase(const int64_t index) {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  if (final_index == _size-1) erase();
-  else if (final_index < _size-1) {
+  if (final_index == int64_t(_size)-1) erase();
+  else if (final_index < int64_t(_size)-1) {
     memmove(&_data[final_index], &_data[final_index+1], sizeof(char) * MAXIMUM_STACK_VAL_SIZE);
     memmove(&_types[final_index], &_types[final_index+1], sizeof(char) * MAXIMUM_STACK_VAL_SIZE);
     _size -= 1;
@@ -312,7 +312,7 @@ stack_element context::stack_t<N>::element() const {
 template <size_t N>
 stack_element context::stack_t<N>::element(const int64_t index) const {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < _size ? _data[final_index] : stack_element();
+  return final_index < int64_t(_size) ? _data[final_index] : stack_element();
 }
 
 template <size_t N>
@@ -323,7 +323,7 @@ std::string_view context::stack_t<N>::type() const {
 template <size_t N>
 std::string_view context::stack_t<N>::type(const int64_t index) const {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < _size ? _types[final_index] : std::string_view();
+  return final_index < int64_t(_size) ? _types[final_index] : std::string_view();
 }
 
 template <size_t N>
@@ -340,7 +340,7 @@ void context::stack_t<N>::push(const std::string_view& type, const stack_element
 template <size_t N>
 bool context::stack_t<N>::invalid(const int64_t index) const {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < _size ? _data[final_index].invalid() : true;
+  return final_index < int64_t(_size) ? _data[final_index].invalid() : true;
 }
 
 template <size_t N>
@@ -348,7 +348,7 @@ template <typename T> requires(valid_stack_type<T>)
 auto context::stack_t<N>::rawget(const size_t index) const -> final_stack_el_t<T>* {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < _size ? _data[final_index].template rawget<basic_T>() : nullptr;
+  return final_index < int64_t(_size) ? _data[final_index].template rawget<basic_T>() : nullptr;
 }
 
 template <typename T> requires(valid_stack_type<T>)

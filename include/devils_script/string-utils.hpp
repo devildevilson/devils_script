@@ -137,7 +137,7 @@ constexpr std::string_view trim(const std::string_view &input) {
   int64_t right = 0;
   int64_t left = input.size() - 1;
 
-  for (; right < input.size() && is_whitespace(input[right]); ++right) {}
+  for (; right < int64_t(input.size()) && is_whitespace(input[right]); ++right) {}
   for (; left >= right && is_whitespace(input[left]); --left) {}
 
   if (right > left) return std::string_view();

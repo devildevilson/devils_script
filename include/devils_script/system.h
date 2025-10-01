@@ -717,15 +717,15 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
   constexpr bool is_not_member_func = is_not_member_function<F>;
   using scope_type = HT;
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
-  constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
-  using first_argument = utils::function_argument_type<F, first_argument_index>;
-  constexpr auto uftype = get_user_function_type<F>();
+  //constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
+  //using first_argument = utils::function_argument_type<F, first_argument_index>;
+  //constexpr auto uftype = get_user_function_type<F>();
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
-  constexpr bool is_special_case = args_count == 1 && (std::is_same_v<std::string_view, first_argument> || std::is_same_v<std::string, first_argument>);
-  constexpr bool change_scope_function = uftype == user_function_type::object && args_count == 0;
+  //constexpr bool is_special_case = args_count == 1 && (std::is_same_v<std::string_view, first_argument> || std::is_same_v<std::string, first_argument>);
+  //constexpr bool change_scope_function = uftype == user_function_type::object && args_count == 0;
   using ret_type = std::remove_cvref_t<utils::function_result_type<F>>;
-  constexpr auto ret_type_name = utils::type_name<ret_type>();
+  //constexpr auto ret_type_name = utils::type_name<ret_type>();
 
   if (scr->globals.empty()) raise_error(std::format("scr->globals is empty????"));
 
@@ -771,7 +771,7 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
   if (!std::is_fundamental_v<FROM> || !std::is_fundamental_v<TO>) raise_error(std::format("Could not convert from '{}' to '{}'", utils::type_name<FROM>(), utils::type_name<TO>()));
 
   const function_t fs[] = { &convert_unsafe<FROM, TO>, &convert<FROM, TO> };
-  scr->cmds.push_back(container::command(fs[size_t(safety())], 0ll));
+  scr->cmds.push_back(container::command(fs[size_t(safety())], INT64_C(0)));
 
   container::command_description desc(
     { static_cast<size_t>(basicf::conversion), SIZE_MAX},
@@ -815,7 +815,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
     constexpr auto uftype = get_user_function_type<F>();
     constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
     using first_argument = final_stack_el_t<utils::function_argument_type<F, first_argument_index>>;
-    constexpr size_t function_args_count = args_count;
+    //constexpr size_t function_args_count = args_count;
     constexpr bool unlimited_args = args_count == 2 &&
       std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_argument_type<F, first_argument_index + 1>>>&&
       std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_result_type<F>>>;
@@ -861,7 +861,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         ctx->unlimited_func_index = ctx->function_names.size() - 1;
 
         // command_block b(args, 1) is first argument
-        sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block& arg) {
+        sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
           if (index == 0) return;
 
           constexpr function_t fs[] = { &userfunc_unsafe<F, f, HT, vf, eff>, &userfunc<F, f, HT, vf, eff> };
@@ -937,7 +937,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
-  constexpr auto uftype = get_user_function_type<F>();
+  //constexpr auto uftype = get_user_function_type<F>();
   constexpr auto parse_ftype = command_data::ftype::function_t;
   constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
   constexpr bool unlimited_args = args_count == 2 &&
@@ -971,9 +971,9 @@ void system::register_operator(std::string name, const std::string_view& propert
   if (itr->second.empty()) raise_error(std::format("Could not find function '{}'", properties_as));
 
   operator_props ps;
-  ps.priority = itr->second.begin()->priority;
-  ps.assoc = itr->second.begin()->assoc;
-  ps.mtype = static_cast<decltype(ps.mtype)>(itr->second.begin()->arg_count);
+  ps.priority = itr->second.begin()->second.priority;
+  ps.assoc = itr->second.begin()->second.assoc;
+  ps.mtype = static_cast<decltype(ps.mtype)>(itr->second.begin()->second.arg_count);
 
   register_operator<F, f, HT, vf>(std::move(name), ps, std::move(init_f));
 }
@@ -997,7 +997,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
   using first_argument = final_stack_el_t<utils::function_argument_type<F, first_argument_index>>;
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
-  constexpr size_t function_args_count = args_count;
+  //constexpr size_t function_args_count = args_count;
   constexpr auto parse_ftype = command_data::ftype::operator_t;
   constexpr bool unlimited_args = args_count == 2 &&
     std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_argument_type<F, first_argument_index + 1>>>&&
@@ -1024,7 +1024,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
         int64_t scope_index = INT64_MAX;
         if constexpr (requires_scope) {
           scope_index = ctx->scope_stack.back();
-          if (!ctx->is_scope<scope_type>()) sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->current_scope_type(), curfname, scope_type_name));
+          if (!ctx->is_scope<scope_type>()) sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->current_scope_type(), curfname, stn));
         }
 
         if constexpr (!unlimited_args) {
@@ -1034,7 +1034,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
         std::vector<size_t> jumps;
         if constexpr (unlimited_args) {
           size_t curpos = scr->cmds.size();
-          sys->parse_args<first_argument>(ctx, scr, args, 1, 0, {}, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block& arg) {
+          sys->parse_args<first_argument>(ctx, scr, args, 1, 0, {}, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
             if (index == 0) return;
 
             constexpr function_t fs[] = { &mathfunc_unsafe<F, f, HT, vf>, &mathfunc<F, f, HT, vf> };
@@ -1104,7 +1104,7 @@ template<typename F, F f, typename HT, is_valid_t<HT> vf>
   requires(utils::is_function_v<F> && valid_stack_type_v<HT>)
 void system::register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
   using scope_type = std::remove_cvref_t<HT>;
-  constexpr auto uftype = get_user_function_type<F, utils::function_result_type<F>, true>();
+  //constexpr auto uftype = get_user_function_type<F, utils::function_result_type<F>, true>();
   constexpr auto parse_ftype = command_data::ftype::function_t;
   using ret_type = final_stack_el_t<utils::function_result_type<F>>;
 
@@ -1125,6 +1125,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
       constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
       const auto curfname = ctx->function_names.back();
       using ret_type = final_stack_el_t<utils::function_result_type<F>>;
+      constexpr auto stn = scope_type_name<scope_type>();
 
       if constexpr (!is_valid_argument_function_v<first_argument>) sys->raise_error(std::format("At least one argument must be a function in iterator function '{}'", curfname));
 
@@ -1132,14 +1133,12 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
       if (!init_f) {
         if constexpr (requires_scope) {
           scope_index = ctx->scope_stack.back();
-          if (!ctx->is_scope<scope_type>()) sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->current_scope_type(), curfname, scope_type_name<scope_type>()));
+          if (!ctx->is_scope<scope_type>()) sys->raise_error(std::format("Stack index {} contains '{}' type, but function '{}' required '{}' type", scope_index, ctx->current_scope_type(), curfname, stn));
         }
       }
 
       const bool expected_void = type_is_void(ctx->expected_type);
       if (expected_void && uftype != user_function_type::iterator_effect) sys->raise_error(std::format("Effect iterator is outside of effect scriptblock?"));
-
-      bool has_count = false;
 
       if (init_f) {
         std::invoke(init_f, sys, ctx, scr, args, func_args_names);
@@ -1149,7 +1148,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
         sys->setup_description<F, f, HT, vf>(ctx, scr, args.name());
 
         std::vector<size_t> jumps;
-        utils::static_for<args_count>([&](auto index) {
+        utils::static_for<args_count>([&](auto) {
           const size_t jump_index = sys->push_basic_function(ctx, scr, basicf::jump, 0);
           jumps.push_back(jump_index);
         });

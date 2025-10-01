@@ -18,14 +18,14 @@ static constexpr int64_t make_mask(const size_t count) {
 }
 
 int64_t packstrid(const uint8_t global_index, const uint32_t pos, const uint32_t size) noexcept {
-  return (int64_t(global_index) << packed_pos_bit_size + packed_size_bit_size) | (int64_t(pos) << packed_size_bit_size) | (int64_t(size));
+  return (int64_t(global_index) << (packed_pos_bit_size + packed_size_bit_size)) | (int64_t(pos) << packed_size_bit_size) | (int64_t(size));
 }
 
 std::tuple<uint8_t, uint32_t, uint32_t> unpackstrid(const int64_t value) noexcept {
   constexpr int64_t index_mask = make_mask(sizeof(uint8_t) * CHAR_BIT);
   constexpr int64_t pos_mask = make_mask(packed_pos_bit_size);
   constexpr int64_t size_mask = make_mask(packed_size_bit_size);
-  return std::make_tuple(uint8_t((value >> packed_pos_bit_size + packed_size_bit_size) & index_mask), uint32_t((value >> packed_size_bit_size) & pos_mask), uint32_t((value) & pos_mask));
+  return std::make_tuple(uint8_t((value >> (packed_pos_bit_size + packed_size_bit_size)) & index_mask), uint32_t((value >> packed_size_bit_size) & pos_mask), uint32_t((value) & pos_mask));
 }
 
 // влияет ли endian на это дело?

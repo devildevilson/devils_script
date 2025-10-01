@@ -391,7 +391,7 @@ void system::rpn_conversion_ctx::convert(const system* sys, const std::string_vi
     const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(rvalue_funcname);
     if (ftype == system::command_data::ftype::function_t) {
       if (callstack.empty()) sys->raise_error(std::format("Parsing error: found function '{}' without callstack", top.token));
-      const size_t callstack_args_count = callstack.back();
+      //const size_t callstack_args_count = callstack.back();
       callstack.pop_back();
       // useless check?
       //if (arg_count != INT32_MAX && top.args_count < callstack_args_count) sys->raise_error(std::format("Function '{}' expects {} arguments but {} is provided", top.token, top.args_count, callstack_args_count));
@@ -443,7 +443,7 @@ size_t system::rpn_conversion_ctx::convert_block(const system* sys, const std::s
 
     std::string_view lfn = "__empty_lvalue";
 
-    size_t found_function_args_count = 0;
+    //size_t found_function_args_count = 0;
     std::array<block, 16 * 3 + 1> arr;
     size_t lvalue_tokens_count = 0;
     if (!lvalue.empty()) {
@@ -451,8 +451,8 @@ size_t system::rpn_conversion_ctx::convert_block(const system* sys, const std::s
       lvalue_tokens_count = count;
 
       if (!func_name.empty()) {
-        const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(func_name);
-        found_function_args_count = arg_count;
+        //const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(func_name);
+        //found_function_args_count = arg_count;
         lfn = func_name;
       }
     }
@@ -505,6 +505,7 @@ std::tuple<std::string_view, size_t> system::rpn_conversion_ctx::convert_scope(c
   std::string_view lfn;
   for (size_t i = 0; i < count; ++i) {
     if (!lfn.empty()) throw std::runtime_error(std::format("Could not parse expr '{}', found scope call stack after left value function", expr));
+    if (counter >= max_size) throw std::runtime_error(std::format("Could not parse expr '{}', not enough 'block' memory ({})", expr, max_size));
 
     std::array<std::string_view, 3> colon_arr;
     const size_t colon_count = utils::string::split(dot_arr[i], ":", colon_arr.data(), colon_arr.size());
@@ -656,15 +657,15 @@ static any_stack loadctx(thisctx, ctx_value) { return any_stack{}; }
 enum class arg_value {};
 static thisarg arg() { return thisarg{}; }
 // this way? or custom function?
-static any_stack loadarg(thisctx ctx, arg_value val) {
-  return ctx.ctx->get_arg<any_stack>(static_cast<size_t>(val));
-}
+//static any_stack loadarg(thisctx ctx, arg_value val) {
+  //return ctx.ctx->get_arg<any_stack>(static_cast<size_t>(val));
+//}
 
 static ignore_value ctx_set(arg_value) { return ignore_value{}; }
 static ignore_value ctx_set_as(arg_value) { return ignore_value{}; }
 
 // needs to be slightly rewritten
-static thisctxlist list(const thisctx& ctx, const std::string_view& name) { return thisctxlist{}; }
+static thisctxlist list(const thisctx&, const std::string_view&) { return thisctxlist{}; }
 static ignore_value add_to(const thisctxlist& l, const any_stack &val) {
   stack_element el;
   el.set(val.view());
@@ -696,28 +697,28 @@ static any_stack randomfn(double, const element_view&) { return any_stack{}; }
 template <typename F, F f>
 static void add_cmd(const system* sys, container* scr) {
   constexpr function_t fs[] = { &mathfunc_unsafe<F, f>, &mathfunc<F, f> };
-  scr->cmds.emplace_back(fs[size_t(sys->safety())], 0ll);
+  scr->cmds.emplace_back(fs[size_t(sys->safety())], INT64_C(0));
 }
 
 #define ADD_CMD(fn) add_cmd<decltype(&fn), fn>
 
 void system::init_basic_functions() {
-  RFI(internal::operator_and)("AND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::operator_and)("AND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     return sys->parse_block(ctx, scr, args, basicf::AND);
   });
-  RFI(internal::operator_or)("OR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::operator_or)("OR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     return sys->parse_block(ctx, scr, args, basicf::OR);
   });
-  RFI(internal::operator_and)("NAND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::operator_and)("NAND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     return sys->parse_block(ctx, scr, args, basicf::NAND);
   });
-  RFI(internal::operator_or)("NOR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::operator_or)("NOR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     return sys->parse_block(ctx, scr, args, basicf::NOR);
   });
   RFI(internal::rawadd)("ADD");
   RFI(internal::rawmul)("MUL");
   // is 'while (ctx->pop_while_ignore())' an overkill for this situations?
-  RFI(internal::value_or)("value_or", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string> &func_args_names) -> size_t {
+  RFI(internal::value_or)("value_or", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string> &) -> size_t {
     if (ctx->ftype != function_type::lvalue) sys->raise_error(std::format("'value_or' expected to be lvalue"));
     if (type_is_void(ctx->expected_type)) sys->raise_error(std::format("Could not use 'value_or' in this context, is it effect block?"));
 
@@ -769,7 +770,7 @@ void system::init_basic_functions() {
     return args.size();
   });
   
-  RFI(internal::thisfn)("this", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::thisfn)("this", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     if (ctx->scope_stack.size() == 0) sys->raise_error(std::format("Function 'this' requires at least 1 element in scope_stack"));
     sys->push_basic_function(ctx, scr, basicf::pushthis, ctx->current_scope_index());
     ctx->push(ctx->current_scope_type());
@@ -784,7 +785,7 @@ void system::init_basic_functions() {
     return args.size();
   });
   
-  RFI(internal::prevfn)("prev", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::prevfn)("prev", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     if (ctx->scope_stack.size() <= 1 + ctx->prev_chaining) sys->raise_error(std::format("Function 'prev' requires at least 2 elements in scope_stack"));
 
     // mess =(
@@ -803,7 +804,7 @@ void system::init_basic_functions() {
   });
 
   // jump out of the script internal ctxs
-  RFI(internal::prevfn)("outer", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::prevfn)("outer", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     size_t counter = 0;
     size_t fin_index = SIZE_MAX;
     for (auto itr = ctx->scope_stack.rbegin(); itr != ctx->scope_stack.rend(); ++itr) {
@@ -840,7 +841,7 @@ void system::init_basic_functions() {
   });
 
   // making equality for every possible combinations...
-  const auto eqfn = [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  const auto eqfn = [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     const auto expected = utils::type_name<element_view>();
     size_t offset = 1;
     do { 
@@ -910,7 +911,7 @@ void system::init_basic_functions() {
 
   // find first 'condition' that true and compute a block
   // simple "if then else"
-  RFI(internal::selectfn)("select", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) -> size_t {
+  RFI(internal::selectfn)("select", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
     const auto exp = ctx->expected_type;
     if (type_is_string(exp) && type_is_object(exp)) sys->raise_error(std::format("Current language design makes 'select' meaningless in string and object blocks"));
 
@@ -956,7 +957,7 @@ void system::init_basic_functions() {
   
   // while 'condition' block is true, do command in a block
   // when false, jump out
-  RFI(internal::selectfn)("sequence", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) {
+  RFI(internal::selectfn)("sequence", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
     // what to do when no value? now i try to push default one
     // but maybe better to push ignore_value?
 
@@ -1011,8 +1012,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::switchfn)("switch", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) {
-    const auto exp = ctx->expected_type;
+  RFI(internal::switchfn)("switch", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+    //const auto exp = ctx->expected_type;
 
     std::vector<size_t> jumps;
     std::vector<size_t> values_indicies;
@@ -1091,7 +1092,7 @@ void system::init_basic_functions() {
   RFI(internal::rawmore)("MORE");
   RFI(internal::rawless)("LESS");
 
-  RFI(internal::chance)("chance", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::chance)("chance", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block&, const std::vector<std::string>&) {
     const auto val = sys->gen_value();
     sys->push_basic_function(ctx, scr, basicf::chance, std::bit_cast<int64_t>(val)); // push
     return 0;
@@ -1112,7 +1113,6 @@ void system::init_basic_functions() {
     size_t last_index = stack_index;
 
     {
-      size_t counter = 0;
       size_t offset = 1;
       while (offset < args.size()) {
         const auto curblock = command_block(args, offset);
@@ -1687,7 +1687,6 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
       return 1;
     }
 
-    size_t parse_count = 0;
     {
       set_function_type sft(ctx, function_type::lvalue);
 
@@ -1835,35 +1834,35 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
   container::command cmd;
   switch (curid) {
     case basicf::ADD: {
-      cmd = container::command(&mathfunc<decltype(&internal::rawadd), &internal::rawadd>, 0ll);
+      cmd = container::command(&mathfunc<decltype(&internal::rawadd), &internal::rawadd>, INT64_C(0));
       break;
     }
 
     case basicf::MUL: {
-      cmd = container::command(&mathfunc<decltype(&internal::rawmul), &internal::rawmul>, 0ll);
+      cmd = container::command(&mathfunc<decltype(&internal::rawmul), &internal::rawmul>, INT64_C(0));
       break;
     }
 
     case basicf::AND: {
-      cmd = container::command(&andjump, 0ll);
+      cmd = container::command(&andjump, INT64_C(0));
       boolean_and_block = true;
       break;
     }
 
     case basicf::OR: {
-      cmd = container::command(&orjump, 0ll);
+      cmd = container::command(&orjump, INT64_C(0));
       boolean_or_block = true;
       break;
     }
 
     case basicf::NAND: {
-      cmd = container::command(&andjump, 0ll);
+      cmd = container::command(&andjump, INT64_C(0));
       boolean_and_block = true;
       break;
     }
 
     case basicf::NOR: {
-      cmd = container::command(&orjump, 0ll);
+      cmd = container::command(&orjump, INT64_C(0));
       boolean_or_block = true;
       break;
     }
