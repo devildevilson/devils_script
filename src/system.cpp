@@ -76,7 +76,7 @@ basicf find_basicf(const std::string_view& str) noexcept {
 
 template <typename T1, typename T2> requires(is_typeless_v<T1> && is_typeless_v<T2>)
 bool operator==(const T1& s1, const T2& s2) noexcept {
-  return memcmp(s1._mem, s2._mem, MAXIMUM_STACK_VAL_SIZE) && s1.type() == s2.type();
+  return memcmp(s1._mem, s2._mem, MAXIMUM_STACK_VAL_SIZE) == 0 && s1.type() == s2.type();
 }
 
 template <typename T1, typename T2> requires(is_typeless_v<T1> && is_typeless_v<T2>)
@@ -171,24 +171,6 @@ system::push_list_index_upvalue::~push_list_index_upvalue() noexcept { ctx->list
 system::change_chain_index::change_chain_index(parse_ctx* ctx) noexcept : ctx(ctx) { ctx->prev_chaining += 2; }
 system::change_chain_index::~change_chain_index() noexcept { ctx->prev_chaining -= 2; }
 
-//void print_tokens(const std::string_view* strs, const size_t count) {
-//  std::cout << strs[0];
-//  for (size_t i = 1; i < count; ++i) {
-//    std::cout << " , " << strs[i];
-//  }
-//  std::cout << "\n";
-//}
-//
-//void print_tokens(const system::rpn_conversion_ctx::block* blocks, const size_t count) {
-//  if (count == 0) { std::cout << "\n"; return; }
-//
-//  std::cout << blocks[0].token;
-//  for (size_t i = 1; i < count; ++i) {
-//    std::cout << " , " << blocks[i].token;
-//  }
-//  std::cout << "\n";
-//}
-
 static size_t compute_argument_size(const std::vector<system::rpn_conversion_ctx::block> &output, const size_t args_count) {
   size_t counter = 0;
   size_t index = output.size()-1;
@@ -232,21 +214,13 @@ using as_t = system::command_data::associativity;
 using mf_t = system::command_data::math_ftype;
 using f_t = system::command_data::ftype;
 
-static bool can_be_forwarded_to_output(const std::string_view& token, const int32_t args_count, const as_t assoc, const f_t ftype) {
+static bool can_be_forwarded_to_output(const std::string_view& token, const int32_t args_count, const as_t, const f_t ftype) {
   return !token.empty() && token != "," && token != "(" && token != ")" && ((ftype == f_t::operator_t && static_cast<mf_t>(args_count) == mf_t::postfix) || (ftype == f_t::invalid) || (ftype == f_t::function_t && args_count == 0));
 }
 
 static bool is_prev_token_invalid(const system* sys, const std::string_view &prev_token) {
   return prev_token.empty() || prev_token == "(" || prev_token == "," || sys->get_token_type(prev_token) == f_t::operator_t;
 }
-
-//static void print_block_names(const system::rpn_conversion_ctx::block* blocks, const size_t size) {
-//  for (size_t i = 0; i < size; ++i) {
-//    const auto& b = blocks[i];
-//    std::cout << b.token << " ";
-//  }
-//  std::cout << "\n";
-//}
 
 void system::rpn_conversion_ctx::convert(const system* sys, const std::string_view& expr) {
   if (operators.empty()) sys->raise_error(std::format("rpn_conversion_ctx::operators is empty"));
@@ -500,7 +474,6 @@ std::tuple<std::string_view, size_t> system::rpn_conversion_ctx::convert_scope(c
   const size_t count = utils::string::split(expr, ".", dot_arr.data(), dot_arr.size());
   if (count == SIZE_MAX) throw std::runtime_error(std::format("Could not parse expr '{}', too many dots", expr));
 
-  size_t cur = 0;
   size_t size = 0;
   std::string_view lfn;
   for (size_t i = 0; i < count; ++i) {
@@ -513,10 +486,8 @@ std::tuple<std::string_view, size_t> system::rpn_conversion_ctx::convert_scope(c
 
     arr[counter] = { colon_arr[0], 0, 1 }; counter += 1;
     size += 1;
-    cur = counter;
     if (colon_count > 2) {
       arr[counter] = { colon_arr[1], 1, 2 }; counter += 1;
-      cur = counter;
       arr[counter] = { colon_arr[2], 0, 1 }; counter += 1;
       size += 2;
     } else if (colon_count == 2) {

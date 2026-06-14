@@ -489,7 +489,7 @@ any_stack::any_stack(const T& val) noexcept : _type(utils::type_name<final_stack
   if constexpr (is_typeless_v<basic_T>) {
     _type = val.type();
     memcpy(_mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
-  } else *reinterpret_cast<basic_T*>(_mem[0]) = val;
+  } else *reinterpret_cast<basic_T*>(&_mem[0]) = val;
 }
 
 template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)

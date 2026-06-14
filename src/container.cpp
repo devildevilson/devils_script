@@ -110,8 +110,8 @@ size_t container::find_saved(const std::string_view& name) const {
 }
 
 std::string_view container::get_saved_name(const size_t index) const {
-  if (index >= args.size()) return std::string_view();
-  return get_string(args[index].name);
+  if (index >= saved.size()) return std::string_view();
+  return get_string(saved[index].name);
 }
 
 size_t container::find_list(const std::string_view& name) const {

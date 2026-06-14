@@ -16,19 +16,18 @@ void remove_comment_blocks(std::string& script) noexcept {
   size_t pos_line_comment = std::string::npos;
   size_t pos_block_comment = std::string::npos;
   size_t curpos = 0;
-  size_t endindex = 0;
   while (curpos < script.size()) {
     if (pos_line_comment != std::string::npos) {
       const size_t end_index = script.find("\n", curpos);
       auto beg = script.begin()+curpos;
       auto end = end_index != std::string::npos ? script.begin()+end_index : script.end();
-      std::transform(beg, end, beg, [](const char& c) { return ' '; });
+      std::transform(beg, end, beg, [](const char&) { return ' '; });
       curpos = end_index;
     } else if (pos_block_comment != std::string::npos) {
       const size_t end_index = script.find("*/", curpos);
       auto beg = script.begin()+curpos;
       auto end = end_index != std::string::npos ? script.begin()+end_index : script.end();
-      std::transform(beg, end, beg, [](const char& c) { return ' '; });
+      std::transform(beg, end, beg, [](const char&) { return ' '; });
       curpos = end_index;
     } else {
       pos_line_comment = script.find("//", curpos);

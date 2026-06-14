@@ -25,7 +25,7 @@ std::tuple<uint8_t, uint32_t, uint32_t> unpackstrid(const int64_t value) noexcep
   constexpr int64_t index_mask = make_mask(sizeof(uint8_t) * CHAR_BIT);
   constexpr int64_t pos_mask = make_mask(packed_pos_bit_size);
   constexpr int64_t size_mask = make_mask(packed_size_bit_size);
-  return std::make_tuple(uint8_t((value >> (packed_pos_bit_size + packed_size_bit_size)) & index_mask), uint32_t((value >> packed_size_bit_size) & pos_mask), uint32_t((value) & pos_mask));
+  return std::make_tuple(uint8_t((value >> (packed_pos_bit_size + packed_size_bit_size)) & index_mask), uint32_t((value >> packed_size_bit_size) & pos_mask), uint32_t((value) & size_mask));
 }
 
 // влияет ли endian на это дело?
@@ -51,7 +51,7 @@ bool check_value(const int64_t val, const size_t bits) noexcept {
   return (val & index_mask) == 0;
 }
 
-int64_t andjump(int64_t arg, context* ctx, const container* scr) {
+int64_t andjump(int64_t arg, context* ctx, const container*) {
   const bool b2 = ctx->stack.safe_pop<bool>();
   const bool b1 = ctx->stack.safe_pop<bool>();
   const bool res = b1 && b2;
@@ -60,7 +60,7 @@ int64_t andjump(int64_t arg, context* ctx, const container* scr) {
   return -1;
 }
 
-int64_t orjump(int64_t arg, context* ctx, const container* scr) {
+int64_t orjump(int64_t arg, context* ctx, const container*) {
   const bool b2 = ctx->stack.safe_pop<bool>();
   const bool b1 = ctx->stack.safe_pop<bool>();
   const bool res = b1 || b2;
@@ -69,13 +69,13 @@ int64_t orjump(int64_t arg, context* ctx, const container* scr) {
   return -1;
 }
 
-int64_t condjump(int64_t arg, context* ctx, const container* scr) {
+int64_t condjump(int64_t arg, context* ctx, const container*) {
   const bool b = ctx->stack.safe_pop<bool>();
   if (!b) ctx->current_index = arg - 1;
   return -1;
 }
 
-int64_t condjumpt(int64_t arg, context* ctx, const container* scr) {
+int64_t condjumpt(int64_t arg, context* ctx, const container*) {
   const bool b = ctx->stack.safe_pop<bool>();
   if (b) ctx->current_index = arg - 1;
   return -1;
@@ -93,7 +93,7 @@ int64_t condjumpt_get(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t andjump_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t andjump_unsafe(int64_t arg, context* ctx, const container*) {
   const bool b2 = ctx->stack.pop<bool>();
   const bool b1 = ctx->stack.pop<bool>();
   const bool res = b1 && b2;
@@ -102,7 +102,7 @@ int64_t andjump_unsafe(int64_t arg, context* ctx, const container* scr) {
   return -1;
 }
 
-int64_t orjump_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t orjump_unsafe(int64_t arg, context* ctx, const container*) {
   const bool b2 = ctx->stack.pop<bool>();
   const bool b1 = ctx->stack.pop<bool>();
   const bool res = b1 || b2;
@@ -111,13 +111,13 @@ int64_t orjump_unsafe(int64_t arg, context* ctx, const container* scr) {
   return -1;
 }
 
-int64_t condjump_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t condjump_unsafe(int64_t arg, context* ctx, const container*) {
   const bool b = ctx->stack.pop<bool>();
   if (!b) ctx->current_index = arg - 1;
   return -1;
 }
 
-int64_t condjumpt_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t condjumpt_unsafe(int64_t arg, context* ctx, const container*) {
   const bool b = ctx->stack.pop<bool>();
   if (b) ctx->current_index = arg - 1;
   return -1;
@@ -135,7 +135,7 @@ int64_t condjumpt_get_unsafe(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t jump(int64_t arg, context* ctx, const container* scr) {
+int64_t jump(int64_t arg, context* ctx, const container*) {
   ctx->current_index = arg - 1;
   return 0;
 }
@@ -154,39 +154,39 @@ int64_t orbin(int64_t, context* ctx, const container*) {
   return -1;
 }
 
-int64_t invb(int64_t arg, context* ctx, const container* scr) {
+int64_t invb(int64_t, context* ctx, const container*) {
   const bool b = ctx->stack.safe_pop<bool>();
   ctx->stack.push(!b);
   return 0;
 }
 
-int64_t sum(int64_t arg, context* ctx, const container* scr) {
+int64_t sum(int64_t, context* ctx, const container*) {
   const double n2 = ctx->stack.safe_pop<double>();
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(n1 + n2);
   return -1;
 }
 
-int64_t mul(int64_t arg, context* ctx, const container* scr) {
+int64_t mul(int64_t, context* ctx, const container*) {
   const double n2 = ctx->stack.safe_pop<double>();
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(n1 * n2);
   return -1;
 }
 
-int64_t neg(int64_t arg, context* ctx, const container* scr) {
+int64_t neg(int64_t, context* ctx, const container*) {
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(-n1);
   return 0;
 }
 
-int64_t pos(int64_t arg, context* ctx, const container* scr) {
+int64_t pos(int64_t, context* ctx, const container*) {
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(+n1);
   return 0;
 }
 
-int64_t invd(int64_t arg, context* ctx, const container* scr) {
+int64_t invd(int64_t, context* ctx, const container*) {
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(1.0 / n1);
   return 0;
@@ -247,39 +247,39 @@ int64_t orbin_unsafe(int64_t, context* ctx, const container*) {
   return -1;
 }
 
-int64_t invb_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t invb_unsafe(int64_t, context* ctx, const container*) {
   const bool b = ctx->stack.pop<bool>();
   ctx->stack.push(!b);
   return 0;
 }
 
-int64_t sum_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t sum_unsafe(int64_t, context* ctx, const container*) {
   const double n2 = ctx->stack.pop<double>();
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(n1 + n2);
   return -1;
 }
 
-int64_t mul_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t mul_unsafe(int64_t, context* ctx, const container*) {
   const double n2 = ctx->stack.pop<double>();
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(n1 * n2);
   return -1;
 }
 
-int64_t neg_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t neg_unsafe(int64_t, context* ctx, const container*) {
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(-n1);
   return 0;
 }
 
-int64_t pos_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t pos_unsafe(int64_t, context* ctx, const container*) {
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(+n1);
   return 0;
 }
 
-int64_t invd_unsafe(int64_t arg, context* ctx, const container* scr) {
+int64_t invd_unsafe(int64_t, context* ctx, const container*) {
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(1.0 / n1);
   return 0;
@@ -326,17 +326,17 @@ int64_t mulsetstack_unsafe(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t pushbool(int64_t arg, context* ctx, const container* scr) {
+int64_t pushbool(int64_t arg, context* ctx, const container*) {
   ctx->stack.push(bool(arg));
   return 1;
 }
 
-int64_t pushvalue(int64_t arg, context* ctx, const container* scr) {
+int64_t pushvalue(int64_t arg, context* ctx, const container*) {
   ctx->stack.push(std::bit_cast<double>(arg));
   return 1;
 }
 
-int64_t pushint(int64_t arg, context* ctx, const container* scr) {
+int64_t pushint(int64_t arg, context* ctx, const container*) {
   ctx->stack.push(arg);
   return 1;
 }
@@ -349,7 +349,7 @@ int64_t pushstring(int64_t arg, context* ctx, const container* scr) {
   return 1;
 }
 
-int64_t pushroot(int64_t arg, context* ctx, const container* scr) {
+int64_t pushroot(int64_t, context* ctx, const container*) {
   ctx->stack.push(ctx->safe_get_arg<any_stack>(0));
   return 1;
 }
@@ -368,7 +368,7 @@ int64_t pushprev(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-int64_t pushreturn(int64_t arg, context* ctx, const container* scr) {
+int64_t pushreturn(int64_t, context* ctx, const container*) {
   const auto &el = ctx->stack.element();
   const auto type = ctx->stack.type();
   ctx->stack.erase();
@@ -376,7 +376,7 @@ int64_t pushreturn(int64_t arg, context* ctx, const container* scr) {
   return 0;
 }
 
-int64_t pusharg(int64_t arg, context* ctx, const container* scr) {
+int64_t pusharg(int64_t, context*, const container*) {
   //ctx->stack.push(scr->args_type[arg], ctx->_args[arg]);
   return 1;
 }
@@ -388,12 +388,12 @@ int64_t pushinvalid(int64_t, context* ctx, const container*) {
   return 1;
 }
 
-int64_t erase(int64_t arg, context* ctx, const container* scr) {
+int64_t erase(int64_t arg, context* ctx, const container*) {
   ctx->stack.erase(arg);
   return -1;
 }
 
-int64_t pushcurrent(int64_t arg, context* ctx, const container*) {
+int64_t pushcurrent(int64_t, context* ctx, const container*) {
   ctx->stack.push(ctx->stack.get_view());
   return 1;
 }
@@ -416,17 +416,17 @@ int64_t pushcontext(int64_t, context* ctx, const container*) {
   return 1;
 }
 
-int64_t pushargvalue(int64_t arg, context* ctx, const container* scr) {
+int64_t pushargvalue(int64_t arg, context* ctx, const container*) {
   ctx->stack.push(ctx->get_arg<any_stack>(arg));
   return 1;
 }
 
-int64_t setargrvalue(int64_t arg, context* ctx, const container* scr) {
+int64_t setargrvalue(int64_t arg, context* ctx, const container*) {
   ctx->set_arg(arg, ctx->stack.pop<any_stack>());
   return -1;
 }
 
-int64_t setarglvalue(int64_t arg, context* ctx, const container* scr) {
+int64_t setarglvalue(int64_t arg, context* ctx, const container*) {
   const auto [id1, id2] = unpack2(arg);
   ctx->set_arg(id2, ctx->stack.get<any_stack>(id1));
   return 0;
