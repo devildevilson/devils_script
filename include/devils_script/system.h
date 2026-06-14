@@ -287,6 +287,56 @@ public:
     requires(utils::is_function_v<F>)
   void register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f = nullptr);
 
+  // --- preferred auto-f API: register_function<&fn> / register_function<&fn, ScopeT> ---
+  // thin forwarders to the typed overloads above, so call sites no longer repeat decltype(&fn)
+  template <auto f>
+    requires(valid_function_type<decltype(f)>)
+  void register_function(std::string name, std::vector<std::string> func_args_names = {}, custom_init_fn_t init_f = nullptr) {
+    register_function<decltype(f), f>(std::move(name), std::move(func_args_names), std::move(init_f));
+  }
+
+  template <auto f, typename HT, is_valid_t<HT> vf = &is_valid<HT>>
+    requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
+  void register_function(std::string name, std::vector<std::string> func_args_names = {}, custom_init_fn_t init_f = nullptr) {
+    register_function<decltype(f), f, HT, vf>(std::move(name), std::move(func_args_names), std::move(init_f));
+  }
+
+  template <auto f>
+    requires(valid_function_type<decltype(f)>)
+  void register_operator(std::string name, const std::string_view& properties_as, custom_init_fn_t init_f = nullptr) {
+    register_operator<decltype(f), f>(std::move(name), properties_as, std::move(init_f));
+  }
+
+  template <auto f, typename HT, is_valid_t<HT> vf = &is_valid<HT>>
+    requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
+  void register_operator(std::string name, const std::string_view& properties_as, custom_init_fn_t init_f = nullptr) {
+    register_operator<decltype(f), f, HT, vf>(std::move(name), properties_as, std::move(init_f));
+  }
+
+  template <auto f>
+    requires(valid_function_type<decltype(f)>)
+  void register_operator(std::string name, const operator_props& properties, custom_init_fn_t init_f = nullptr) {
+    register_operator<decltype(f), f>(std::move(name), properties, std::move(init_f));
+  }
+
+  template <auto f, typename HT, is_valid_t<HT> vf = &is_valid<HT>>
+    requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
+  void register_operator(std::string name, const operator_props& properties, custom_init_fn_t init_f = nullptr) {
+    register_operator<decltype(f), f, HT, vf>(std::move(name), properties, std::move(init_f));
+  }
+
+  template <auto f>
+    requires(utils::is_function_v<decltype(f)>)
+  void register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f = nullptr) {
+    register_function_iter<decltype(f), f>(std::move(name), std::move(func_args_names), std::move(init_f));
+  }
+
+  template <auto f, typename HT, is_valid_t<HT> vf = &is_valid<HT>>
+    requires(utils::is_function_v<decltype(f)> && valid_stack_type_v<HT>)
+  void register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f = nullptr) {
+    register_function_iter<decltype(f), f, HT, vf>(std::move(name), std::move(func_args_names), std::move(init_f));
+  }
+
   void register_function(command_data data);
 
   template <typename T>

@@ -99,11 +99,6 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
 namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 #endif
 
-#define RF(fn) register_function<decltype(&fn), &fn>
-#define RFH(fn, handle) register_function<decltype(&fn), &fn, handle>
-#define RFI(fn) register_function_iter<decltype(&fn), &fn>
-#define RFIH(fn, handle) register_function_iter<decltype(&fn), &fn, handle>
-
 bool print(const std::string_view& name, const std::string_view& desc, const size_t nest, const ds::any_stack& value, const ds::any_stack& scope) {
   for (size_t i = 0; i < nest; ++i) {
     std::cout << "  ";
@@ -160,25 +155,25 @@ int main() {
   sys.init_math();
 
   // Function with unique scope type can have same names
-  sys.RF(country::get_population)("population");
-  sys.RF(country::get_gdp)("gdp");
-  sys.RF(country::add_population)("add_population");
-  sys.RF(country::add_gdp)("add_gdp");
-  sys.RF(country::leader)("leader");
-  sys.RF(city_population)("population");
-  sys.RF(city_wealth)("wealth");
-  sys.RF(city_owner)("owner");
-  sys.RF(city_notable_people_count)("notable_people_count");
-  sys.RF(add_city_population)("add_population");
-  sys.RF(add_city_wealth)("add_wealth");
-  sys.RF(person_age)("age");
-  sys.RF(person_charisma)("charisma");
-  sys.RFH(person::inc_age, handle<person>)("inc_age");
-  sys.RFH(person::add_charisma, handle<person>)("add_charisma");
-  sys.RFH(person::country, handle<person>)("country");
-  sys.RFH(person::living_in, handle<person>)("living_in");
-  sys.RFI(each_city)("each_city", { "value" });
-  sys.RFI(each_notable_person)("each_notable_person", { "filter", "value" });
+  sys.register_function<&country::get_population>("population");
+  sys.register_function<&country::get_gdp>("gdp");
+  sys.register_function<&country::add_population>("add_population");
+  sys.register_function<&country::add_gdp>("add_gdp");
+  sys.register_function<&country::leader>("leader");
+  sys.register_function<&city_population>("population");
+  sys.register_function<&city_wealth>("wealth");
+  sys.register_function<&city_owner>("owner");
+  sys.register_function<&city_notable_people_count>("notable_people_count");
+  sys.register_function<&add_city_population>("add_population");
+  sys.register_function<&add_city_wealth>("add_wealth");
+  sys.register_function<&person_age>("age");
+  sys.register_function<&person_charisma>("charisma");
+  sys.register_function<&person::inc_age, handle<person>>("inc_age");
+  sys.register_function<&person::add_charisma, handle<person>>("add_charisma");
+  sys.register_function<&person::country, handle<person>>("country");
+  sys.register_function<&person::living_in, handle<person>>("living_in");
+  sys.register_function_iter<&each_city>("each_city", { "value" });
+  sys.register_function_iter<&each_notable_person>("each_notable_person", { "filter", "value" });
 
   const auto cont1 = sys.parse<double, handle<person>>(scripts[0]);
   const auto cont2 = sys.parse<double, handle<person>>(scripts[1]);

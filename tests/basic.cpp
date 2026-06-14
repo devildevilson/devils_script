@@ -69,7 +69,7 @@ TEST_CASE("Script basics") {
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
-      sys.register_function<decltype(&g), &g>("g");
+      sys.register_function<&g>("g");
       cont2 = sys.parse<double, void>(script4);
     }
 
@@ -98,7 +98,7 @@ TEST_CASE("Script functions and functions call") {
   SUBCASE("script1") {
     ds::system sys;
     sys.init_math();
-    sys.register_function<decltype(&f), &f>("ADD"); // it is required for arithmetic scripts
+    sys.register_function<&f>("ADD"); // it is required for arithmetic scripts
     const auto cont = sys.parse<double, void>(script1);
     ds::context ctx;
     cont.process(&ctx);
@@ -110,9 +110,9 @@ TEST_CASE("Script functions and functions call") {
     using mf = ds::system::command_data::math_ftype;
     using at = ds::system::command_data::associativity;
     ds::system sys;
-    sys.register_function<decltype(&f), &f>("ADD"); // it is required for arithmetic scripts
-    sys.register_function<decltype(&f), &f>("f");
-    sys.register_operator<decltype(&f), &f>("+", { 11, mf::binary, at::left });
+    sys.register_function<&f>("ADD"); // it is required for arithmetic scripts
+    sys.register_function<&f>("f");
+    sys.register_operator<&f>("+", { 11, mf::binary, at::left });
     const auto cont = sys.parse<double, void>(script2);
     ds::context ctx;
     cont.process(&ctx);
@@ -122,8 +122,8 @@ TEST_CASE("Script functions and functions call") {
 
   SUBCASE("script3") {
     ds::system sys;
-    sys.register_function<decltype(&f), &f>("ADD"); // it is required for arithmetic scripts
-    sys.register_function<decltype(&f), &f>("f");
+    sys.register_function<&f>("ADD"); // it is required for arithmetic scripts
+    sys.register_function<&f>("f");
     const auto cont = sys.parse<double, void>(script3);
     ds::context ctx;
     cont.process(&ctx);
@@ -135,8 +135,8 @@ TEST_CASE("Script functions and functions call") {
     using mf = ds::system::command_data::math_ftype;
     using at = ds::system::command_data::associativity;
     ds::system sys;
-    sys.register_function<decltype(&m), &m>("AND"); // it is required for boolean scripts
-    sys.register_operator<decltype(&m), &m>("m", { 3, mf::binary, at::left });
+    sys.register_function<&m>("AND"); // it is required for boolean scripts
+    sys.register_operator<&m>("m", { 3, mf::binary, at::left });
     const auto cont = sys.parse<bool, void>(script4);
     ds::context ctx;
     cont.process(&ctx);
@@ -148,8 +148,8 @@ TEST_CASE("Script functions and functions call") {
     using mf = ds::system::command_data::math_ftype;
     using at = ds::system::command_data::associativity;
     ds::system sys;
-    sys.register_function<decltype(&m), &m>("AND"); // it is required for boolean scripts
-    sys.register_operator<decltype(&m), &m>("m", { 3, mf::binary, at::left });
+    sys.register_function<&m>("AND"); // it is required for boolean scripts
+    sys.register_operator<&m>("m", { 3, mf::binary, at::left });
     const auto cont = sys.parse<bool, void>(script5);
     ds::context ctx;
     cont.process(&ctx);
@@ -185,15 +185,15 @@ TEST_CASE("Advanced example") {
   sys.init_basic_functions();
   sys.init_math();
 
-  sys.register_function<decltype(&func1), func1>("func1");
-  sys.register_function<decltype(&func2), func2>("func2");
-  sys.register_function<decltype(&func3), func3>("func3");
-  sys.register_function<decltype(&func4), func4>("func4");
-  sys.register_function<decltype(&func7), func7>("func7");
-  sys.register_function<decltype(&to_scope3), to_scope3>("to_scope3");
-  sys.register_function<decltype(&to_scope2), to_scope2>("to_scope2");
-  sys.register_function<decltype(&func8), func8>("func8");
-  sys.register_function<decltype(&func9), func9>("func9");
+  sys.register_function<&func1>("func1");
+  sys.register_function<&func2>("func2");
+  sys.register_function<&func3>("func3");
+  sys.register_function<&func4>("func4");
+  sys.register_function<&func7>("func7");
+  sys.register_function<&to_scope3>("to_scope3");
+  sys.register_function<&to_scope2>("to_scope2");
+  sys.register_function<&func8>("func8");
+  sys.register_function<&func9>("func9");
 
   SUBCASE("script1") {
     const auto cont = sys.parse<scope1, scope1>(script1);
@@ -268,18 +268,18 @@ TEST_CASE("Iterators example") {
   sys.init_basic_functions();
   sys.init_math();
 
-  sys.register_function<decltype(&func1), func1>("func1");
-  sys.register_function<decltype(&func2), func2>("func2");
-  sys.register_function<decltype(&func3), func3>("func3");
-  sys.register_function<decltype(&func4), func4>("func4");
-  sys.register_function<decltype(&func7), func7>("func7");
-  sys.register_function<decltype(&to_scope3), to_scope3>("to_scope3");
-  sys.register_function<decltype(&to_scope2), to_scope2>("to_scope2");
-  sys.register_function<decltype(&func8), func8>("func8");
-  sys.register_function<decltype(&func9), func9>("func9");
+  sys.register_function<&func1>("func1");
+  sys.register_function<&func2>("func2");
+  sys.register_function<&func3>("func3");
+  sys.register_function<&func4>("func4");
+  sys.register_function<&func7>("func7");
+  sys.register_function<&to_scope3>("to_scope3");
+  sys.register_function<&to_scope2>("to_scope2");
+  sys.register_function<&func8>("func8");
+  sys.register_function<&func9>("func9");
 
-  sys.register_function_iter<decltype(&func6), func6>("func6", { "value" });
-  sys.register_function_iter<decltype(&func10), func10>("func10", { "count", "value" });
+  sys.register_function_iter<&func6>("func6", { "value" });
+  sys.register_function_iter<&func10>("func10", { "count", "value" });
 
   SUBCASE("script1") {
     const auto cont = sys.parse<double, scope2>(script1);
@@ -425,8 +425,8 @@ TEST_CASE("switch (known broken, repair pending)" * doctest::should_fail()) {
   ds::system sys;
   sys.init_basic_functions();
   sys.init_math();
-  sys.register_function<decltype(&to_scope2), to_scope2>("to_scope2");
-  sys.register_function<decltype(&func7), func7>("func7");
+  sys.register_function<&to_scope2>("to_scope2");
+  sys.register_function<&func7>("func7");
 
   const std::string script = "{ switch = { value = this, { value = to_scope2, func7 }, { value = to_scope2 } } }";
   const auto cont = sys.parse<double, scope1>(script);
@@ -483,8 +483,8 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    sys.register_function<decltype(&func1), func1>("func1");
-    sys.register_function<decltype(&func7), func7>("func7");
+    sys.register_function<&func1>("func1");
+    sys.register_function<&func7>("func7");
     const auto cont = sys.parse<double, scope1>(script3);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");
@@ -498,8 +498,8 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    sys.register_function<decltype(&func1), func1>("func1");
-    sys.register_function<decltype(&func7), func7>("func7");
+    sys.register_function<&func1>("func1");
+    sys.register_function<&func7>("func7");
     const auto cont = sys.parse<double, scope1>(script4);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");
@@ -513,9 +513,9 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    sys.register_function<decltype(&func1), func1>("func1");
-    sys.register_function<decltype(&func7), func7>("func7");
-    sys.register_function_iter<decltype(&every_on_list), every_on_list>("every_on_list", { "value" });
+    sys.register_function<&func1>("func1");
+    sys.register_function<&func7>("func7");
+    sys.register_function_iter<&every_on_list>("every_on_list", { "value" });
     const auto cont = sys.parse<double, scope2>(script5);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");
@@ -530,9 +530,9 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    sys.register_function<decltype(&func1), func1>("func1");
-    sys.register_function<decltype(&func7), func7>("func7");
-    sys.register_function_iter<decltype(&every_on_list), every_on_list>("every_on_list", { "value" });
+    sys.register_function<&func1>("func1");
+    sys.register_function<&func7>("func7");
+    sys.register_function_iter<&every_on_list>("every_on_list", { "value" });
     const auto cont = sys.parse<double, scope2>(script6);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");

@@ -545,8 +545,8 @@ size_t system::command_block::args_count() const { return !data.empty() ? data[0
 size_t system::command_block::size() const { return data.size(); }
 bool system::command_block::empty() const { return data.empty(); }
 
-#define RFI(func) register_function<decltype(&func), &func>
-#define ROI(func) register_operator<decltype(&func), &func>
+#define RFI(func) register_function<&func>
+#define ROI(func) register_operator<&func>
 
 using p_t = prng::xoshiro256starstar;
 system::options::options() noexcept : seed(1), safety(safety::safe), error([](const std::string& msg) { throw std::runtime_error(msg); }), warning([](const std::string& msg) { std::cout << "WARN: " << msg << "\n"; }) {}

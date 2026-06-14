@@ -36,10 +36,10 @@ double each_soldier(army* a, std::function<bool(soldier*)> filter, std::function
 // ...
 
 devils_script::system sys;
-sys.register_function<decltype(&func1), &func1>("func1"); // any scope
-sys.register_function<decltype(&liege), &liege>("liege"); // scope is handle<character>
-sys.register_function<decltype(&character::strength), &character::strength, handle<character>>("strength"); // tell script to use handle<character> as scope for this function
-sys.register_function_iter<decltype(&each_soldier), &each_soldier>("each_soldier", { "filter", "value" }); // argument names is mandatory for iterators
+sys.register_function<&func1>("func1"); // any scope
+sys.register_function<&liege>("liege"); // scope is handle<character>
+sys.register_function<&character::strength, handle<character>>("strength"); // tell script to use handle<character> as scope for this function
+sys.register_function_iter<&each_soldier>("each_soldier", { "filter", "value" }); // argument names is mandatory for iterators
 ```
 
 **!!!Important** **devils_script** ignores constness of pointers 
