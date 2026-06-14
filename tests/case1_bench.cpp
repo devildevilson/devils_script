@@ -1,9 +1,12 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/benchmark/catch_benchmark.hpp>
+// Minimal standalone benchmark (no test framework).
+// Replaces the former Catch2 benchmark harness.
 #include "devils_script/system.h"
 
+#include <chrono>
+#include <cstdio>
 #include <string>
-#include <cassert>
+#include <functional>
+#include <vector>
 
 template <typename T>
 struct handle { // sizeof(handle) <= 16
@@ -97,7 +100,7 @@ const std::string scripts[] = {
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
-#else 
+#else
 namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 #endif
 
@@ -106,7 +109,24 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 #define RFI(fn) register_function_iter<decltype(&fn), &fn>
 #define RFIH(fn, handle) register_function_iter<decltype(&fn), &fn, handle>
 
-TEST_CASE("Real usage 1", "[usage]") {
+// keep the optimizer from discarding the measured work
+static volatile double g_sink = 0.0;
+
+template <typename F>
+static void bench(const char* name, const size_t iters, F&& f) {
+  using clock = std::chrono::steady_clock;
+  // warmup
+  for (size_t i = 0; i < 16; ++i) g_sink += f();
+
+  const auto start = clock::now();
+  for (size_t i = 0; i < iters; ++i) g_sink += f();
+  const auto end = clock::now();
+
+  const double total_ns = std::chrono::duration<double, std::nano>(end - start).count();
+  std::printf("%-24s %10.1f ns/op  (%zu iters)\n", name, total_ns / double(iters), iters);
+}
+
+int main() {
   person p1{ "Mary", 20, 5, nullptr, nullptr };
   person p2{ "Alaska", 13, 2, nullptr, nullptr };
   person p3{ "Alexey", 26, 7, nullptr, nullptr };
@@ -143,7 +163,6 @@ TEST_CASE("Real usage 1", "[usage]") {
   sys.init_basic_functions();
   sys.init_math();
 
-  // unfortunately no unique fns in unique scope type yet (fixed. see examples/desc.cpp)
   sys.RF(country::get_population)("country_population");
   sys.RF(country::get_gdp)("country_gdp");
   sys.RF(country::add_population)("country_add_population");
@@ -164,69 +183,33 @@ TEST_CASE("Real usage 1", "[usage]") {
   sys.RFI(each_city)("each_city", { "value" });
   sys.RFI(each_notable_person)("each_notable_person", { "filter", "value" });
 
-  BENCHMARK("script1 parse") { return sys.parse<double, handle<person>>(scripts[0]); };
-  BENCHMARK("script2 parse") { return sys.parse<double, handle<person>>(scripts[1]); };
-  BENCHMARK("script3 parse") { return sys.parse<double, handle<person>>(scripts[2]); };
-  BENCHMARK("script4 parse") { return sys.parse<double, handle<person>>(scripts[3]); };
-  BENCHMARK("script5 parse") { return sys.parse<double, handle<person>>(scripts[4]); };
+  constexpr size_t script_count = sizeof(scripts) / sizeof(scripts[0]);
 
-  BENCHMARK_ADVANCED("script1 execution")(Catch::Benchmark::Chronometer meter) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[0]);
+  std::printf("== parse ==\n");
+  for (size_t i = 0; i < script_count; ++i) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "script%zu parse", i + 1);
+    bench(name, 10000, [&] {
+      const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+      return double(cont.cmds.size());
+    });
+  }
+
+  std::printf("== execution ==\n");
+  for (size_t i = 0; i < script_count; ++i) {
+    const auto cont = sys.parse<double, handle<person>>(scripts[i]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
+    ctx.create_lists(&cont);
 
-    meter.measure([&ctx, &cont] {
+    char name[32];
+    std::snprintf(name, sizeof(name), "script%zu execution", i + 1);
+    bench(name, 100000, [&] {
       ctx.clear();
       cont.process(&ctx);
       return ctx.get_return<double>();
-      });
-  };
+    });
+  }
 
-  BENCHMARK_ADVANCED("script2 execution")(Catch::Benchmark::Chronometer meter) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[1]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-
-    meter.measure([&ctx, &cont] {
-      ctx.clear();
-      cont.process(&ctx);
-      return ctx.get_return<double>();
-      });
-  };
-
-  BENCHMARK_ADVANCED("script3 execution")(Catch::Benchmark::Chronometer meter) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[2]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-
-    meter.measure([&ctx, &cont] {
-      ctx.clear();
-      cont.process(&ctx);
-      return ctx.get_return<double>();
-      });
-  };
-
-  BENCHMARK_ADVANCED("script4 execution")(Catch::Benchmark::Chronometer meter) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[3]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-
-    meter.measure([&ctx, &cont] {
-      ctx.clear();
-      cont.process(&ctx);
-      return ctx.get_return<double>();
-      });
-  };
-
-  BENCHMARK_ADVANCED("script5 execution")(Catch::Benchmark::Chronometer meter) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[4]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h); // set root
-
-    meter.measure([&ctx, &cont] {
-      ctx.clear();
-      cont.process(&ctx);
-      return ctx.get_return<double>();
-      });
-  };
+  return 0;
 }

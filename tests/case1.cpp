@@ -1,5 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/benchmark/catch_benchmark.hpp>
+#include <doctest/doctest.h>
 #include "devils_script/system.h"
 
 #include <string>
@@ -106,7 +105,7 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 #define RFI(fn) register_function_iter<decltype(&fn), &fn>
 #define RFIH(fn, handle) register_function_iter<decltype(&fn), &fn, handle>
 
-TEST_CASE("Real usage 1", "[usage]") {
+TEST_CASE("Real usage 1") {
   person p1{ "Mary", 20, 5, nullptr, nullptr };
   person p2{ "Alaska", 13, 2, nullptr, nullptr };
   person p3{ "Alexey", 26, 7, nullptr, nullptr };
@@ -164,7 +163,7 @@ TEST_CASE("Real usage 1", "[usage]") {
   sys.RFI(each_city)("each_city", { "value" });
   sys.RFI(each_notable_person)("each_notable_person", { "filter", "value" });
 
-  SECTION("script1") {
+  SUBCASE("script1") {
     const auto cont = sys.parse<double, handle<person>>(scripts[0]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
@@ -173,7 +172,7 @@ TEST_CASE("Real usage 1", "[usage]") {
     REQUIRE(ctx.get_return<double>() == double(p3.age));
   }
 
-  SECTION("script2") {
+  SUBCASE("script2") {
     const auto cont = sys.parse<double, handle<person>>(scripts[1]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
@@ -182,7 +181,7 @@ TEST_CASE("Real usage 1", "[usage]") {
     REQUIRE(ctx.get_return<double>() == double(c1.population + c2.population + c3.population));
   }
 
-  SECTION("script3") {
+  SUBCASE("script3") {
     const auto cont = sys.parse<double, handle<person>>(scripts[2]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
@@ -191,7 +190,7 @@ TEST_CASE("Real usage 1", "[usage]") {
     REQUIRE(ctx.get_return<double>() == double(p1.charisma + p2.charisma + p3.charisma + p4.charisma + p5.charisma));
   }
 
-  SECTION("script4") {
+  SUBCASE("script4") {
     const auto cont = sys.parse<double, handle<person>>(scripts[3]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
@@ -200,7 +199,7 @@ TEST_CASE("Real usage 1", "[usage]") {
     REQUIRE((std::abs(ctx.get_return<double>()) - double(city_notable_people_count(&c1) / c1.notable_people[0].ptr->age + c1.notable_people[1].ptr->age)) < 0.0000001);
   }
 
-  SECTION("script5") {
+  SUBCASE("script5") {
     const auto cont = sys.parse<double, handle<person>>(scripts[4]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root

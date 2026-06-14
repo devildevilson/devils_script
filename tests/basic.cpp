@@ -1,4 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
+#include <doctest/doctest.h>
 #include "devils_script/system.h"
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -9,13 +9,13 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 
 static double g(const double v1, const double v2, const double v3) noexcept { return v1 + v2 + v3; }
 
-TEST_CASE("Script basics", "[script]") {
+TEST_CASE("Script basics") {
   const std::string script1 = "5";
   const std::string script2 = "5 + 5";
   const std::string script3 = "35 * 2 + (-3) * (10 + 12) + (3 / 4) * max(5,6)";
   const std::string script4 = "{1,2,3,g(4,5,6),NAND={false, false},max={7,8,9}}";
 
-  SECTION("script1") {
+  SUBCASE("script1") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -30,7 +30,7 @@ TEST_CASE("Script basics", "[script]") {
     REQUIRE(ctx.get_return<double>() == 5.0);
   }
 
-  SECTION("script2") {
+  SUBCASE("script2") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -46,7 +46,7 @@ TEST_CASE("Script basics", "[script]") {
   }
 
   ds::container cont1;
-  SECTION("script3") {
+  SUBCASE("script3") {
     {
       ds::system sys;
       sys.init_basic_functions();
@@ -64,7 +64,7 @@ TEST_CASE("Script basics", "[script]") {
   }
 
   ds::container cont2;
-  SECTION("script4") {
+  SUBCASE("script4") {
     {
       ds::system sys;
       sys.init_basic_functions();
@@ -87,7 +87,7 @@ TEST_CASE("Script basics", "[script]") {
 static double f(const double v1, const double v2) noexcept { return v1 + v2; }
 static bool m(const bool v1, const bool v2) noexcept { return v1 && v2; }
 
-TEST_CASE("Script functions and functions call", "[functions]") {
+TEST_CASE("Script functions and functions call") {
   // (return type == first argument type == second argument type && arguments count == 2) is unlimited argument function
   const std::string script1 = "max(1,2)+max(1,2,3)";
   const std::string script2 = "f(1,2)+f(1,2,3)+f(1,2,3,4)+f(1,2,3,4,5)"; // function f
@@ -95,7 +95,7 @@ TEST_CASE("Script functions and functions call", "[functions]") {
   const std::string script4 = "true m true m true m true"; // operator m
   const std::string script5 = "{m={true,true,true,true}}";
 
-  SECTION("script1") {
+  SUBCASE("script1") {
     ds::system sys;
     sys.init_math();
     sys.register_function<decltype(&f), &f>("ADD"); // it is required for arithmetic scripts
@@ -106,7 +106,7 @@ TEST_CASE("Script functions and functions call", "[functions]") {
     REQUIRE(ctx.get_return<double>() == 5.0);
   }
 
-  SECTION("script2") {
+  SUBCASE("script2") {
     using mf = ds::system::command_data::math_ftype;
     using at = ds::system::command_data::associativity;
     ds::system sys;
@@ -120,7 +120,7 @@ TEST_CASE("Script functions and functions call", "[functions]") {
     REQUIRE(ctx.get_return<double>() == 34.0);
   }
 
-  SECTION("script3") {
+  SUBCASE("script3") {
     ds::system sys;
     sys.register_function<decltype(&f), &f>("ADD"); // it is required for arithmetic scripts
     sys.register_function<decltype(&f), &f>("f");
@@ -131,7 +131,7 @@ TEST_CASE("Script functions and functions call", "[functions]") {
     REQUIRE(ctx.get_return<double>() == 34.0);
   }
 
-  SECTION("script4") {
+  SUBCASE("script4") {
     using mf = ds::system::command_data::math_ftype;
     using at = ds::system::command_data::associativity;
     ds::system sys;
@@ -144,7 +144,7 @@ TEST_CASE("Script functions and functions call", "[functions]") {
     REQUIRE(ctx.get_return<bool>() == true);
   }
 
-  SECTION("script5") {
+  SUBCASE("script5") {
     using mf = ds::system::command_data::math_ftype;
     using at = ds::system::command_data::associativity;
     ds::system sys;
@@ -172,7 +172,7 @@ static scope2 to_scope2(scope1) { return scope2{}; }
 static scope3 func8(scope2, std::string_view) { return scope3{}; }
 static double func9(scope1, double) { return 10; }
 
-TEST_CASE("Advanced example", "[advanced]") {
+TEST_CASE("Advanced example") {
   const std::string script1 = "this"; // returns this
   const std::string script2 = "this:func1:abc = { func7 }";  // returns 5
   const std::string script3 = "to_scope2 = { to_scope3 = { func2 = { 4,5 } } }"; // returns 1
@@ -195,7 +195,7 @@ TEST_CASE("Advanced example", "[advanced]") {
   sys.register_function<decltype(&func8), func8>("func8");
   sys.register_function<decltype(&func9), func9>("func9");
 
-  SECTION("script1") {
+  SUBCASE("script1") {
     const auto cont = sys.parse<scope1, scope1>(script1);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
@@ -203,7 +203,7 @@ TEST_CASE("Advanced example", "[advanced]") {
     REQUIRE(ctx.is_return<scope1>());
   }
 
-  SECTION("script2") {
+  SUBCASE("script2") {
     const auto cont = sys.parse<double, scope1>(script2);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
@@ -212,7 +212,7 @@ TEST_CASE("Advanced example", "[advanced]") {
     REQUIRE(ctx.get_return<double>() == 5.0);
   }
 
-  SECTION("script3") {
+  SUBCASE("script3") {
     const auto cont = sys.parse<double, scope1>(script3);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
@@ -221,7 +221,7 @@ TEST_CASE("Advanced example", "[advanced]") {
     REQUIRE(ctx.get_return<double>() == 1.0);
   }
 
-  SECTION("script4") {
+  SUBCASE("script4") {
     const auto cont = sys.parse<scope1, scope1>(script4);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
@@ -229,7 +229,7 @@ TEST_CASE("Advanced example", "[advanced]") {
     REQUIRE(ctx.is_return<scope1>());
   }
 
-  SECTION("script5") {
+  SUBCASE("script5") {
     const auto cont = sys.parse<scope1, scope1>(script5);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
@@ -237,7 +237,7 @@ TEST_CASE("Advanced example", "[advanced]") {
     REQUIRE(ctx.is_return<scope1>());
   }
 
-  SECTION("script6") {
+  SUBCASE("script6") {
     const auto cont = sys.parse<scope1, scope1>(script6);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
@@ -245,7 +245,7 @@ TEST_CASE("Advanced example", "[advanced]") {
     REQUIRE(ctx.is_return<scope1>());
   }
 
-  SECTION("script7") {
+  SUBCASE("script7") {
     const auto cont = sys.parse<double, scope1>(script7);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
@@ -259,7 +259,7 @@ TEST_CASE("Advanced example", "[advanced]") {
 static double func6(scope2, const std::function<double(scope3)>& fn) { return fn(scope3{}); }
 static double func10(scope2, const std::function<double(scope2)>& fn1, const std::function<double(scope2)>& fn2) { return fn1(scope2{}) + fn2(scope2{}); }
 
-TEST_CASE("Iterators example", "[iterators]") {
+TEST_CASE("Iterators example") {
   const std::string script1 = "{ func6 = { value = 5 + 5 } }"; // returns 10
   const std::string script2 = "{ func6 = { value = { func2 = { 4,5 } } } }"; // returns 1
   const std::string script3 = "{ func10 = { value = { func7 * func7 }, count = { 1 + 1 } } }"; // returns 27
@@ -281,7 +281,7 @@ TEST_CASE("Iterators example", "[iterators]") {
   sys.register_function_iter<decltype(&func6), func6>("func6", { "value" });
   sys.register_function_iter<decltype(&func10), func10>("func10", { "count", "value" });
 
-  SECTION("script1") {
+  SUBCASE("script1") {
     const auto cont = sys.parse<double, scope2>(script1);
     ds::context ctx;
     ctx.set_arg(0, scope2{}); // set root
@@ -290,7 +290,7 @@ TEST_CASE("Iterators example", "[iterators]") {
     REQUIRE(ctx.get_return<double>() == 10.0);
   }
 
-  SECTION("script2") {
+  SUBCASE("script2") {
     const auto cont = sys.parse<double, scope2>(script2);
     ds::context ctx;
     ctx.set_arg(0, scope2{}); // set root
@@ -299,7 +299,7 @@ TEST_CASE("Iterators example", "[iterators]") {
     REQUIRE(ctx.get_return<double>() == 1.0);
   }
 
-  SECTION("script3") {
+  SUBCASE("script3") {
     const auto cont = sys.parse<double, scope2>(script3);
     ds::context ctx;
     ctx.set_arg(0, scope2{}); // set root
@@ -309,7 +309,7 @@ TEST_CASE("Iterators example", "[iterators]") {
   }
 }
 
-TEST_CASE("Main lang statements", "[statements]") {
+TEST_CASE("Main lang statements") {
   const std::string script1 = "{ value_or = { false, 10, 20 }, value_or = { true, 10, 20 }, value_or(false, 10, 20) }"; // returns 50
   const std::string script2 = "{ 5.0 == 5.00000000001 }"; // returns true
   const std::string script3 = "{ select = { { condition = false, 10 }, { condition = true, 20 }, { 100 } } }"; // returns 20
@@ -319,7 +319,7 @@ TEST_CASE("Main lang statements", "[statements]") {
   // random select, much better then 'select = { { condition = chance < 0.5, ... }, ...'
   const std::string script7 = "{ random = { { weight = 1, 3 }, { weight = 2, 6 }, { weight = 3, 9 } } }";
 
-  SECTION("value_or") {
+  SUBCASE("value_or") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -330,7 +330,7 @@ TEST_CASE("Main lang statements", "[statements]") {
     REQUIRE(ctx.get_return<double>() == 50.0);
   }
 
-  SECTION("equality") {
+  SUBCASE("equality") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -341,7 +341,7 @@ TEST_CASE("Main lang statements", "[statements]") {
     REQUIRE(ctx.get_return<bool>() == true);
   }
 
-  SECTION("select") {
+  SUBCASE("select") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -352,7 +352,7 @@ TEST_CASE("Main lang statements", "[statements]") {
     REQUIRE(ctx.get_return<double>() == 20.0);
   }
 
-  SECTION("sequence") {
+  SUBCASE("sequence") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -365,7 +365,7 @@ TEST_CASE("Main lang statements", "[statements]") {
 
   // switch???
 
-  SECTION("chance") {
+  SUBCASE("chance") {
     { // context seed 1
       ds::system sys;
       sys.init_basic_functions();
@@ -405,7 +405,7 @@ TEST_CASE("Main lang statements", "[statements]") {
     }
   }
 
-  SECTION("random") {
+  SUBCASE("random") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -418,7 +418,26 @@ TEST_CASE("Main lang statements", "[statements]") {
   }
 }
 
-static double every_on_list(const ds::internal::thisctxlist &l, const std::function<double(scope2)>& fn) { 
+// switch is still technical debt (see README TODO). This pins the CURRENT
+// broken state: the test is expected to fail until switch is repaired, at
+// which point should_fail() will flip it red and prompt removing the marker.
+TEST_CASE("switch (known broken, repair pending)" * doctest::should_fail()) {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_function<decltype(&to_scope2), to_scope2>("to_scope2");
+  sys.register_function<decltype(&func7), func7>("func7");
+
+  const std::string script = "{ switch = { value = this, { value = to_scope2, func7 }, { value = to_scope2 } } }";
+  const auto cont = sys.parse<double, scope1>(script);
+  ds::context ctx;
+  ctx.set_arg(0, scope1{});
+  cont.process(&ctx);
+  REQUIRE(ctx.is_return<double>());
+  CHECK(ctx.get_return<double>() == 5.0);
+}
+
+static double every_on_list(const ds::internal::thisctxlist &l, const std::function<double(scope2)>& fn) {
   double val = 0.0;
   for (size_t i = 0; i < l.ctx->lists[l.idx].size(); ++i) {
     val += fn(l.ctx->lists[l.idx][i].get<scope2>());
@@ -426,7 +445,7 @@ static double every_on_list(const ds::internal::thisctxlist &l, const std::funct
   return val;
 }
 
-TEST_CASE("Using arguments + save to context + lists", "[memory]") {
+TEST_CASE("Using arguments + save to context + lists") {
   const std::string script1 = "{ ctx_save = { number = 5 }, ctx:saved:number, ctx:saved:number }"; // returns 10
   const std::string script2 = "{ ctx:arg:first, ctx:arg:second }"; // returns 10
   const std::string script3 = "{ ctx_save = { obj = { func1 = abc } }, ctx:saved:obj = { func7 + func7 } }"; // returns 10 (save scope2 as obj)
@@ -434,7 +453,7 @@ TEST_CASE("Using arguments + save to context + lists", "[memory]") {
   const std::string script5 = "{ ctx:list:baby_list = { add_to = outer, add_to = outer }, ctx:list:baby_list = { every_on_list = { value = { func7 } } } }"; // returns 10
   const std::string script6 = "{ ctx:list:baby_list = { add_to = outer, add_to = outer, every_on_list = { value = { func7 } } } }"; // returns 10 (same as above)
 
-  SECTION("ctx_save numbers") {
+  SUBCASE("ctx_save numbers") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -445,7 +464,7 @@ TEST_CASE("Using arguments + save to context + lists", "[memory]") {
     REQUIRE(ctx.get_return<double>() == 10);
   }
 
-  SECTION("ctx:arg") {
+  SUBCASE("ctx:arg") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -460,7 +479,7 @@ TEST_CASE("Using arguments + save to context + lists", "[memory]") {
     REQUIRE(ctx.get_return<double>() == 10);
   }
 
-  SECTION("ctx_save objects") {
+  SUBCASE("ctx_save objects") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -475,7 +494,7 @@ TEST_CASE("Using arguments + save to context + lists", "[memory]") {
     REQUIRE(ctx.get_return<double>() == 10);
   }
 
-  SECTION("ctx_save_as objects") {
+  SUBCASE("ctx_save_as objects") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -490,7 +509,7 @@ TEST_CASE("Using arguments + save to context + lists", "[memory]") {
     REQUIRE(ctx.get_return<double>() == 10);
   }
 
-  SECTION("ctx:list objects") {
+  SUBCASE("ctx:list objects") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
@@ -507,7 +526,7 @@ TEST_CASE("Using arguments + save to context + lists", "[memory]") {
     REQUIRE(ctx.get_return<double>() == 10);
   }
 
-  SECTION("ctx:list objects 2") {
+  SUBCASE("ctx:list objects 2") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();

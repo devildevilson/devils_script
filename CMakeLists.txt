@@ -78,18 +78,18 @@ if (DS_BUILD_EXAMPLES)
   endif()
 endif()
 
-if (DS_BUILD_TESTS) 
+if (DS_BUILD_TESTS)
   FetchContent_Declare(
-    Catch2
-    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG        v3.10.0
+    doctest
+    GIT_REPOSITORY https://github.com/doctest/doctest.git
+    GIT_TAG        v2.5.2
   )
 
-  FetchContent_MakeAvailable(Catch2)
+  FetchContent_MakeAvailable(doctest)
 
-  add_executable (devils_script_tests tests/basic.cpp tests/case1.cpp)
+  add_executable (devils_script_tests tests/main.cpp tests/basic.cpp tests/case1.cpp tests/introspection.cpp)
   set_property(TARGET devils_script_tests PROPERTY CXX_STANDARD 20)
-  target_link_libraries(devils_script_tests devils_script Catch2::Catch2WithMain)
+  target_link_libraries(devils_script_tests devils_script doctest::doctest)
   if (MSVC)
     target_compile_options(devils_script_tests PRIVATE
       /permissive-
@@ -107,7 +107,7 @@ if (DS_BUILD_TESTS)
 
   add_executable (devils_script_benchs tests/case1_bench.cpp)
   set_property(TARGET devils_script_benchs PROPERTY CXX_STANDARD 20)
-  target_link_libraries(devils_script_benchs devils_script Catch2::Catch2WithMain)
+  target_link_libraries(devils_script_benchs devils_script)
   if (MSVC)
     target_compile_options(devils_script_benchs PRIVATE
       /permissive-

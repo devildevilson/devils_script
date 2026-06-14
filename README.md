@@ -1,7 +1,7 @@
 # devils_script
 Script system similar to Paradox games scripts (CK3, EU4). While working on this I have completely forgot how Paradox lang is looks like. Thus the comma separator was born
 
-The only dependency is STL + Catch2 for tests
+The only dependency is STL + doctest for tests
 
 Look example folder and tests for examples
 
