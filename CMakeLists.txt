@@ -13,27 +13,53 @@ enable_language(CXX)
 option(DS_BUILD_TESTS "Build tests for devils_script" ON)
 option(DS_BUILD_EXAMPLES "Build examples for devils_script" ON)
 
-include_directories(
-  include/
+add_library(devils_script_options INTERFACE)
+target_compile_features(devils_script_options INTERFACE cxx_std_20)
+target_compile_options(devils_script_options INTERFACE
+  $<$<CONFIG:Debug>:$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX /MDd /Zi /Wall /wd5045 /wd4820 /wd4514 /GR- /permissive- /Zc:preprocessor>>
+  $<$<CONFIG:Release>:$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX /MD /Wall /wd5045 /wd4820 /O2 /GR- /permissive- /Zc:preprocessor>>
+  $<$<CONFIG:MinSizeRel>:$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX /MD /Wall /wd5045 /wd4820 /O2 /GR- /permissive- /Zc:preprocessor>>
+  $<$<CONFIG:RelWithDebInfo>:$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX /MDd /ZI /Wall /wd5045 /wd4820 /O2 /GR- /permissive- /Zc:preprocessor>>
+
+  $<$<CONFIG:Debug>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -g -Wall -Wextra -fno-rtti -fno-inline>>
+  $<$<CONFIG:Release>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -Wall -Wextra -fno-rtti -pipe -flto>>
+  $<$<CONFIG:MinSizeRel>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -Wall -Wextra -fno-rtti -pipe -flto -s>>
+  $<$<CONFIG:RelWithDebInfo>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -g -Wall -Wextra -fno-rtti -pipe -flto>>
 )
+target_compile_definitions(devils_script_options INTERFACE
+  $<$<CONFIG:Debug>:>
+  $<$<CONFIG:Release>:NDEBUG _NDEBUG>
+  $<$<CONFIG:MinSizeRel>:NDEBUG _NDEBUG>
+  $<$<CONFIG:RelWithDebInfo>:>
+)
+
+FetchContent_Declare(
+  tavl
+  GIT_REPOSITORY https://github.com/devildevilson/tavl.git
+  GIT_TAG        497e661dcdb4b9259138ab0b7355706725fde9d3
+)
+
+FetchContent_MakeAvailable(tavl)
 
 set(HDR_LIST
   include/devils_script/type_traits.h
-  include/devils_script/context.h 
-  include/devils_script/container.h 
-  include/devils_script/common.h 
-  include/devils_script/system.h 
-  include/devils_script/text.h 
-  include/devils_script/basic_functions.h 
-  include/devils_script/template_functions.h 
+  include/devils_script/context.h
+  include/devils_script/container.h
+  include/devils_script/common.h
+  include/devils_script/system.h
+  include/devils_script/text.h
+  include/devils_script/script_ast.h
+  include/devils_script/basic_functions.h
+  include/devils_script/template_functions.h
   include/devils_script/prng.h
 )
 
 set(SRC_LIST
-  src/container.cpp 
-  src/text.cpp 
-  src/system.cpp 
-  src/basic_functions.cpp 
+  src/container.cpp
+  src/text.cpp
+  src/script_ast.cpp
+  src/system.cpp
+  src/basic_functions.cpp
   src/prng.cpp
 )
 
@@ -42,40 +68,12 @@ set(SRC_LIST
 add_compile_definitions(DEVILS_SCRIPT_OUTER_NAMESPACE=devils_script)
 
 add_library(devils_script STATIC ${SRC_LIST} ${HDR_LIST})
-set_property(TARGET devils_script PROPERTY CXX_STANDARD 20)
-if (MSVC)
-  target_compile_options(devils_script PRIVATE
-    /permissive-
-    $<$<CONFIG:Debug>:/Od /Zi /GR- /Wall>
-    $<$<CONFIG:Release>:/O2 /DNDEBUG /GR- /Wall>
-    $<$<CONFIG:RelWithDebInfo>:/O2 /Zi /DNDEBUG /GR- /Wall>
-  )
-else()
-  target_compile_options(devils_script PRIVATE
-    $<$<CONFIG:Debug>:-Wall -Wextra -g -fno-rtti>
-    $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
-    $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
-  )
-endif()
+target_link_libraries(devils_script PUBLIC devils_script_options tavl)
+target_include_directories(devils_script PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if (DS_BUILD_EXAMPLES)
   add_executable (devils_script_example_desc examples/desc.cpp)
-  set_property(TARGET devils_script_example_desc PROPERTY CXX_STANDARD 20)
-  target_link_libraries(devils_script_example_desc devils_script)
-  if (MSVC)
-    target_compile_options(devils_script_example_desc PRIVATE
-      /permissive-
-      $<$<CONFIG:Debug>:/Od /Zi /GR- /Wall>
-      $<$<CONFIG:Release>:/O2 /DNDEBUG /GR- /Wall>
-      $<$<CONFIG:RelWithDebInfo>:/O2 /Zi /DNDEBUG /GR- /Wall>
-    )
-  else()
-    target_compile_options(devils_script_example_desc PRIVATE
-      $<$<CONFIG:Debug>:-Wall -Wextra -g -fno-rtti>
-      $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
-      $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
-    )
-  endif()
+  target_link_libraries(devils_script_example_desc devils_script devils_script_options)
 endif()
 
 if (DS_BUILD_TESTS)
@@ -88,40 +86,10 @@ if (DS_BUILD_TESTS)
   FetchContent_MakeAvailable(doctest)
 
   add_executable (devils_script_tests tests/main.cpp tests/basic.cpp tests/case1.cpp tests/introspection.cpp)
-  set_property(TARGET devils_script_tests PROPERTY CXX_STANDARD 20)
-  target_link_libraries(devils_script_tests devils_script doctest::doctest)
-  if (MSVC)
-    target_compile_options(devils_script_tests PRIVATE
-      /permissive-
-      $<$<CONFIG:Debug>:/Od /Zi /GR- /Wall>
-      $<$<CONFIG:Release>:/O2 /DNDEBUG /GR- /Wall>
-      $<$<CONFIG:RelWithDebInfo>:/O2 /Zi /DNDEBUG /GR- /Wall>
-    )
-  else()
-    target_compile_options(devils_script_tests PRIVATE
-      $<$<CONFIG:Debug>:-Wall -Wextra -g -fno-rtti>
-      $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
-      $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
-    )
-  endif()
+  target_link_libraries(devils_script_tests devils_script devils_script_options doctest::doctest)
 
   add_executable (devils_script_benchs tests/case1_bench.cpp)
-  set_property(TARGET devils_script_benchs PROPERTY CXX_STANDARD 20)
-  target_link_libraries(devils_script_benchs devils_script)
-  if (MSVC)
-    target_compile_options(devils_script_benchs PRIVATE
-      /permissive-
-      $<$<CONFIG:Debug>:/Od /Zi /GR- /Wall>
-      $<$<CONFIG:Release>:/O2 /DNDEBUG /GR- /Wall>
-      $<$<CONFIG:RelWithDebInfo>:/O2 /Zi /DNDEBUG /GR- /Wall>
-    )
-  else()
-    target_compile_options(devils_script_benchs PRIVATE
-      $<$<CONFIG:Debug>:-Wall -Wextra -g -fno-rtti>
-      $<$<CONFIG:Release>:-O3 -Wall -Wextra -fno-rtti>
-      $<$<CONFIG:RelWithDebInfo>:-O3 -Wall -Wextra -g -fno-rtti>
-    )
-  endif()
+  target_link_libraries(devils_script_benchs devils_script devils_script_options)
 endif()
 
 # optional lua converter? or another project?

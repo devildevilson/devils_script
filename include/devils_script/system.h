@@ -13,6 +13,8 @@
 #include "devils_script/basic_functions.h"
 #include "devils_script/template_functions.h"
 #include "devils_script/prng.h"
+#include "devils_script/script_ast.h"
+#include "tavl/parser.h"
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -46,20 +48,20 @@ public:
   constexpr static std::string_view get_user_function_type_name(const user_function_type t);
 
   struct rpn_conversion_ctx {
-    enum class assigment_t : uint16_t { standart, validity_check };
     struct block { std::string_view token; size_t args_count; size_t size; };
 
     std::vector<block> output;
-    std::vector<block> stack;
-    std::vector<size_t> callstack;
-    std::vector<size_t> text_stack;
-    std::vector<std::string_view> operators;
 
-    std::tuple<std::string_view, bool> find_rvalue_scope_function(const std::string_view& expr) const;
-    void convert(const system* sys, const std::string_view& expr);
-    void rearrange_to_poland_notation(const size_t start);
-    size_t convert_block(const system* sys, const std::string_view& expr);
     std::tuple<std::string_view, size_t> convert_scope(const std::string_view& expr, block* arr, const size_t max_size) const;
+
+    // Path N: build the same rpn block stream as convert_block, but from a tavl AST (make_script_ast)
+    // instead of text. Reuses convert_scope for lvalue scope-path splitting; tavl already supplies math
+    // precedence so the shunting-yard (convert/convert_block) is bypassed. Returns the root row count.
+    size_t normalize(const std::vector<tavl::node>& tree, std::string_view src);
+    size_t normalize_block(const tavl::node* block, std::string_view src);
+    void normalize_row(const tavl::node* row, std::string_view src);
+    size_t normalize_expr(const tavl::node* n, std::string_view src);
+
     void clear();
   };
 
@@ -94,7 +96,13 @@ public:
     std::vector<int64_t> scope_stack;
     std::vector<std::string_view> stack_types;
 
+    // per-parse mutable scratch — moved off `system` so the registry stays const/shareable
+    rpn_conversion_ctx rpn_ctx;
+    prng::xoshiro256starstar::state prng_s;
+
     parse_ctx() noexcept;
+
+    uint64_t gen_value();           // advances this parse's PRNG (seeded from system at parse start)
 
     bool is_func_subblock() const;
     void push_func(const std::string_view &name);
@@ -124,6 +132,27 @@ public:
     void pop();
     void erase(const size_t index);
     std::string_view top() const;
+  };
+
+  // Codegen sink: wraps (system, parse_ctx, container) and centralizes instruction emission +
+  // forward-jump backpatching, so function init-callbacks stop hand-rolling the
+  // `std::vector<size_t> jumps; ...; cmds[i].arg = cmds.size()` dance. Thin facade over
+  // push_basic_function (the insn table) — does not own stack_types yet (still in parse_ctx).
+  struct emitter {
+    const system* sys;
+    parse_ctx* ctx;
+    container* scr;
+
+    // A forward-jump target: a set of pending jump-sites all resolved to one address by bind().
+    struct label { std::vector<size_t> sites; };
+
+    size_t emit(const basicf op, const int64_t arg = 0) const;  // -> push_basic_function
+    size_t emit_string(const std::string_view& str) const;      // -> push_string
+
+    label make_label() const;
+    void jump_to(const basicf op, label& l) const;     // emit `op` (placeholder target), record its site
+    void mark(label& l, const size_t cmd_index) const; // record an already-emitted cmd as a jump-site
+    void bind(label& l) const;                         // patch every recorded site to current cmds.size()
   };
 
   struct command_data {
@@ -205,7 +234,6 @@ public:
   bool safety() const;
   void raise_error(const std::string &msg) const;
   void raise_warning(const std::string& msg) const;
-  uint64_t gen_value() const;
   uint64_t get_seed() const;
   void reseed(const uint64_t val);
 
@@ -348,29 +376,30 @@ public:
   void register_enum(const std::span<std::tuple<std::string_view, T>>& values);
 
   template <typename RETURN_T, typename ROOT_T>
-  container parse(std::string text);
+  container parse(std::string text) const;
 
   void setup_block_description(parse_ctx* ctx, container* scr, const std::string_view& token, const std::string_view& custom_desc, const size_t start) const;
 
   size_t push_basic_function(parse_ctx* ctx, container* scr, const basicf id, const int64_t arg) const;
   size_t push_string(parse_ctx* ctx, container* scr, const std::string_view &str) const;
-  size_t parse_block(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view &override_lvalue = std::string_view()) const;
-  size_t parse_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const;
+  size_t dispatch_node(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view &override_lvalue = std::string_view()) const;
+  size_t fold_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const;
   command_data::ftype get_token_type(const std::string_view& name) const;
   std::tuple<int32_t, int32_t, command_data::associativity, command_data::ftype> get_token_caps(const std::string_view& name) const;
   size_t patch_prev_functions_descriptions(container* scr, const size_t start) const;
 
-  std::vector<std::string_view> make_operators_list() const;
+  // Register this system's operators into a tavl parser (name + precedence + fixity + assoc), so
+  // make_script_ast lexes/folds them correctly. Data-driven from mfuncs; `=`/`?=` (structural call
+  // operators, not in mfuncs) are added at the lowest precedence. See step 4.2.
+  void configure_parser(tavl::parser& p) const;
   void scope_exit(parse_ctx* ctx, container* scr, const size_t count) const;
 private:
   void check_is_str_part_of_and_throw(const std::string_view& big_str, const std::string_view& small_str) const;
 
-  uint64_t seed; 
-  enum safety safet; 
-  err_fn error; 
+  uint64_t seed;
+  enum safety safet;
+  err_fn error;
   err_fn warning;
-  mutable rpn_conversion_ctx rpn_ctx;
-  mutable prng::xoshiro256starstar::state prng_s;
   // function name first + scope type second, no scope == void
   std::unordered_map<std::string, std::unordered_map<std::string, command_data>> mfuncs;
   std::unordered_map<std::string, std::unordered_map<std::string, size_t>> enums;
@@ -614,7 +643,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
         const auto inner_itr = itr->second.find(std::string(enum_str));
         if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
         push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
-      } else parse_block(ctx, scr, block, override_lvalue);
+      } else dispatch_node(ctx, scr, block, override_lvalue);
     }
   } else {
     if constexpr (std::is_enum_v<cur_arg_type>) { // special case, expecting rvalue with string
@@ -625,7 +654,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       const auto inner_itr = itr->second.find(std::string(enum_str));
       if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
       push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
-    } else parse_block(ctx, scr, block, override_lvalue);
+    } else dispatch_node(ctx, scr, block, override_lvalue);
   }
 
   if (!arg_name.empty()) { // special case - named argument description
@@ -725,7 +754,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
         const auto inner_itr = itr->second.find(std::string(enum_str));
         if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
         push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
-      } else parse_block(ctx, scr, block, local_override_block_behaviour);
+      } else fold_block(ctx, scr, block, local_override_block_behaviour);
     }
   } else {
     if constexpr (std::is_enum_v<cur_arg_type>) { // special case, expecting rvalue with string
@@ -736,7 +765,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       const auto inner_itr = itr->second.find(std::string(enum_str));
       if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
       push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
-    } else parse_block(ctx, scr, block, local_override_block_behaviour);
+    } else fold_block(ctx, scr, block, local_override_block_behaviour);
   }
 
   if (!arg_name.empty()) { // special case - named argument description
@@ -951,16 +980,16 @@ void system::register_function(std::string name, std::vector<std::string> func_a
           // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
           // parse scope block AFTER the scope function 
           // after parsing there are 2 types of scope functions - with argument and without
-          // when no argument provided we can use parse_block
+          // when no argument provided we can use dispatch_node
           // bad design?
           if (offset < args.size() && offset == 1) { // no args
             ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-            sys->parse_block(ctx, scr, args, basicf::invalid);
+            sys->fold_block(ctx, scr, args, basicf::invalid);
             sys->scope_exit(ctx, scr, 1);
           } else if (offset < args.size() && ctx->ftype == function_type::lvalue) { // was args
             const auto remaining = command_block(args, offset);
             ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-            sys->parse_block(ctx, scr, remaining);
+            sys->dispatch_node(ctx, scr, remaining);
             sys->scope_exit(ctx, scr, 1);
 
             offset += remaining.size();
@@ -1111,16 +1140,16 @@ void system::register_operator(std::string name, const operator_props& ps, custo
             // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
             // parse scope block AFTER the scope function 
             // after parsing there are 2 types of scope functions - with argument and without
-            // when no argument provided we can use parse_block
+            // when no argument provided we can use dispatch_node
             // bad design?
             if (offset < args.size() && offset == 1) { // no args
               ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-              sys->parse_block(ctx, scr, args, basicf::invalid);
+              sys->fold_block(ctx, scr, args, basicf::invalid);
               sys->scope_exit(ctx, scr, 1);
             } else if (offset < args.size() && ctx->ftype == function_type::lvalue) { // was args
               const auto remaining = command_block(args, offset);
               ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-              sys->parse_block(ctx, scr, remaining);
+              sys->dispatch_node(ctx, scr, remaining);
               sys->scope_exit(ctx, scr, 1);
 
               offset += remaining.size();
@@ -1280,20 +1309,26 @@ void system::register_enum(const std::span<std::tuple<std::string_view, T>>& val
 }
 
 template <typename RETURN_T, typename ROOT_T>
-container system::parse(std::string text) {
+container system::parse(std::string text) const {
   using ret_type = final_stack_el_t<RETURN_T>;
   using root_type = final_stack_el_t<ROOT_T>;
 
   container scr;
   parse_ctx ctx;
+  ctx.prng_s = prng::xoshiro256starstar::init(get_seed());
   scr.globals.emplace_back(std::move(text));
-  scr.prng_state = gen_value();
+  scr.prng_state = ctx.gen_value();
   const auto script_block = std::string_view(scr.globals[0]);
 
-  rpn_ctx.operators = make_operators_list();
-  auto cmds = rpn_ctx.convert_block(this, script_block);
-  auto output = rpn_ctx.output;
-  rpn_ctx.clear();
+  // Path N: tavl lexes/structures/precedences the script (make_script_ast); normalize() turns its
+  // AST into the same rpn block stream the semantic pass consumes. Replaces text.cpp + the rpn
+  // shunting-yard (convert/convert_block); convert_scope (scope-path splitting) still used downstream.
+  tavl::parser tp;
+  configure_parser(tp);
+  const auto tree = make_script_ast(tp, script_block);
+  const size_t cmds = ctx.rpn_ctx.normalize(tree, script_block);
+  auto output = ctx.rpn_ctx.output;
+  ctx.rpn_ctx.clear();
 
        if constexpr (utils::is_void_v<ret_type>)                 output.emplace(output.begin(), rpn_conversion_ctx::block{ "__effect_block", cmds, output.size()+1 });
   else if constexpr (std::is_same_v<bool, ret_type>)             output.emplace(output.begin(), rpn_conversion_ctx::block{ "AND", cmds, output.size()+1 });
@@ -1327,7 +1362,7 @@ container system::parse(std::string text) {
 
   {
     set_expected_type set(&ctx, scope_type_name<ret_type>());
-    parse_block(&ctx, &scr, script_cmds);
+    dispatch_node(&ctx, &scr, script_cmds);
   }
 
   while (ctx.pop_while_ignore()) {}

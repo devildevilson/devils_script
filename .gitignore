@@ -1,3 +1,6 @@
 .claude/
 build/
 .vs/
+.aider*
+docs/
+.gitignore

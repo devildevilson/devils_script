@@ -171,302 +171,6 @@ system::push_list_index_upvalue::~push_list_index_upvalue() noexcept { ctx->list
 system::change_chain_index::change_chain_index(parse_ctx* ctx) noexcept : ctx(ctx) { ctx->prev_chaining += 2; }
 system::change_chain_index::~change_chain_index() noexcept { ctx->prev_chaining -= 2; }
 
-static size_t compute_argument_size(const std::vector<system::rpn_conversion_ctx::block> &output, const size_t args_count) {
-  size_t counter = 0;
-  size_t index = output.size()-1;
-  for (size_t i = 0; i < args_count; ++i) {
-    counter += output[index].size;
-    index -= output[index].size;
-  }
-
-  return counter;
-}
-
-// not the best checker, but might be faster then convert_scope
-// expected '.' and ':' in rvalue scope
-std::tuple<std::string_view, bool> system::rpn_conversion_ctx::find_rvalue_scope_function(const std::string_view& expr) const {
-  if (expr.find(".") == std::string_view::npos && expr.find(":") == std::string_view::npos) return std::make_tuple(expr, false);
-
-  std::string_view ret;
-  bool has_value = false;
-  std::array<std::string_view, 8> arr;
-  std::array<std::string_view, 3> colon_arr;
-  auto curexpr = expr;
-  while (!curexpr.empty()) {
-    for (auto& el : arr) { el = std::string_view(); }
-    const size_t count = utils::string::split(curexpr, ".", arr.data(), arr.size());
-    curexpr = arr[arr.size()-1];
-
-    for (size_t i = 0; i < count; ++i) {
-      const size_t count = utils::string::split(arr[i], ":", colon_arr.data(), colon_arr.size());
-
-      // third one must be an only argument, we probably need to check this....
-      if (count == 1) { ret = colon_arr[0]; has_value = false; }
-      else if (count == 2) { ret = colon_arr[1]; has_value = false; }
-      else if (count == 3) { ret = colon_arr[1]; has_value = true; }
-    }
-  }
-
-  return std::make_tuple(ret, has_value);
-}
-
-using as_t = system::command_data::associativity;
-using mf_t = system::command_data::math_ftype;
-using f_t = system::command_data::ftype;
-
-static bool can_be_forwarded_to_output(const std::string_view& token, const int32_t args_count, const as_t, const f_t ftype) {
-  return !token.empty() && token != "," && token != "(" && token != ")" && ((ftype == f_t::operator_t && static_cast<mf_t>(args_count) == mf_t::postfix) || (ftype == f_t::invalid) || (ftype == f_t::function_t && args_count == 0));
-}
-
-static bool is_prev_token_invalid(const system* sys, const std::string_view &prev_token) {
-  return prev_token.empty() || prev_token == "(" || prev_token == "," || sys->get_token_type(prev_token) == f_t::operator_t;
-}
-
-void system::rpn_conversion_ctx::convert(const system* sys, const std::string_view& expr) {
-  if (operators.empty()) sys->raise_error(std::format("rpn_conversion_ctx::operators is empty"));
-
-  const auto& finexpr = utils::string::trim(expr);
-  if (text::is_bool(finexpr) || text::is_number(finexpr)) {
-    output.push_back({ finexpr, 0, 1 });
-    return;
-  }
-
-  const size_t cur_output_size = output.size();
-
-  auto curexpr = expr;
-  std::string_view prev_token;
-  while (!curexpr.empty()) {
-    const auto [token, strpart] = utils::string::substr_split_alt(curexpr, operators.data(), operators.size());
-    curexpr = utils::string::trim(strpart);
-
-    const auto cur_token = utils::string::trim(token);
-    //const auto cur_divider = utils::string::trim(divider);
-
-    const auto [ rvalue_funcname, has_value ] = find_rvalue_scope_function(cur_token);
-    const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(rvalue_funcname);
-    const bool is_postfix = static_cast<mf_t>(arg_count) == mf_t::postfix;
-    const bool fast_function_with_data = arg_count == 1 && ftype == f_t::function_t && has_value;
-    const bool forw_to_output = can_be_forwarded_to_output(cur_token, arg_count, assoc, ftype) || fast_function_with_data;
-    //const bool token_is_op = (ftype != system::command_data::ftype::invalid && arg_count > 0) || cur_token == "(" || cur_token == ")";
-    //const bool divider_is_op = !cur_divider.empty() || cur_divider == "(" || cur_divider == ")";
-    const bool token_is_op = !forw_to_output;
-    //const bool divider_is_op = !cur_divider.empty();
-
-    // deal with rvalue later
-    if (forw_to_output) {
-      if (is_postfix) {
-        output.push_back({ cur_token, 1, 2 });
-      } else {
-        output.push_back({ cur_token, 0, 1 });
-      }
-      //prev_token = cur_token;
-    }
-
-    std::array<std::string_view, 2> local_ops;
-    local_ops[0] = token_is_op ? cur_token : std::string_view();
-    //local_ops[1] = divider_is_op ? cur_divider : std::string_view();    
-
-    //for (int i = 0; i < local_ops.size(); ++i) {
-      //auto op = local_ops[i];
-    {
-      auto op = local_ops[0];
-      if (op.empty()) { prev_token = cur_token; continue; }
-
-      const bool is_unary = (is_prev_token_invalid(sys, prev_token) && op == "-") || (is_prev_token_invalid(sys, prev_token) && op == "+");
-      if (is_unary && op == "-") op = "unary_minus";
-      if (is_unary && op == "+") op = "unary_plus";
-
-      const auto [ rvalue_funcname, has_value ] = find_rvalue_scope_function(op);
-      if (has_value) sys->raise_error(std::format("Operator '{}' with data? ({})", rvalue_funcname, op));
-      const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(rvalue_funcname);
-      const bool is_function = ftype == system::command_data::ftype::function_t;
-      if (arg_count == 1 || is_function) stack.push_back({ op, size_t(arg_count), 0ull });
-      if (is_function) callstack.push_back(0);
-
-      if (op == ",") {
-        if (callstack.empty()) sys->raise_error(std::format("Could not parse expr '{}' ('{}' part): token before '(' is not a function", expr, strpart));
-
-        callstack.back() += 1;
-        while (!stack.empty() && stack.back().token != "(") {
-          const size_t size = compute_argument_size(output, stack.back().args_count)+1;
-          output.push_back(stack.back());
-          output.back().size = size;
-          stack.pop_back();
-        }
-        if (stack.empty()) sys->raise_error(std::format("Could not parse expr '{}': wrong brackets placement", expr));
-      }
-
-      if (op == "(") { stack.push_back({ op, 0, 0 }); }
-      if (op == ")") {
-        while (!stack.empty() && stack.back().token != "(") {
-          const size_t size = compute_argument_size(output, stack.back().args_count)+1;
-          output.push_back(stack.back());
-          output.back().size = size;
-          stack.pop_back();
-        }
-        if (stack.empty()) sys->raise_error(std::format("Could not parse expr '{}': wrong brackets placement", expr));
-        stack.pop_back();
-
-        if (!stack.empty()) {
-          const auto [ rvalue_funcname, has_value ] = find_rvalue_scope_function(stack.back().token);
-          if (has_value) sys->raise_error(std::format("All 1 argument functions must be forwarded to output immediately, context '{}'", stack.back().token));
-          const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(rvalue_funcname);
-          const bool is_function = ftype == system::command_data::ftype::function_t;
-          // found a function on left side of brackets
-          if (is_function) {
-            callstack.back() += 1;
-            // useless check?
-            //if (arg_count != INT32_MAX && arg_count < callstack.back()) sys->raise_error(std::format("Function '{}' expects {} arguments but {} is provided", stack.back().token, arg_count, callstack.back()));
-
-            const size_t size = compute_argument_size(output, callstack.back()) + 1;
-            output.push_back(stack.back());
-            output.back().args_count = callstack.back();
-            output.back().size = size;
-            callstack.pop_back();
-            stack.pop_back();
-          }
-        }
-      }
-
-      if (arg_count > 1 && !is_function) {
-        while (!stack.empty()) {
-          const auto &top = stack.back();
-          const auto [ rvalue_funcname, has_value ] = find_rvalue_scope_function(top.token);
-          if (has_value) sys->raise_error(std::format("Operator '{}' with data? ({})", rvalue_funcname, op));
-          const bool is_operator = sys->get_token_type(rvalue_funcname) == system::command_data::ftype::operator_t;
-          if (!is_operator) break;
-
-          const auto [top_p, top_type, top_assoc, top_ftype] = sys->get_token_caps(rvalue_funcname);
-
-          if (top_type == 1 || top_p >= p || (top_assoc == command_data::associativity::left && top_p == p)) {
-            const size_t size = compute_argument_size(output, top_type)+1;
-            output.push_back(top);
-            output.back().size = size;
-            stack.pop_back();
-            continue;
-          }
-
-          break;
-        }
-
-        stack.push_back({ op, size_t(arg_count), 0 });
-      }
-
-      //prev_token = op;
-    }
-
-    prev_token = cur_token;
-  }
-
-  while (!stack.empty()) {
-    const auto &top = stack.back();
-    const auto [ rvalue_funcname, has_value ] = find_rvalue_scope_function(top.token);
-    if (has_value) sys->raise_error(std::format("All 1 argument functions must be forwarded to output immediately, context '{}'", stack.back().token));
-    const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(rvalue_funcname);
-    if (ftype == system::command_data::ftype::function_t) {
-      if (callstack.empty()) sys->raise_error(std::format("Parsing error: found function '{}' without callstack", top.token));
-      //const size_t callstack_args_count = callstack.back();
-      callstack.pop_back();
-      // useless check?
-      //if (arg_count != INT32_MAX && top.args_count < callstack_args_count) sys->raise_error(std::format("Function '{}' expects {} arguments but {} is provided", top.token, top.args_count, callstack_args_count));
-    }
-
-    const bool is_valid = ftype != system::command_data::ftype::invalid;
-    if (!is_valid) sys->raise_error(std::format("Could not parse expr '{}': stack has got non operand token '{}'", expr, top.token));
-    const size_t size = compute_argument_size(output, top.args_count)+1;
-    output.push_back(top);
-    output.back().size = size;
-    stack.pop_back();
-  }
-
-  rearrange_to_poland_notation(cur_output_size);
-}
-
-void system::rpn_conversion_ctx::rearrange_to_poland_notation(const size_t start) {
-  std::vector<block> cur(output.begin()+start, output.end()); // =(
-  output.resize(start);
-  for (size_t i = 0; i < cur.size(); ++i) {
-    const auto& b = cur[i];
-    if (b.args_count == 0) stack.push_back(b);
-    if (b.args_count > 0) {
-      const size_t index = output.size();
-      output.push_back(b);
-      const size_t stack_place = stack.size() - (b.size - 1);
-      for (size_t j = stack_place; j < stack.size(); j += 1) {
-        output.push_back(stack[j]);
-      }
-      
-      stack.resize(stack_place);
-      stack.insert(stack.begin()+stack_place, output.begin()+index, output.end());
-      output.resize(index);
-    }
-  }
-
-  output.insert(output.begin()+start, stack.begin(), stack.end());
-  stack.clear();
-}
-
-size_t system::rpn_conversion_ctx::convert_block(const system* sys, const std::string_view& expr) {
-  std::array<std::string_view, 64> tokens;
-  auto curstr = text::remove_brackets(expr);
-  const size_t tokens_count = text::split_tokens(curstr, tokens.data(), tokens.size(), text_stack);
-  for (size_t i = 0; i < tokens_count; ++i) {
-    const auto [lvalue, op, rvalue] = text::parse_token(tokens[i], operators.data(), operators.size());
-
-    const size_t cur_size = output.size();
-
-    std::string_view lfn = "__empty_lvalue";
-
-    //size_t found_function_args_count = 0;
-    std::array<block, 16 * 3 + 1> arr;
-    size_t lvalue_tokens_count = 0;
-    if (!lvalue.empty()) {
-      const auto [func_name, count] = convert_scope(lvalue, arr.data(), arr.size());
-      lvalue_tokens_count = count;
-
-      if (!func_name.empty()) {
-        //const auto [p, arg_count, assoc, ftype] = sys->get_token_caps(func_name);
-        //found_function_args_count = arg_count;
-        lfn = func_name;
-      }
-    }
-
-    for (size_t i = 0; i < lvalue_tokens_count; i += arr[i].args_count+1) {
-      output.push_back({ arr[i].token, arr[i].args_count, arr[i].size });
-      for (size_t j = i + 1; j < i + arr[i].args_count+1; ++j) {
-        output.push_back({ arr[j].token, arr[j].args_count, arr[j].size });
-      }
-    }
-
-    size_t lfn_index = SIZE_MAX;
-    const bool lvalue_is_empty = lfn == "__empty_lvalue";
-    if (lvalue_is_empty && text::is_block(rvalue)) { output.push_back({ lfn, 0, 1 }); lfn_index = output.size()-1; }
-    if (!lvalue_is_empty) { output.push_back({ lfn, 0, 1 }); lfn_index = output.size()-1; }
-
-    const size_t block_size = output.size();
-
-    size_t arguments_count = 0;
-    if (text::is_block(rvalue)) {
-      arguments_count = convert_block(sys, rvalue);
-    } else {
-      convert(sys, rvalue);
-      arguments_count = 1;
-    }
-
-    const size_t size = output.size() - block_size;
-
-    for (size_t i = cur_size; i < cur_size+lvalue_tokens_count; i += output[i].args_count + 1) {
-      output[i].size += size+1; 
-    }
-
-    if (lfn_index != SIZE_MAX) {
-      output[lfn_index].args_count = arguments_count;
-      output[lfn_index].size += size;
-    }
-  }
-
-  return tokens_count;
-}
 
 std::tuple<std::string_view, size_t> system::rpn_conversion_ctx::convert_scope(const std::string_view& expr, block* arr, const size_t max_size) const {
   size_t counter = 0;
@@ -506,10 +210,142 @@ std::tuple<std::string_view, size_t> system::rpn_conversion_ctx::convert_scope(c
   return std::make_tuple(lfn, counter);
 }
 
+namespace {
+// text of a tavl token via its source span (empty for synthetic/empty tokens, e.g. call operator)
+std::string_view node_text(const tavl::node* n, std::string_view src) {
+  const auto& sp = n->token.span;
+  return sp.offset == SIZE_MAX ? std::string_view() : src.substr(sp.offset, sp.size);
+}
+// direct children of a flat-prefix node (step by child_count+1 over its footprint)
+std::vector<const tavl::node*> node_children(const tavl::node* n) {
+  std::vector<const tavl::node*> r;
+  for (size_t i = 1; i < n->child_count + 1; i += n[i].child_count + 1) r.push_back(n + i);
+  return r;
+}
+}
+
+size_t system::rpn_conversion_ctx::normalize(const std::vector<tavl::node>& tree, std::string_view src) {
+  if (tree.empty()) return 0;
+  const tavl::node* root = tree.data();
+  // mirror convert_block's remove_brackets: if the whole input was a single braced block, descend
+  // one level so its elements become the root rows (else we'd get an extra wrapping block).
+  const auto rk = node_children(root);
+  if (rk.size() == 1 && rk[0]->type == tavl::node_type::object) root = rk[0];
+  return normalize_block(root, src);
+}
+
+size_t system::rpn_conversion_ctx::normalize_block(const tavl::node* block, std::string_view src) {
+  size_t count = 0;
+  for (const auto* row : node_children(block)) { normalize_row(row, src); count += 1; }
+  return count;
+}
+
+// Port of convert_block's per-token body (system.cpp convert_block), sourcing (lvalue, rhs) from a
+// tavl row node instead of text::parse_token. Same size/args bookkeeping; reuses convert_scope.
+void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::string_view src) {
+  const size_t cur_size = output.size();
+  std::string_view lfn = "__empty_lvalue";
+  std::array<block, 16 * 3 + 1> arr;
+  size_t lvalue_tokens_count = 0;
+
+  std::string_view lvalue;
+  const tavl::node* rhs = row;
+  if (row->type == tavl::node_type::pair) {
+    const auto op = node_text(row, src);
+    if (op == "=" || op == "?=") {            // call/assignment: lhs = function, rhs = its argument
+      const auto ch = node_children(row);
+      lvalue = node_text(ch[0], src);          // lhs is a single token (scope paths arrive whole)
+      rhs = ch[1];
+    }
+  }
+
+  if (!lvalue.empty()) {
+    const auto [func_name, count] = convert_scope(lvalue, arr.data(), arr.size());
+    lvalue_tokens_count = count;
+    if (!func_name.empty()) lfn = func_name;
+  }
+
+  for (size_t i = 0; i < lvalue_tokens_count; i += arr[i].args_count + 1) {
+    output.push_back({ arr[i].token, arr[i].args_count, arr[i].size });
+    for (size_t j = i + 1; j < i + arr[i].args_count + 1; ++j)
+      output.push_back({ arr[j].token, arr[j].args_count, arr[j].size });
+  }
+
+  size_t lfn_index = SIZE_MAX;
+  const bool lvalue_is_empty = lfn == "__empty_lvalue";
+  const bool rhs_is_block = rhs->type == tavl::node_type::object;
+  if (lvalue_is_empty && rhs_is_block) { output.push_back({ lfn, 0, 1 }); lfn_index = output.size() - 1; }
+  if (!lvalue_is_empty) { output.push_back({ lfn, 0, 1 }); lfn_index = output.size() - 1; }
+
+  const size_t block_size = output.size();
+  size_t arguments_count = 0;
+  if (rhs_is_block) arguments_count = normalize_block(rhs, src);
+  else { normalize_expr(rhs, src); arguments_count = 1; }
+
+  const size_t size = output.size() - block_size;
+  for (size_t i = cur_size; i < cur_size + lvalue_tokens_count; i += output[i].args_count + 1)
+    output[i].size += size + 1;
+  if (lfn_index != SIZE_MAX) {
+    output[lfn_index].args_count = arguments_count;
+    output[lfn_index].size += size;
+  }
+}
+
+// Expression (rvalue) -> prefix blocks, mirroring convert()'s output but reading tavl's already
+// precedence-correct tree. Returns the footprint (1 + descendants).
+size_t system::rpn_conversion_ctx::normalize_expr(const tavl::node* n, std::string_view src) {
+  if (n->type == tavl::node_type::token) {
+    output.push_back({ node_text(n, src), 0, 1 });   // leaf (incl. whole rvalue scope paths)
+    return 1;
+  }
+
+  if (n->type == tavl::node_type::pair) {
+    const auto ch = node_children(n);
+    const auto op = node_text(n, src);
+
+    if (op.empty()) {                                 // call f(...) / f{...}: pair with empty op token
+      const size_t idx = output.size();
+      output.push_back({ node_text(ch[0], src), 0, 1 });
+      size_t s = 0, argn = 0;
+      for (const auto* a : node_children(ch[1])) { s += normalize_expr(a, src); argn += 1; }
+      output[idx].args_count = argn;
+      output[idx].size += s;
+      return 1 + s;
+    }
+
+    if (ch.size() == 1) {                             // unary prefix (rpn names: unary_minus/unary_plus)
+      std::string_view o = op == "-" ? "unary_minus" : (op == "+" ? "unary_plus" : op);
+      const size_t idx = output.size();
+      output.push_back({ o, 1, 1 });
+      const size_t s = normalize_expr(ch[0], src);
+      output[idx].size += s;
+      return 1 + s;
+    }
+
+    const size_t idx = output.size();                 // binary
+    output.push_back({ op, 2, 1 });
+    const size_t s = normalize_expr(ch[0], src) + normalize_expr(ch[1], src);
+    output[idx].size += s;
+    return 1 + s;
+  }
+
+  if (n->type == tavl::node_type::object) {           // anonymous block at expr position
+    const size_t idx = output.size();
+    output.push_back({ "__empty_lvalue", 0, 1 });
+    const size_t cnt = normalize_block(n, src);
+    output[idx].args_count = cnt;
+    output[idx].size = output.size() - idx;
+    return output.size() - idx;
+  }
+
+  // tuple / array group: emit elements in sequence (best-effort; not exercised by golden)
+  size_t s = 0;
+  for (const auto* e : node_children(n)) s += normalize_expr(e, src);
+  return s;
+}
+
 void system::rpn_conversion_ctx::clear() {
   output.clear();
-  stack.clear();
-  callstack.clear();
 }
 
 system::command_block::command_block() noexcept {}
@@ -550,15 +386,15 @@ bool system::command_block::empty() const { return data.empty(); }
 
 using p_t = prng::xoshiro256starstar;
 system::options::options() noexcept : seed(1), safety(safety::safe), error([](const std::string& msg) { throw std::runtime_error(msg); }), warning([](const std::string& msg) { std::cout << "WARN: " << msg << "\n"; }) {}
-system::system(const options& opts) noexcept : seed(opts.seed), safet(opts.safety), error(opts.error), warning(opts.warning), prng_s(p_t::init(opts.seed)) {}
+system::system(const options& opts) noexcept : seed(opts.seed), safet(opts.safety), error(opts.error), warning(opts.warning) {}
 
 void system::toggle_safety() { this->safet = static_cast<enum safety>(!static_cast<bool>(this->safet)); }
 bool system::safety() const { return static_cast<bool>(this->safet); }
 void system::raise_error(const std::string& msg) const { error(msg); }
 void system::raise_warning(const std::string& msg) const { warning(msg); }
-uint64_t system::gen_value() const { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
 uint64_t system::get_seed() const { return seed; }
-void system::reseed(const uint64_t val) { seed = val; prng_s = p_t::init(val); }
+void system::reseed(const uint64_t val) { seed = val; }
+uint64_t system::parse_ctx::gen_value() { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
 
 void system::init_math() {
   ROI(internal::rawpos)("unary_plus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
@@ -675,16 +511,16 @@ static void add_cmd(const system* sys, container* scr) {
 
 void system::init_basic_functions() {
   RFI(internal::operator_and)("AND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
-    return sys->parse_block(ctx, scr, args, basicf::AND);
+    return sys->fold_block(ctx, scr, args, basicf::AND);
   });
   RFI(internal::operator_or)("OR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
-    return sys->parse_block(ctx, scr, args, basicf::OR);
+    return sys->fold_block(ctx, scr, args, basicf::OR);
   });
   RFI(internal::operator_and)("NAND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
-    return sys->parse_block(ctx, scr, args, basicf::NAND);
+    return sys->fold_block(ctx, scr, args, basicf::NAND);
   });
   RFI(internal::operator_or)("NOR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
-    return sys->parse_block(ctx, scr, args, basicf::NOR);
+    return sys->fold_block(ctx, scr, args, basicf::NOR);
   });
   RFI(internal::rawadd)("ADD");
   RFI(internal::rawmul)("MUL");
@@ -693,6 +529,8 @@ void system::init_basic_functions() {
     if (ctx->ftype != function_type::lvalue) sys->raise_error(std::format("'value_or' expected to be lvalue"));
     if (type_is_void(ctx->expected_type)) sys->raise_error(std::format("Could not use 'value_or' in this context, is it effect block?"));
 
+    emitter e{sys, ctx, scr};
+
     size_t offset = 1;
     do { 
       auto cb = command_block(args, offset);
@@ -700,16 +538,18 @@ void system::init_basic_functions() {
       offset += sys->parse_arg<0, 0, decltype(&internal::value_or)>(ctx, scr, cb, utils::type_name<bool>(), std::string_view(), {});
     } while (ctx->pop_while_ignore());
 
-    const size_t index1 = sys->push_basic_function(ctx, scr, basicf::condjump, 0);
-    
-    do { 
+    auto else_branch = e.make_label();   // first arg false -> skip the second arg, take the default
+    e.jump_to(basicf::condjump, else_branch);
+
+    do {
       auto cb = command_block(args, offset);
       if (cb.name() == custom_description_constant) { offset += cb.size(); cb = command_block(args, offset); }
       offset += sys->parse_arg<1, 1, decltype(&internal::value_or)>(ctx, scr, cb, ctx->expected_type, std::string_view(), {});
     } while (ctx->pop_while_ignore());
     const auto second_arg_value_type = ctx->top();
-    const size_t index2 = sys->push_basic_function(ctx, scr, basicf::jump, 0);
-    scr->cmds[index1].arg = scr->cmds.size();
+    auto end = e.make_label();
+    e.jump_to(basicf::jump, end);
+    e.bind(else_branch);
 
     ctx->pop();
 
@@ -719,7 +559,7 @@ void system::init_basic_functions() {
       offset += sys->parse_arg<2, 2, decltype(&internal::value_or)>(ctx, scr, cb, second_arg_value_type, std::string_view(), {});
     } while (ctx->pop_while_ignore());
     const auto third_arg_value_type = ctx->top();
-    scr->cmds[index2].arg = scr->cmds.size();
+    e.bind(end);
 
     ctx->pop();
 
@@ -748,9 +588,9 @@ void system::init_basic_functions() {
 
     if (args.size() == 1) return args.size();
 
-    // sys->parse_block(ctx, scr, args, basicf::invalid); - doesnt produce description
+    // sys->fold_block(ctx, scr, args, basicf::invalid); - doesnt produce description
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->fold_block(ctx, scr, args, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
 
     return args.size();
@@ -768,7 +608,7 @@ void system::init_basic_functions() {
 
     change_chain_index cci(ctx);
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->fold_block(ctx, scr, args, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
 
     return args.size();
@@ -803,7 +643,7 @@ void system::init_basic_functions() {
     ctx->prev_chaining += counter; // ???
     
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->fold_block(ctx, scr, args, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
 
     ctx->prev_chaining = prev_value;
@@ -888,7 +728,8 @@ void system::init_basic_functions() {
 
     const bool requires_at_least_one_value = type_is_bool(exp) || type_is_fundamental(exp);
 
-    std::vector<size_t> jumps;
+    emitter e{sys, ctx, scr};
+    auto end = e.make_label();   // a matched clause jumps past all the rest
 
     size_t offset = 1;
     while (offset < args.size()) {
@@ -901,27 +742,26 @@ void system::init_basic_functions() {
       const auto cond = block.find("condition");
       if (requires_at_least_one_value && !last_block && cond.empty()) sys->raise_error(std::format("Each script block in 'select' except last one requires 'condition'"));
       if (requires_at_least_one_value && last_block && !cond.empty()) sys->raise_error(std::format("Last script block in 'select' must not contain 'condition'"));
-      
-      size_t local_jump = SIZE_MAX;
-      if (!cond.empty()) {
-        sys->parse_block(ctx, scr, cond, "AND");
-        local_jump = sys->push_basic_function(ctx, scr, basicf::condjump, 0);
+
+      auto next_clause = e.make_label();   // failed condition falls through to the next clause
+      const bool has_cond = !cond.empty();
+      if (has_cond) {
+        sys->dispatch_node(ctx, scr, cond, "AND");
+        e.jump_to(basicf::condjump, next_clause);
       }
 
-      sys->parse_block(ctx, scr, block);
+      sys->dispatch_node(ctx, scr, block);
       if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'select' function returns 'ignore_value'???"));
-      const size_t index2 = sys->push_basic_function(ctx, scr, basicf::jump, 0);
-      jumps.push_back(index2);
+      e.jump_to(basicf::jump, end);
 
-      if (local_jump != SIZE_MAX) scr->cmds[local_jump].arg = scr->cmds.size();
+      if (has_cond) e.bind(next_clause);
 
       if (!type_is_void(exp)) ctx->pop();
     }
 
     if (!type_is_void(exp)) ctx->push(exp);
 
-    const size_t curins = scr->cmds.size();
-    for (const auto i : jumps) { scr->cmds[i].arg = curins; }
+    e.bind(end);
 
     return args.size();
   });
@@ -944,7 +784,8 @@ void system::init_basic_functions() {
       if (exp_is_fund) sys->push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(0.0));
     }
 
-    std::vector<size_t> jumps;
+    emitter e{sys, ctx, scr};
+    auto end = e.make_label();   // a failed condition jumps out of the whole sequence
 
     size_t offset = 1;
     while (offset < args.size()) {
@@ -956,11 +797,10 @@ void system::init_basic_functions() {
       const auto cond = block.find("condition");
       if (cond.empty()) sys->raise_error(std::format("Each script block in 'sequence' requires 'condition'"));
 
-      sys->parse_block(ctx, scr, cond, "AND"); // condition would generate a description
-      const size_t index = sys->push_basic_function(ctx, scr, basicf::condjump, 0);
-      jumps.push_back(index);
+      sys->dispatch_node(ctx, scr, cond, "AND"); // condition would generate a description
+      e.jump_to(basicf::condjump, end);
 
-      sys->parse_block(ctx, scr, block);
+      sys->dispatch_node(ctx, scr, block);
       if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'sequence' function returns 'ignore_value'???"));
 
       if (exp_is_bool) {
@@ -977,8 +817,7 @@ void system::init_basic_functions() {
       }
     }
 
-    const size_t curins = scr->cmds.size();
-    for (const auto i : jumps) { scr->cmds[i].arg = curins; }
+    e.bind(end);
 
     return args.size();
   });
@@ -986,7 +825,8 @@ void system::init_basic_functions() {
   RFI(internal::switchfn)("switch", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
     //const auto exp = ctx->expected_type;
 
-    std::vector<size_t> jumps;
+    emitter e{sys, ctx, scr};
+    auto end = e.make_label();   // a matched case jumps past the rest
     std::vector<size_t> values_indicies;
 
     const size_t prev_index = ctx->stack_types.size()-1;
@@ -996,7 +836,7 @@ void system::init_basic_functions() {
       set_expected_type set(ctx, utils::type_name<any_object>());
       // сначала нужно вычислить рвалуе у value
       const auto valnode = args.find("value");
-      sys->parse_block(ctx, scr, valnode);
+      sys->dispatch_node(ctx, scr, valnode);
       stack_index = ctx->stack_types.size() - 1;
       if (prev_index == stack_index) sys->raise_error(std::format("'value' node in 'switch' does not produce a value"));
       ctx->scope_stack.push_back(stack_index);
@@ -1018,7 +858,7 @@ void system::init_basic_functions() {
 
         const size_t start = scr->block_descs.size();
         const auto valblock = curblock.find("value");
-        sys->parse_block(ctx, scr, valblock, "__object_block");
+        sys->dispatch_node(ctx, scr, valblock, "__object_block");
         const auto cd = valblock.find(custom_description_constant); // value ??
         sys->setup_block_description(ctx, scr, valblock.name(), command_block(cd, 1).name(), start);
 
@@ -1039,17 +879,17 @@ void system::init_basic_functions() {
       const size_t curid = values_indicies[arg_index];
 
       sys->push_basic_function(ctx, scr, basicf::cmpeq2, pack2(int32_t(stack_index), int32_t(curid))); // push
-      const size_t jumpid = sys->push_basic_function(ctx, scr, basicf::condjump, 0);
+      auto next_case = e.make_label();
+      e.jump_to(basicf::condjump, next_case);
 
-      sys->parse_block(ctx, scr, curblock);
+      sys->dispatch_node(ctx, scr, curblock);
 
-      scr->cmds[jumpid].arg = scr->cmds.size();
+      e.bind(next_case);
 
-      const size_t jumpout = sys->push_basic_function(ctx, scr, basicf::jump, 0);
-      jumps.push_back(jumpout);
+      e.jump_to(basicf::jump, end);
     }
 
-    for (const auto id : jumps) { scr->cmds[id].arg = scr->cmds.size(); }
+    e.bind(end);
 
     // чистим за собой ненужное
     sys->push_basic_function(ctx, scr, basicf::erase, stack_index);
@@ -1064,7 +904,7 @@ void system::init_basic_functions() {
   RFI(internal::rawless)("LESS");
 
   RFI(internal::chance)("chance", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block&, const std::vector<std::string>&) {
-    const auto val = sys->gen_value();
+    const auto val = ctx->gen_value();
     sys->push_basic_function(ctx, scr, basicf::chance, std::bit_cast<int64_t>(val)); // push
     return 0;
   });
@@ -1074,10 +914,11 @@ void system::init_basic_functions() {
 
     const bool is_void = type_is_void(exp);
 
-    std::vector<size_t> jumps;
+    emitter e{sys, ctx, scr};
+    auto end = e.make_label();   // a chosen weighted branch jumps past the rest
     std::vector<size_t> values_indicies;
 
-    const auto val = sys->gen_value();
+    const auto val = ctx->gen_value();
     const size_t chance_index = sys->push_basic_function(ctx, scr, basicf::chance, std::bit_cast<int64_t>(val));
     if (chance_index > INT32_MAX) sys->raise_error("wtf");
     const size_t stack_index = ctx->stack_types.size() - 1;
@@ -1096,7 +937,7 @@ void system::init_basic_functions() {
 
         set_expected_type set(ctx, utils::type_name<double>());
         const size_t start = scr->block_descs.size();
-        sys->parse_block(ctx, scr, wnode, basicf::ADD);
+        sys->fold_block(ctx, scr, wnode, basicf::ADD);
         const auto cd = wnode.find(custom_description_constant);
         sys->setup_block_description(ctx, scr, wnode.name(), command_block(cd, 1).name(), start);
 
@@ -1129,11 +970,12 @@ void system::init_basic_functions() {
       const size_t curid = values_indicies[arg_index];
 
       sys->push_basic_function(ctx, scr, basicf::cmplesseqd2, pack2(int32_t(stack_index), int32_t(curid))); // push
-      const size_t jumpid = sys->push_basic_function(ctx, scr, basicf::condjump, 0);
+      auto next_case = e.make_label();
+      e.jump_to(basicf::condjump, next_case);
 
       const size_t stack_size = ctx->stack_types.size();
       const size_t start = scr->block_descs.size();
-      sys->parse_block(ctx, scr, curblock, basicf::invalid);
+      sys->fold_block(ctx, scr, curblock, basicf::invalid);
       const auto cd = curblock.find(custom_description_constant);
       sys->setup_block_description(ctx, scr, curblock.name(), command_block(cd, 1).name(), start);
       if (!is_void) {
@@ -1142,13 +984,12 @@ void system::init_basic_functions() {
         ctx->pop();
       }
 
-      const size_t jumpout = sys->push_basic_function(ctx, scr, basicf::jump, 0);
-      jumps.push_back(jumpout);
+      e.jump_to(basicf::jump, end);
 
-      scr->cmds[jumpid].arg = scr->cmds.size();
+      e.bind(next_case);
     }
 
-    for (const auto id : jumps) { scr->cmds[id].arg = scr->cmds.size(); }
+    e.bind(end);
 
     // erase needs to be in OPPOSITE order
     std::reverse(values_indicies.begin(), values_indicies.end());
@@ -1166,7 +1007,7 @@ void system::init_basic_functions() {
     if (args.size() == 1) return args.size();
     
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->parse_block(ctx, scr, args, basicf::invalid);
+    sys->fold_block(ctx, scr, args, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
 
     return args.size();
@@ -1194,7 +1035,7 @@ void system::init_basic_functions() {
     const size_t desc_start = scr->block_descs.size();
 
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->parse_block(ctx, scr, nextblock, basicf::invalid);
+    sys->fold_block(ctx, scr, nextblock, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
 
     const auto desc_name = nextblock.find(custom_description_constant).name();
@@ -1214,7 +1055,7 @@ void system::init_basic_functions() {
 
       set_expected_type set(ctx, utils::type_name<element_view>());
       const auto childchild = command_block(child, 1);
-      sys->parse_block(ctx, scr, childchild);
+      sys->dispatch_node(ctx, scr, childchild);
 
       const auto top = ctx->top();
 
@@ -1301,7 +1142,7 @@ void system::init_basic_functions() {
     sys->push_basic_function(ctx, scr, basicf::pushargvalue, index);
     if (!nextblock.empty()) {
       ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-      sys->parse_block(ctx, scr, nextblock);
+      sys->dispatch_node(ctx, scr, nextblock);
       sys->scope_exit(ctx, scr, 1);
 
       if (!ctx->scope_type_upvalue.empty() && exp_value == utils::type_name<element_view>()) {
@@ -1323,7 +1164,7 @@ void system::init_basic_functions() {
 
       set_expected_type set(ctx, utils::type_name<element_view>());
       const auto childchild = command_block(child, 1);
-      sys->parse_block(ctx, scr, childchild);
+      sys->dispatch_node(ctx, scr, childchild);
 
       const auto top = ctx->top();
 
@@ -1405,7 +1246,7 @@ void system::init_basic_functions() {
     push_list_index_upvalue pliu(ctx, index);
     const auto nextblock = command_block(args, 1 + child.size());
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->parse_block(ctx, scr, nextblock);
+    sys->dispatch_node(ctx, scr, nextblock);
     sys->scope_exit(ctx, scr, 1);
 
     //const auto desc_name = nextblock.find(custom_description_constant).name();
@@ -1523,69 +1364,131 @@ void system::setup_block_description(parse_ctx* ctx, container* scr, const std::
   scr->block_descs[current_index].args_count = counter;
 }
 
+namespace {
+
+// How a basic instruction affects the compile-time type-stack on push.
+// Most ops push a static type; a few push a type derived from the script's args/saved/stack.
+enum class push_kind : uint8_t {
+  none, b_bool, b_double, b_int64, b_string,
+  root,           // scr->args[0].type   (pushroot)
+  arg_indexed,    // scr->args[arg].type  (pusharg / pushargvalue)
+  saved_indexed,  // scr->saved[arg].type (pushctxvalue)
+  same_as_top,    // duplicate the current stack top (current)
+  thisarg, thisctx, thisctxlist,
+};
+
+// One row per basic instruction — the single source of truth for its stack effect & description.
+// safe/unsafe are the two execution function pointers (equal when the op has no unsafe variant);
+// safe == nullptr marks a basicf value that is NOT directly emittable (blocks/combinators).
+struct insn_info {
+  function_t safe = nullptr;
+  function_t unsafe = nullptr;
+  uint8_t   pops = 0;            // type-slots popped before the push
+  push_kind pushes = push_kind::none;
+  bool      has_return = false;  // command_description flag (independent of the stack push)
+  uint8_t   arg_count = 0;       // command_description flag
+};
+
+constexpr size_t basicf_count = static_cast<size_t>(basicf::invalid) + 1;
+
+constexpr std::array<insn_info, basicf_count> make_insn_table() {
+  std::array<insn_info, basicf_count> t{};
+  using pk = push_kind;
+  auto row = [&](basicf id, function_t s, function_t u, uint8_t pops, pk pushes, bool ret, uint8_t ac) {
+    t[static_cast<size_t>(id)] = insn_info{ s, u, pops, pushes, ret, ac };
+  };
+  //  basicf                  safe              unsafe                 pops  pushes           ret    args
+  row(basicf::jump,          &jump,            &jump,                  0,    pk::none,        false, 0);
+  row(basicf::andbin,        &andbin,          &andbin_unsafe,         2,    pk::b_bool,      true,  2);
+  row(basicf::sum,           &sum,             &sum_unsafe,            2,    pk::b_double,    true,  2);
+  row(basicf::sumsetstack,   &sumsetstack,     &sumsetstack_unsafe,    0,    pk::none,        false, 0);
+  row(basicf::mulsetstack,   &mulsetstack,     &mulsetstack_unsafe,    0,    pk::none,        false, 0);
+  row(basicf::cmpeq2,        &cmpeq2,          &cmpeq2_unsafe,         0,    pk::b_bool,      true,  0);
+  row(basicf::cmplesseqd2,   &cmplesseqd2,     &cmplesseqd2_unsafe,    0,    pk::b_bool,      true,  0);
+  row(basicf::notfn,         &invb,            &invb_unsafe,           1,    pk::b_bool,      true,  1);
+  row(basicf::unary_plus,    &pos,             &pos_unsafe,            1,    pk::b_double,    true,  1);
+  row(basicf::unary_minus,   &neg,             &neg_unsafe,            1,    pk::b_double,    true,  1);
+  row(basicf::andjump,       &andjump,         &andjump_unsafe,        2,    pk::b_bool,      true,  2);
+  row(basicf::orjump,        &orjump,          &orjump_unsafe,         2,    pk::b_bool,      false, 2);
+  row(basicf::condjump,      &condjump,        &condjump_unsafe,       1,    pk::none,        false, 1);
+  row(basicf::condjumpt,     &condjumpt,       &condjumpt_unsafe,      1,    pk::none,        false, 1);
+  row(basicf::condjump_get,  &condjump_get,    &condjump_get_unsafe,   0,    pk::none,        false, 0);
+  row(basicf::condjumpt_get, &condjumpt_get,   &condjumpt_get_unsafe,  0,    pk::none,        false, 0);
+  row(basicf::pushbool,      &pushbool,        &pushbool,              0,    pk::b_bool,      true,  0);
+  row(basicf::pushvalue,     &pushvalue,       &pushvalue,             0,    pk::b_double,    true,  0);
+  row(basicf::chance,        &pushchance,      &pushchance,            0,    pk::b_double,    true,  0);
+  row(basicf::pushint,       &pushint,         &pushint,               0,    pk::b_int64,     true,  0);
+  row(basicf::pushstring,    &pushstring,      &pushstring,            0,    pk::b_string,    true,  0);
+  row(basicf::pushroot,      &pushroot,        &pushroot,              0,    pk::root,        true,  0);
+  row(basicf::pushthis,      &pushthis,        &pushthis,              0,    pk::none,        true,  0); // pushes outside this fn
+  row(basicf::pushprev,      &pushprev,        &pushprev,              0,    pk::none,        true,  0); // pushes outside this fn
+  row(basicf::pushreturn,    &pushreturn,      &pushreturn,            1,    pk::none,        false, 1);
+  row(basicf::pusharg,       &pusharg,         &pusharg,               0,    pk::arg_indexed, true,  0);
+  row(basicf::pushinvalid,   &pushinvalid,     &pushinvalid,           0,    pk::none,        true,  0);
+  row(basicf::argcontext,    &pushargcontext,  &pushargcontext,        0,    pk::thisarg,     true,  0);
+  row(basicf::context,       &pushcontext,     &pushcontext,           0,    pk::thisctx,     true,  0);
+  row(basicf::erase,         &erase,           &erase,                 0,    pk::none,        false, 0);
+  row(basicf::current,       &pushcurrent,     &pushcurrent,           0,    pk::same_as_top, true,  0);
+  row(basicf::pushargvalue,  &pushargvalue,    &pushargvalue,          0,    pk::arg_indexed, true,  0);
+  row(basicf::setargrvalue,  &setargrvalue,    &setargrvalue,          1,    pk::none,        false, 0);
+  row(basicf::setarglvalue,  &setarglvalue,    &setarglvalue,          0,    pk::none,        false, 0);
+  row(basicf::pushctxvalue,  &pushctxvalue,    &pushctxvalue,          0,    pk::saved_indexed,true,0);
+  row(basicf::savectxrvalue, &savectxrvalue,   &savectxrvalue,         1,    pk::none,        false, 0);
+  row(basicf::savectxlvalue, &savectxlvalue,   &savectxlvalue,         0,    pk::none,        false, 0);
+  row(basicf::pushlist,      &pushlist,        &pushlist,              0,    pk::thisctxlist, true,  0);
+  return t;
+}
+
+constexpr auto insn_table = make_insn_table();
+
+}  // namespace
+
 size_t system::push_basic_function(parse_ctx* ctx, container* scr, const basicf id, const int64_t arg) const {
   function_name_changer fnc(ctx, to_string(id));
 
-  const auto selector = [&](function_t unsafe, function_t safe) { return this->safety() ? safe : unsafe; };
+  const auto& info = insn_table[static_cast<size_t>(id)];
+  if (info.safe == nullptr) raise_error(std::format("'{}' is not supported here", to_string(id)));
 
-  bool has_return = 0;
-  size_t arg_count = 0;
-  switch (id) {
-    case basicf::jump: { scr->cmds.push_back(container::command(&jump, arg)); break; }
-    case basicf::andbin: { scr->cmds.push_back(container::command(selector(&andbin_unsafe, &andbin), arg)); has_return = true; arg_count = 2; ctx->pop(); ctx->pop(); ctx->push<bool>(); break; }
-    case basicf::sum: { scr->cmds.push_back(container::command(selector(&sum_unsafe, &sum), arg)); has_return = true; arg_count = 2; ctx->pop(); ctx->pop(); ctx->push<double>(); break; }
-    case basicf::sumsetstack: { scr->cmds.push_back(container::command(selector(&sumsetstack_unsafe, &sumsetstack), arg)); has_return = false; arg_count = 0; break; }
-    case basicf::mulsetstack: { scr->cmds.push_back(container::command(selector(&mulsetstack_unsafe, &mulsetstack), arg)); has_return = false; arg_count = 0; break; }
-    case basicf::cmpeq2: { scr->cmds.push_back(container::command(selector(&cmpeq2_unsafe, &cmpeq2), arg)); has_return = true; arg_count = 0; ctx->push<bool>(); break; }
-    case basicf::cmplesseqd2: { scr->cmds.push_back(container::command(selector(&cmplesseqd2_unsafe, &cmplesseqd2), arg)); has_return = true; arg_count = 0; ctx->push<bool>(); break; }
-    case basicf::notfn: { scr->cmds.push_back(container::command(selector(&invb_unsafe, &invb), arg)); has_return = true; arg_count = 1; ctx->pop(); ctx->push<bool>(); break; }
-    case basicf::unary_plus: { scr->cmds.push_back(container::command(selector(&pos_unsafe, &pos), arg)); has_return = true; arg_count = 1; ctx->pop(); ctx->push<double>(); break; }
-    case basicf::unary_minus: { scr->cmds.push_back(container::command(selector(&neg_unsafe, &neg), arg)); has_return = true; arg_count = 1; ctx->pop(); ctx->push<double>(); break; }
-    case basicf::andjump: { scr->cmds.push_back(container::command(selector(&andjump_unsafe, &andjump), arg)); has_return = true; arg_count = 2; ctx->pop(); ctx->pop(); ctx->push<bool>(); break; }
-    case basicf::orjump: { scr->cmds.push_back(container::command(selector(&orjump_unsafe, &orjump), arg)); has_return = false; arg_count = 2; ctx->pop(); ctx->pop(); ctx->push<bool>(); break; }
-    case basicf::condjump: { scr->cmds.push_back(container::command(selector(&condjump_unsafe, &condjump), arg)); has_return = false; arg_count = 1; ctx->pop(); break; }
-    case basicf::condjumpt: { scr->cmds.push_back(container::command(selector(&condjumpt_unsafe, &condjumpt), arg)); has_return = false; arg_count = 1; ctx->pop(); break; }
-    case basicf::condjump_get: { scr->cmds.push_back(container::command(selector(&condjump_get_unsafe, &condjump_get), arg)); has_return = false; arg_count = 0; break; }
-    case basicf::condjumpt_get: { scr->cmds.push_back(container::command(selector(&condjumpt_get_unsafe, &condjumpt_get), arg)); has_return = false; arg_count = 0; break; }
-    case basicf::pushbool: { scr->cmds.push_back(container::command(&pushbool, arg)); has_return = true; arg_count = 0; ctx->push<bool>(); break; }
-    case basicf::pushvalue: { scr->cmds.push_back(container::command(&pushvalue, arg)); has_return = true; arg_count = 0; ctx->push<double>(); break; }
-    case basicf::chance: { scr->cmds.push_back(container::command(&pushchance, arg)); has_return = true; arg_count = 0; ctx->push<double>(); break; }
-    case basicf::pushint: { scr->cmds.push_back(container::command(&pushint, arg)); has_return = true; arg_count = 0; ctx->push<int64_t>(); break; }
-    case basicf::pushstring: { scr->cmds.push_back(container::command(&pushstring, arg)); has_return = true; arg_count = 0; ctx->push<std::string_view>(); break; }
-    case basicf::pushroot: { scr->cmds.push_back(container::command(&pushroot, arg)); has_return = true; arg_count = 0; ctx->push(scr->args[0].type); break; }
-    case basicf::pushthis: { scr->cmds.push_back(container::command(&pushthis, arg)); has_return = true; arg_count = 0; break; } // needs to push outside this function =(
-    case basicf::pushprev: { scr->cmds.push_back(container::command(&pushprev, arg)); has_return = true; arg_count = 0; break; } // needs to push outside this function =(
-    case basicf::pushreturn: { scr->cmds.push_back(container::command(&pushreturn, arg)); has_return = false; arg_count = 1; ctx->pop(); break; }
-    case basicf::pusharg: { scr->cmds.push_back(container::command(&pusharg, arg)); has_return = true; arg_count = 0; ctx->push(scr->args[arg].type); break; }
-    case basicf::pushinvalid: { scr->cmds.push_back(container::command(&pushinvalid, arg)); has_return = true; arg_count = 0; break; }
-    case basicf::argcontext: { scr->cmds.push_back(container::command(&pushargcontext, arg)); has_return = true; arg_count = 0; ctx->push<internal::thisarg>(); break; }
-    case basicf::context: { scr->cmds.push_back(container::command(&pushcontext, arg)); has_return = true; arg_count = 0; ctx->push<internal::thisctx>(); break; }
-    case basicf::erase: { scr->cmds.push_back(container::command(&erase, arg)); has_return = false; arg_count = 0; break; }
-    case basicf::current: {
-      scr->cmds.push_back(container::command(&pushcurrent, arg)); has_return = true; arg_count = 0;
+  scr->cmds.push_back(container::command(safety() ? info.safe : info.unsafe, arg));
+
+  for (uint8_t i = 0; i < info.pops; ++i) ctx->pop();
+  switch (info.pushes) {
+    case push_kind::none:                                              break;
+    case push_kind::b_bool:        ctx->push<bool>();                  break;
+    case push_kind::b_double:      ctx->push<double>();                break;
+    case push_kind::b_int64:       ctx->push<int64_t>();               break;
+    case push_kind::b_string:      ctx->push<std::string_view>();      break;
+    case push_kind::root:          ctx->push(scr->args[0].type);       break;
+    case push_kind::arg_indexed:   ctx->push(scr->args[arg].type);     break;
+    case push_kind::saved_indexed: ctx->push(scr->saved[arg].type);    break;
+    case push_kind::same_as_top:
       if (ctx->stack_types.empty()) raise_error(std::format("Trying to use 'pushcurrent' function on an empty stack"));
       ctx->push(ctx->stack_types.back());
-      break; 
-    }
-    case basicf::pushargvalue: { scr->cmds.push_back(container::command(&pushargvalue, arg)); has_return = true; arg_count = 0; ctx->push(scr->args[arg].type); break; }
-    case basicf::setargrvalue: { scr->cmds.push_back(container::command(&setargrvalue, arg)); has_return = false; arg_count = 0; ctx->pop(); break; }
-    case basicf::setarglvalue: { scr->cmds.push_back(container::command(&setarglvalue, arg)); has_return = false; arg_count = 0; break; }
-    case basicf::pushctxvalue: { scr->cmds.push_back(container::command(&pushctxvalue, arg)); has_return = true; arg_count = 0; ctx->push(scr->saved[arg].type); break; }
-    case basicf::savectxrvalue: { scr->cmds.push_back(container::command(&savectxrvalue, arg)); has_return = false; arg_count = 0; ctx->pop(); break; }
-    case basicf::savectxlvalue: { scr->cmds.push_back(container::command(&savectxlvalue, arg)); has_return = false; arg_count = 0; break; }
-    case basicf::pushlist: { scr->cmds.push_back(container::command(&pushlist, arg)); has_return = true; arg_count = 0; ctx->push<internal::thisctxlist>(); break; }
-    default: raise_error(std::format("'{}' is not supported here", to_string(id)));
+      break;
+    case push_kind::thisarg:       ctx->push<internal::thisarg>();     break;
+    case push_kind::thisctx:       ctx->push<internal::thisctx>();     break;
+    case push_kind::thisctxlist:   ctx->push<internal::thisctxlist>(); break;
   }
 
   container::command_description desc(
-    { static_cast<size_t>(id), SIZE_MAX }, arg_count, 
-    false, true, has_return, false, ctx->nest_level, SIZE_MAX
+    { static_cast<size_t>(id), SIZE_MAX }, info.arg_count,
+    false, true, info.has_return, false, ctx->nest_level, SIZE_MAX
   );
   scr->descs.emplace_back(desc);
 
   if (scr->cmds.size() != scr->descs.size()) raise_error(std::format("Unconsistent descriptions {} != {}", scr->cmds.size(), scr->descs.size()));
 
   return scr->cmds.size()-1;
+}
+
+size_t system::emitter::emit(const basicf op, const int64_t arg) const { return sys->push_basic_function(ctx, scr, op, arg); }
+size_t system::emitter::emit_string(const std::string_view& str) const { return sys->push_string(ctx, scr, str); }
+system::emitter::label system::emitter::make_label() const { return label{}; }
+void system::emitter::jump_to(const basicf op, label& l) const { l.sites.push_back(emit(op, 0)); }
+void system::emitter::mark(label& l, const size_t cmd_index) const { l.sites.push_back(cmd_index); }
+void system::emitter::bind(label& l) const {
+  const size_t target = scr->cmds.size();
+  for (const size_t site : l.sites) scr->cmds[site].arg = target;
 }
 
 // we wanna save the position of the string in the global
@@ -1625,7 +1528,7 @@ size_t system::push_string(parse_ctx* ctx, container* scr, const std::string_vie
   return 1;
 }
 
-size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& override_lvalue) const {
+size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& override_lvalue) const {
   if (block.empty()) return 0;
 
   const auto exp_t = ctx->expected_type;
@@ -1662,7 +1565,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
       set_function_type sft(ctx, function_type::lvalue);
 
       std::array<rpn_conversion_ctx::block, 16 * 3+1> arr;
-      auto [local_fname, count] = rpn_ctx.convert_scope(funcname, arr.data(), arr.size());
+      auto [local_fname, count] = ctx->rpn_ctx.convert_scope(funcname, arr.data(), arr.size());
       funcname = local_fname;
 
       if (count == 0) {
@@ -1713,7 +1616,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
         setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
         return 1;
       } else {
-        return parse_block(ctx, scr, cb);
+        return dispatch_node(ctx, scr, cb);
       }
     }
   }
@@ -1733,7 +1636,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
     else if (type_is_void(exp_t)) curid = basicf::effect_block;
 
     const size_t desc_start = scr->block_descs.size();
-    const size_t count = parse_block(ctx, scr, block, curid);
+    const size_t count = fold_block(ctx, scr, block, curid);
     const auto cd = block.find(custom_description_constant);
     setup_block_description(ctx, scr, to_string(curid), command_block(cd, 1).name(), desc_start);
     return count;
@@ -1749,7 +1652,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
     if (is_object_block) curid = basicf::object_block;
 
     const size_t desc_start = scr->block_descs.size();
-    const size_t count = parse_block(ctx, scr, block, curid);
+    const size_t count = fold_block(ctx, scr, block, curid);
     const auto cd = block.find(custom_description_constant);
     setup_block_description(ctx, scr, funcname, command_block(cd, 1).name(), desc_start);
     return count;
@@ -1775,17 +1678,17 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
   return block.size(); // ?
 }
 
-size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const {
-  if (block.args_count() == 0 && block.size() == 1) return parse_block(ctx, scr, block);
+size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const {
+  if (block.args_count() == 0 && block.size() == 1) return dispatch_node(ctx, scr, block);
 
   if (id == basicf::NAND) { 
-    const size_t size = parse_block(ctx, scr, block, basicf::AND);
+    const size_t size = fold_block(ctx, scr, block, basicf::AND);
     push_basic_function(ctx, scr, basicf::notfn, 0);
     return size;
   }
 
   if (id == basicf::NOR) {
-    const size_t size = parse_block(ctx, scr, block, basicf::OR);
+    const size_t size = fold_block(ctx, scr, block, basicf::OR);
     push_basic_function(ctx, scr, basicf::notfn, 0);
     return size;
   }
@@ -1848,7 +1751,8 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
     default: raise_error(std::format("Wrong place for '{}'", to_string(id)));
   }
 
-  std::vector<size_t> jumps;
+  emitter e{this, ctx, scr};
+  auto end = e.make_label();   // every short-circuit / cond jump in this block resolves to the block end
 
   size_t current_stack_size = ctx->stack_types.size();
 
@@ -1860,16 +1764,15 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
 
     if (curid == basicf::effect_block || curid == basicf::string_subblock || curid == basicf::object_subblock) {
       if (const auto cond_block = child.find("condition"); !cond_block.empty()) {
-        parse_block(ctx, scr, cond_block, "AND");
+        dispatch_node(ctx, scr, cond_block, "AND");
         if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value?", cond_block.name()));
-        const size_t cond_jump_index = push_basic_function(ctx, scr, basicf::condjump, 0);
-        jumps.push_back(cond_jump_index);
+        e.jump_to(basicf::condjump, end);
       }
     }
 
     if (text::is_in_ignore_list(child.name())) continue;
 
-    parse_block(ctx, scr, child);
+    dispatch_node(ctx, scr, child);
     if (curid == basicf::effect_block) continue;
     if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value?", child.name()));
     if (ctx->is<ignore_value>()) { ctx->pop(); continue; }
@@ -1880,13 +1783,8 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
     counter += 1;
 
     if (curarg == 0) {
-      if (boolean_and_block) {
-        const size_t cond_jump_index = push_basic_function(ctx, scr, basicf::condjump_get, 0);
-        jumps.push_back(cond_jump_index);
-      } else if (boolean_or_block) {
-        const size_t cond_jump_index = push_basic_function(ctx, scr, basicf::condjumpt_get, 0);
-        jumps.push_back(cond_jump_index);
-      }
+      if (boolean_and_block) e.jump_to(basicf::condjump_get, end);
+      else if (boolean_or_block) e.jump_to(basicf::condjumpt_get, end);
 
       continue;
     }
@@ -1911,7 +1809,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
 
     if (boolean_and_block || boolean_or_block) {
       ctx->push<bool>();
-      jumps.push_back(scr->cmds.size()-1); // andjump orjump
+      e.mark(end, scr->cmds.size()-1); // andjump / orjump is itself a short-circuit site
     } else {
       ctx->push<double>();
     }
@@ -1919,7 +1817,7 @@ size_t system::parse_block(parse_ctx* ctx, container* scr, const command_block& 
     if (scr->cmds.size() != scr->descs.size()) raise_error(std::format("Unconsistent descriptions {} != {}, after block '{}'", scr->cmds.size(), scr->descs.size(), child.name()));
   }
 
-  for (const auto i : jumps) { scr->cmds[i].arg = scr->cmds.size(); }
+  e.bind(end);
   if (current_stack_size == ctx->stack_types.size()) ctx->push<ignore_value>(); // no value
 
   return block.size();
@@ -1930,29 +1828,36 @@ void system::check_is_str_part_of_and_throw(const std::string_view& big_str, con
     raise_error(std::format("'{}' is not part of script string? ( {} {} | {} {} )", small_str, std::bit_cast<size_t>(big_str.data()), std::bit_cast<size_t>(big_str.data() + big_str.size()), std::bit_cast<size_t>(small_str.data()), std::bit_cast<size_t>(small_str.data() + small_str.size())));
 }
 
-std::vector<std::string_view> system::make_operators_list() const {
-  std::vector<std::string_view> ops;
+void system::configure_parser(tavl::parser& p) const {
+  p.clear_operators();
+  // structural call operators — not registered in mfuncs; lowest precedence, right-assoc.
+  // `abc = {...}` / `abc ?= {...}` lower than any math so the rhs expression binds first.
+  p.add_operator("=",  tavl::op_fixity::binary, 1, tavl::op_assoc::right);
+  p.add_operator("?=", tavl::op_fixity::binary, 1, tavl::op_assoc::right);
 
-  for (const auto &[name, _] : mfuncs) {
-    if (!text::is_special_operator(name)) continue;
-    ops.push_back(std::string_view(name));
+  for (const auto& [name, scopes] : mfuncs) {
+    if (scopes.empty()) continue;
+    const auto& cd = scopes.begin()->second;        // operators don't vary by scope
+    if (cd.type != command_data::ftype::operator_t) continue;
+
+    // `unary_plus`/`unary_minus` are rpn-only aliases (see convert()); the source symbol is +/-,
+    // distinguished from the binary form by tavl op_fixity instead of a separate name.
+    std::string_view sym = name;
+    if (name == "unary_minus") sym = "-";
+    else if (name == "unary_plus") sym = "+";
+
+    tavl::op_fixity fixity;
+    switch (static_cast<command_data::math_ftype>(cd.arg_count)) {
+      case command_data::math_ftype::prefix:  fixity = tavl::op_fixity::prefix;  break;
+      case command_data::math_ftype::postfix: fixity = tavl::op_fixity::postfix; break;
+      default:                                fixity = tavl::op_fixity::binary;  break;
+    }
+    const auto assoc = (cd.assoc == command_data::associativity::right)
+      ? tavl::op_assoc::right : tavl::op_assoc::left;
+
+    if (text::is_special_operator(sym)) p.add_operator(sym, fixity, cd.priority, assoc);
+    else p.add_litteral_operator(sym, fixity, cd.priority, assoc);
   }
-
-  ops.push_back("(");
-  ops.push_back(")");
-  ops.push_back(",");
-  ops.push_back("=");
-  ops.push_back("?=");
-  ops.push_back(" ");
-  ops.push_back("\n");
-  ops.push_back("\r");
-  ops.push_back("\f");
-  ops.push_back("\v");
-  ops.push_back("\t");
-
-  std::sort(ops.begin(), ops.end(), [](const auto& a, const auto& b) -> bool { return a.size() > b.size(); });
-
-  return ops;
 }
 
 system::command_data::ftype system::get_token_type(const std::string_view& name) const {
