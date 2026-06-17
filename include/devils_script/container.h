@@ -121,6 +121,11 @@ struct container_view {
   std::string_view get_string(const size_t start, const size_t count) const;
 };
 
+// Human-readable disassembly of the compiled command array — one line per instruction:
+// `idx: opcode <arg>`, with branch targets rendered as `-> N`. For debugging and for
+// golden tests that pin the output of the compilation step (see tests/disasm.cpp).
+std::string disassemble(const container& scr);
+
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 }
 #endif

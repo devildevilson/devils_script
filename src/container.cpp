@@ -1,6 +1,8 @@
 #include "devils_script/container.h"
 
 #include <bit>
+#include <format>
+#include <string>
 #include "devils_script/context.h"
 #include <iostream>
 
@@ -90,6 +92,37 @@ std::string_view container::get_string(const size_t start, const size_t count) c
 
 std::string_view container::get_string(const command_description::global_string_view& str) const {
   return get_string(str.start, str.count);
+}
+
+std::string disassemble(const container& scr) {
+  std::string out;
+  for (size_t i = 0; i < scr.cmds.size(); ++i) {
+    const auto& desc = scr.descs[i];
+    const int64_t arg = scr.cmds[i].arg;
+    const std::string_view name = scr.get_string(desc.name);
+
+    // A desc whose name has count == SIZE_MAX is a basic instruction; its `start` is the
+    // basicf id (see push_basic_function). User-function descs carry a real global string.
+    const bool is_basic = desc.name.count == SIZE_MAX;
+    const basicf op = is_basic ? static_cast<basicf>(desc.name.start) : basicf::invalid;
+
+    std::string argstr;
+    switch (op) {
+      case basicf::jump: case basicf::condjump: case basicf::condjump_get:
+      case basicf::condjumpt_get: case basicf::andjump: case basicf::orjump:
+        argstr = std::format(" -> {}", arg); break;
+      case basicf::pushvalue:
+        argstr = std::format(" {}", std::bit_cast<double>(arg)); break;
+      case basicf::pushbool:
+        argstr = std::format(" {}", arg != 0 ? "true" : "false"); break;
+      default:
+        if (arg != 0) argstr = std::format(" {}", arg);
+        break;
+    }
+
+    out += std::format("{:>3}: {}{}\n", i, name, argstr);
+  }
+  return out;
 }
 
 size_t container::find_arg(const std::string_view& name) const {

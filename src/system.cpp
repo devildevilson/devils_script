@@ -737,7 +737,7 @@ void system::init_basic_functions() {
   RFI(internal::selectfn)("select", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto exp = ctx->expected_type;
-    if (type_is_string(exp) && type_is_object(exp)) sys->raise_error(std::format("Current language design makes 'select' meaningless in string and object blocks"));
+    if (type_is_string(exp) || type_is_object(exp)) sys->raise_error(std::format("Current language design makes 'select' meaningless in string and object blocks"));
 
     const bool requires_at_least_one_value = type_is_bool(exp) || type_is_fundamental(exp);
 
@@ -752,18 +752,12 @@ void system::init_basic_functions() {
       if (requires_at_least_one_value && !last_block && cond.empty()) sys->raise_error(std::format("Each script block in 'select' except last one requires 'condition'"));
       if (requires_at_least_one_value && last_block && !cond.empty()) sys->raise_error(std::format("Last script block in 'select' must not contain 'condition'"));
 
-      auto next_clause = e.make_label();   // failed condition falls through to the next clause
       const bool has_cond = !cond.empty();
-      if (has_cond) {
-        sys->dispatch_node(ctx, scr, cond, "AND");
-        e.jump_to(basicf::condjump, next_clause);
-      }
-
-      sys->dispatch_node(ctx, scr, block);
-      if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'select' function returns 'ignore_value'???"));
-      e.jump_to(basicf::jump, end);
-
-      if (has_cond) e.bind(next_clause);
+      if (has_cond) sys->dispatch_node(ctx, scr, cond, "AND");
+      e.guarded_clause(end, has_cond, [&]{
+        sys->dispatch_node(ctx, scr, block);
+        if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'select' function returns 'ignore_value'???"));
+      });
 
       if (!type_is_void(exp)) ctx->pop();
     }
@@ -783,7 +777,7 @@ void system::init_basic_functions() {
     // but maybe better to push ignore_value?
 
     const auto exp = ctx->expected_type;
-    if (type_is_string(exp) && type_is_object(exp)) sys->raise_error(std::format("Current language design makes 'select' meaningless in string and object blocks"));
+    if (type_is_string(exp) || type_is_object(exp)) sys->raise_error(std::format("Current language design makes 'sequence' meaningless in string and object blocks"));
 
     const bool exp_is_void = type_is_void(exp);
     const bool exp_is_bool = type_is_bool(exp);
@@ -963,23 +957,18 @@ void system::init_basic_functions() {
       const size_t curid = values_indicies[arg_index];
 
       sys->push_basic_function(ctx, scr, basicf::cmplesseqd2, pack2(int32_t(stack_index), int32_t(curid))); // push
-      auto next_case = e.make_label();
-      e.jump_to(basicf::condjump, next_case);
-
-      const size_t stack_size = ctx->stack_types.size();
-      const size_t start = scr->block_descs.size();
-      sys->fold_block(ctx, scr, curblock, basicf::invalid);
-      const auto cd = curblock.find(custom_description_constant);
-      sys->setup_block_description(ctx, scr, curblock.name(), command_block(cd, 1).name(), start);
-      if (!is_void) {
-        if (stack_size == ctx->stack_types.size()) sys->raise_error(std::format("'{}' produces no value on stack ???", curblock.name()));
-        if (value_type != ctx->top()) sys->raise_error(std::format("'random' node expects all of values to be same type, expected type '{}', but got '{}'", value_type, ctx->top()));
-        ctx->pop();
-      }
-
-      e.jump_to(basicf::jump, end);
-
-      e.bind(next_case);
+      e.guarded_clause(end, true, [&]{
+        const size_t stack_size = ctx->stack_types.size();
+        const size_t start = scr->block_descs.size();
+        sys->fold_block(ctx, scr, curblock, basicf::invalid);
+        const auto cd = curblock.find(custom_description_constant);
+        sys->setup_block_description(ctx, scr, curblock.name(), command_block(cd, 1).name(), start);
+        if (!is_void) {
+          if (stack_size == ctx->stack_types.size()) sys->raise_error(std::format("'{}' produces no value on stack ???", curblock.name()));
+          if (value_type != ctx->top()) sys->raise_error(std::format("'random' node expects all of values to be same type, expected type '{}', but got '{}'", value_type, ctx->top()));
+          ctx->pop();
+        }
+      });
     }
 
     e.bind(end);

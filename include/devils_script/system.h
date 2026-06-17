@@ -178,6 +178,20 @@ public:
     void jump_to(const basicf op, label& l) const;     // emit `op` (placeholder target), record its site
     void mark(label& l, const size_t cmd_index) const; // record an already-emitted cmd as a jump-site
     void bind(label& l) const;                         // patch every recorded site to current cmds.size()
+
+    // Emit one guarded clause of a control-flow combinator. When `guarded`, a `condjump`
+    // on the boolean test the caller just emitted skips the body (to a fresh per-clause
+    // label) if it is false; then `emit_body()` runs; then an unconditional jump to the
+    // shared `end`; finally the skip label is bound past the body. Centralizes the
+    // condjump/jump/bind ordering shared by select & random (and switch once repaired).
+    template <typename Body>
+    void guarded_clause(label& end, const bool guarded, Body&& emit_body) const {
+      label skip = make_label();
+      if (guarded) jump_to(basicf::condjump, skip);
+      emit_body();
+      jump_to(basicf::jump, end);
+      if (guarded) bind(skip);
+    }
   };
 
   struct command_data {
