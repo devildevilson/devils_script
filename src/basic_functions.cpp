@@ -75,12 +75,6 @@ int64_t condjump(int64_t arg, context* ctx, const container*) {
   return -1;
 }
 
-int64_t condjumpt(int64_t arg, context* ctx, const container*) {
-  const bool b = ctx->stack.safe_pop<bool>();
-  if (b) ctx->current_index = arg - 1;
-  return -1;
-}
-
 int64_t condjump_get(int64_t arg, context* ctx, const container*) {
   const bool b = ctx->stack.safe_get<bool>();
   if (!b) ctx->current_index = arg - 1;
@@ -117,12 +111,6 @@ int64_t condjump_unsafe(int64_t arg, context* ctx, const container*) {
   return -1;
 }
 
-int64_t condjumpt_unsafe(int64_t arg, context* ctx, const container*) {
-  const bool b = ctx->stack.pop<bool>();
-  if (b) ctx->current_index = arg - 1;
-  return -1;
-}
-
 int64_t condjump_get_unsafe(int64_t arg, context* ctx, const container*) {
   const bool b = ctx->stack.get<bool>();
   if (!b) ctx->current_index = arg - 1;
@@ -144,13 +132,6 @@ int64_t andbin(int64_t, context* ctx, const container*) {
   const bool n2 = ctx->stack.safe_pop<bool>();
   const bool n1 = ctx->stack.safe_pop<bool>();
   ctx->stack.push(n1 && n2);
-  return -1;
-}
-
-int64_t orbin(int64_t, context* ctx, const container*) {
-  const bool n2 = ctx->stack.safe_pop<bool>();
-  const bool n1 = ctx->stack.safe_pop<bool>();
-  ctx->stack.push(n1 || n2);
   return -1;
 }
 
@@ -237,13 +218,6 @@ int64_t andbin_unsafe(int64_t, context* ctx, const container*) {
   const bool n2 = ctx->stack.pop<bool>();
   const bool n1 = ctx->stack.pop<bool>();
   ctx->stack.push(n1 && n2);
-  return -1;
-}
-
-int64_t orbin_unsafe(int64_t, context* ctx, const container*) {
-  const bool n2 = ctx->stack.pop<bool>();
-  const bool n1 = ctx->stack.pop<bool>();
-  ctx->stack.push(n1 || n2);
   return -1;
 }
 

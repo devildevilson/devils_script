@@ -159,7 +159,7 @@ public:
     enum class ftype { operator_t, function_t, invalid };
     enum class associativity { left, right };
     enum class math_ftype { prefix = 1, binary, postfix };
-    using init_fn_t = std::function<size_t(const system*, parse_ctx*, container*, const command_block&)>;
+    using init_fn_t = std::function<size_t(emitter&, const command_block&)>;
 
     std::string name;
     std::string_view expected_scope;
@@ -172,7 +172,7 @@ public:
     init_fn_t init;
   };
 
-  using custom_init_fn_t = std::function<void(const system*, parse_ctx*, container*, const command_block&, const std::vector<std::string> &)>;
+  using custom_init_fn_t = std::function<void(emitter&, const command_block&, const std::vector<std::string> &)>;
 
   struct operator_props { int32_t priority; command_data::math_ftype mtype; command_data::associativity assoc; };
 
@@ -882,8 +882,9 @@ template <typename F, F f, typename HT, on_effect_t<F, HT> eff, is_valid_t<HT> v
 void system::register_function(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
 
   auto func = [func_args_names = std::move(func_args_names), init_f = std::move(init_f)]
-    (const system* sys, parse_ctx* ctx, container* scr, const command_block& args) -> size_t 
+    (emitter& e, const command_block& args) -> size_t
   {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     using memder_of = utils::function_member_of<F>;
     using scope_type = std::conditional_t<utils::is_void_v<HT>, memder_of, std::remove_cvref_t<HT>>;
     using ret_type = final_stack_el_t<utils::function_result_type<F>>;
@@ -1003,7 +1004,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
       }
 
       for (const auto i : jumps) { scr->cmds[i].arg = scr->cmds.size(); }
-    } else std::invoke(init_f, sys, ctx, scr, args, func_args_names);
+    } else std::invoke(init_f, e, args, func_args_names);
 
       
     // additional checks?
@@ -1092,7 +1093,8 @@ void system::register_operator(std::string name, const operator_props& ps, custo
 
   command_data mcd{
     name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
-    [init_f = std::move(init_f)](const system* sys, parse_ctx* ctx, container* scr, const command_block& args) -> size_t {
+    [init_f = std::move(init_f)](emitter& e, const command_block& args) -> size_t {
+      [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
       constexpr auto stn = scope_type_name<scope_type>();
       const auto curfname = ctx->function_names.back();
 
@@ -1160,7 +1162,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
         }
 
         for (const auto i : jumps) { scr->cmds[i].arg = scr->cmds.size(); }
-      } else std::invoke(init_f, sys, ctx, scr, args, std::vector<std::string>{});
+      } else std::invoke(init_f, e, args, std::vector<std::string>{});
 
       
       // additional checks?
@@ -1192,8 +1194,9 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
   command_data cd{
     name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), 15, 50, command_data::associativity::right, parse_ftype,
     [func_args_names = std::move(func_args_names), init_f = std::move(init_f)]
-      (const system* sys, parse_ctx* ctx, container* scr, const command_block& args)
+      (emitter& e, const command_block& args)
     {
+      [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
       constexpr bool is_not_member_func = is_not_member_function<F>;
       using scope_type = HT;
       constexpr bool requires_scope = !utils::is_void_v<scope_type>;
@@ -1220,7 +1223,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
       if (expected_void && uftype != user_function_type::iterator_effect) sys->raise_error(std::format("Effect iterator is outside of effect scriptblock?"));
 
       if (init_f) {
-        std::invoke(init_f, sys, ctx, scr, args, func_args_names);
+        std::invoke(init_f, e, args, func_args_names);
       } else {
         constexpr function_t fs[] = { &useriter_unsafe<F, f, HT, vf>, &useriter<F, f, HT, vf> };
         scr->cmds.emplace_back(container::command(fs[size_t(sys->safety())], scope_index));

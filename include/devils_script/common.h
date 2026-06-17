@@ -40,7 +40,6 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
   X(andjump) \
   X(orjump) \
   X(condjump) \
-  X(condjumpt) \
   X(condjump_get) \
   X(condjumpt_get) \
   X(pushbool) \

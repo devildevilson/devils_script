@@ -33,19 +33,16 @@ bool check_value(const int64_t val, const size_t bits) noexcept;
 int64_t andjump(int64_t, context*, const container*);
 int64_t orjump(int64_t, context*, const container*);
 int64_t condjump(int64_t, context*, const container*);
-int64_t condjumpt(int64_t, context*, const container*);
 int64_t condjump_get(int64_t, context*, const container*);
 int64_t condjumpt_get(int64_t, context*, const container*);
 int64_t andjump_unsafe(int64_t, context*, const container*);
 int64_t orjump_unsafe(int64_t, context*, const container*);
 int64_t condjump_unsafe(int64_t, context*, const container*);
-int64_t condjumpt_unsafe(int64_t, context*, const container*);
 int64_t condjump_get_unsafe(int64_t, context*, const container*);
 int64_t condjumpt_get_unsafe(int64_t, context*, const container*);
 int64_t jump(int64_t, context*, const container*);
 
 int64_t andbin(int64_t, context*, const container*);
-int64_t orbin(int64_t, context*, const container*);
 
 int64_t invb(int64_t, context*, const container*);
 int64_t sum(int64_t, context*, const container*);
@@ -61,7 +58,6 @@ int64_t sumsetstack(int64_t, context*, const container*);
 int64_t mulsetstack(int64_t, context*, const container*);
 
 int64_t andbin_unsafe(int64_t, context*, const container*);
-int64_t orbin_unsafe(int64_t, context*, const container*);
 int64_t invb_unsafe(int64_t, context*, const container*);
 int64_t sum_unsafe(int64_t, context*, const container*);
 int64_t mul_unsafe(int64_t, context*, const container*);

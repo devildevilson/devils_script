@@ -510,26 +510,30 @@ static void add_cmd(const system* sys, container* scr) {
 #define ADD_CMD(fn) add_cmd<decltype(&fn), fn>
 
 void system::init_basic_functions() {
-  RFI(internal::operator_and)("AND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::operator_and)("AND", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     return sys->fold_block(ctx, scr, args, basicf::AND);
   });
-  RFI(internal::operator_or)("OR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::operator_or)("OR", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     return sys->fold_block(ctx, scr, args, basicf::OR);
   });
-  RFI(internal::operator_and)("NAND", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::operator_and)("NAND", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     return sys->fold_block(ctx, scr, args, basicf::NAND);
   });
-  RFI(internal::operator_or)("NOR", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::operator_or)("NOR", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     return sys->fold_block(ctx, scr, args, basicf::NOR);
   });
   RFI(internal::rawadd)("ADD");
   RFI(internal::rawmul)("MUL");
   // is 'while (ctx->pop_while_ignore())' an overkill for this situations?
-  RFI(internal::value_or)("value_or", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string> &) -> size_t {
+  RFI(internal::value_or)("value_or", {}, [](emitter& e, const command_block& args, const std::vector<std::string> &) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     if (ctx->ftype != function_type::lvalue) sys->raise_error(std::format("'value_or' expected to be lvalue"));
     if (type_is_void(ctx->expected_type)) sys->raise_error(std::format("Could not use 'value_or' in this context, is it effect block?"));
 
-    emitter e{sys, ctx, scr};
 
     size_t offset = 1;
     do { 
@@ -581,7 +585,8 @@ void system::init_basic_functions() {
     return args.size();
   });
   
-  RFI(internal::thisfn)("this", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::thisfn)("this", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     if (ctx->scope_stack.size() == 0) sys->raise_error(std::format("Function 'this' requires at least 1 element in scope_stack"));
     sys->push_basic_function(ctx, scr, basicf::pushthis, ctx->current_scope_index());
     ctx->push(ctx->current_scope_type());
@@ -596,7 +601,8 @@ void system::init_basic_functions() {
     return args.size();
   });
   
-  RFI(internal::prevfn)("prev", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::prevfn)("prev", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     if (ctx->scope_stack.size() <= 1 + ctx->prev_chaining) sys->raise_error(std::format("Function 'prev' requires at least 2 elements in scope_stack"));
 
     // mess =(
@@ -615,7 +621,8 @@ void system::init_basic_functions() {
   });
 
   // jump out of the script internal ctxs
-  RFI(internal::prevfn)("outer", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::prevfn)("outer", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     size_t counter = 0;
     size_t fin_index = SIZE_MAX;
     for (auto itr = ctx->scope_stack.rbegin(); itr != ctx->scope_stack.rend(); ++itr) {
@@ -652,7 +659,8 @@ void system::init_basic_functions() {
   });
 
   // making equality for every possible combinations...
-  const auto eqfn = [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  const auto eqfn = [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto expected = utils::type_name<element_view>();
     size_t offset = 1;
     do { 
@@ -698,37 +706,41 @@ void system::init_basic_functions() {
     return args.size();
   };
 
-  RFI(internal::raweq)("EQ", {}, [eqfn](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) {
-    return std::invoke(eqfn, sys, ctx, scr, args, func_args_names);
+  RFI(internal::raweq)("EQ", {}, [eqfn](emitter& e, const command_block& args, const std::vector<std::string>& func_args_names) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    return std::invoke(eqfn, e, args, func_args_names);
   });
 
   const operator_props op_specs = { 7, command_data::math_ftype::binary, command_data::associativity::left };
-  ROI(internal::raweq)("==", op_specs, [eqfn](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) {
-    return std::invoke(eqfn, sys, ctx, scr, args, func_args_names);
+  ROI(internal::raweq)("==", op_specs, [eqfn](emitter& e, const command_block& args, const std::vector<std::string>& func_args_names) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    return std::invoke(eqfn, e, args, func_args_names);
   });
 
-  RFI(internal::raweq)("NEQ", {}, [eqfn](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) {
+  RFI(internal::raweq)("NEQ", {}, [eqfn](emitter& e, const command_block& args, const std::vector<std::string>& func_args_names) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     // override function to "EQ" ???
-    const size_t count = std::invoke(eqfn, sys, ctx, scr, args, func_args_names);
-    sys->push_basic_function(ctx, scr, basicf::notfn, 0);
+    const size_t count = std::invoke(eqfn, e, args, func_args_names);
+    e.emit(basicf::notfn, 0);
     return count;
   });
 
-  ROI(internal::raweq)("!=", op_specs, [eqfn](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>& func_args_names) {
-    const size_t count = std::invoke(eqfn, sys, ctx, scr, args, func_args_names);
-    sys->push_basic_function(ctx, scr, basicf::notfn, 0);
+  ROI(internal::raweq)("!=", op_specs, [eqfn](emitter& e, const command_block& args, const std::vector<std::string>& func_args_names) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    const size_t count = std::invoke(eqfn, e, args, func_args_names);
+    e.emit(basicf::notfn, 0);
     return count;
   });
 
   // find first 'condition' that true and compute a block
   // simple "if then else"
-  RFI(internal::selectfn)("select", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) -> size_t {
+  RFI(internal::selectfn)("select", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto exp = ctx->expected_type;
     if (type_is_string(exp) && type_is_object(exp)) sys->raise_error(std::format("Current language design makes 'select' meaningless in string and object blocks"));
 
     const bool requires_at_least_one_value = type_is_bool(exp) || type_is_fundamental(exp);
 
-    emitter e{sys, ctx, scr};
     auto end = e.make_label();   // a matched clause jumps past all the rest
 
     size_t offset = 1;
@@ -768,7 +780,8 @@ void system::init_basic_functions() {
   
   // while 'condition' block is true, do command in a block
   // when false, jump out
-  RFI(internal::selectfn)("sequence", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::selectfn)("sequence", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     // what to do when no value? now i try to push default one
     // but maybe better to push ignore_value?
 
@@ -784,7 +797,6 @@ void system::init_basic_functions() {
       if (exp_is_fund) sys->push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(0.0));
     }
 
-    emitter e{sys, ctx, scr};
     auto end = e.make_label();   // a failed condition jumps out of the whole sequence
 
     size_t offset = 1;
@@ -822,10 +834,10 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::switchfn)("switch", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::switchfn)("switch", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     //const auto exp = ctx->expected_type;
 
-    emitter e{sys, ctx, scr};
     auto end = e.make_label();   // a matched case jumps past the rest
     std::vector<size_t> values_indicies;
 
@@ -903,18 +915,19 @@ void system::init_basic_functions() {
   RFI(internal::rawmore)("MORE");
   RFI(internal::rawless)("LESS");
 
-  RFI(internal::chance)("chance", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block&, const std::vector<std::string>&) {
+  RFI(internal::chance)("chance", {}, [](emitter& e, const command_block&, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto val = ctx->gen_value();
     sys->push_basic_function(ctx, scr, basicf::chance, std::bit_cast<int64_t>(val)); // push
     return 0;
   });
 
-  RFI(internal::randomfn)("random", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::randomfn)("random", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto exp = ctx->expected_type;
 
     const bool is_void = type_is_void(exp);
 
-    emitter e{sys, ctx, scr};
     auto end = e.make_label();   // a chosen weighted branch jumps past the rest
     std::vector<size_t> values_indicies;
 
@@ -1002,7 +1015,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::ctx)("ctx", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::ctx)("ctx", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     sys->push_basic_function(ctx, scr, basicf::context, 0);
     if (args.size() == 1) return args.size();
     
@@ -1013,7 +1027,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::loadctx)("saved", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::loadctx)("saved", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto child = command_block(args, 1);
     if (child.empty() || child.args_count() != 0 || child.size() != 1) sys->raise_error(std::format("'ctx:load' expects a string as the only argument"));
 
@@ -1044,7 +1059,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::ctx_save)("ctx_save", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::ctx_save)("ctx_save", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     size_t offset = 1;
     while (offset < args.size()) {
       const auto child = command_block(args, offset);
@@ -1082,7 +1098,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::ctx_save_as)("ctx_save_as", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::ctx_save_as)("ctx_save_as", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto child = command_block(args, 1);
     if (child.empty() || child.size() > 1) sys->raise_error("'ctx:save_as' expects string as the only argument");
 
@@ -1110,7 +1127,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::arg)("arg", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::arg)("arg", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto child = command_block(args, 1);
     if (child.empty() || child.size() > 1) sys->raise_error("'arg:get' expects string as the only argument");
 
@@ -1153,7 +1171,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::ctx_set)("ctx_set", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::ctx_set)("ctx_set", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     size_t offset = 1;
     while (offset < args.size()) {
       const auto child = command_block(args, offset);
@@ -1191,7 +1210,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::ctx_set_as)("ctx_set_as", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::ctx_set_as)("ctx_set_as", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto child = command_block(args, 1);
     if (child.empty() || child.size() > 1) sys->raise_error("'ctx:save_as' expects string as the only argument");
 
@@ -1219,7 +1239,8 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  RFI(internal::list)("list", {}, [](const system* sys, parse_ctx* ctx, container* scr, const command_block& args, const std::vector<std::string>&) {
+  RFI(internal::list)("list", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto child = command_block(args, 1);
     if (child.empty() || child.size() > 1) sys->raise_error("'ctx:list' expects string as the only argument");
 
@@ -1411,7 +1432,6 @@ constexpr std::array<insn_info, basicf_count> make_insn_table() {
   row(basicf::andjump,       &andjump,         &andjump_unsafe,        2,    pk::b_bool,      true,  2);
   row(basicf::orjump,        &orjump,          &orjump_unsafe,         2,    pk::b_bool,      false, 2);
   row(basicf::condjump,      &condjump,        &condjump_unsafe,       1,    pk::none,        false, 1);
-  row(basicf::condjumpt,     &condjumpt,       &condjumpt_unsafe,      1,    pk::none,        false, 1);
   row(basicf::condjump_get,  &condjump_get,    &condjump_get_unsafe,   0,    pk::none,        false, 0);
   row(basicf::condjumpt_get, &condjumpt_get,   &condjumpt_get_unsafe,  0,    pk::none,        false, 0);
   row(basicf::pushbool,      &pushbool,        &pushbool,              0,    pk::b_bool,      true,  0);
@@ -1584,7 +1604,8 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
         if (scope_itr == itr->second.end()) { scope_itr = itr->second.find(std::string(scope_type_name<void>())); }
         if (scope_itr == itr->second.end()) raise_error(std::format("Could not find function '{}' for scope type '{}'", block.name(), ctx->current_scope_type()));
 
-        const size_t count = std::invoke(scope_itr->second.init, this, ctx, scr, block);
+        emitter e{this, ctx, scr};
+        const size_t count = std::invoke(scope_itr->second.init, e, block);
         setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
         return count;
       }
@@ -1668,7 +1689,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   if (scope_itr == itr->second.end()) { scope_itr = itr->second.find(std::string(scope_type_name<void>())); }
   if (scope_itr == itr->second.end()) raise_error(std::format("Could not find function '{}' for scope type '{}'", block.name(), ctx->current_scope_type()));
 
-  std::invoke(scope_itr->second.init, this, ctx, scr, block);
+  { emitter e{this, ctx, scr}; std::invoke(scope_itr->second.init, e, block); }
 
   if (is_subblock || is_condition || is_not_overriden) {
     const auto cd = block.find(custom_description_constant);
