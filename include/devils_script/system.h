@@ -77,6 +77,31 @@ public:
     size_t args_count() const;
     size_t size() const;
     bool empty() const;
+
+    // Forward range over the direct child blocks, auto-skipping `custom_description`
+    // entries. Replaces the hand-rolled `child = command_block(args, offset);
+    // offset += child.size(); if (child.name() == custom_description_constant) continue;`
+    // idiom that was repeated across the clause-folding functions.
+    struct child_iterator {
+      const command_block* parent;
+      size_t offset;
+      void skip_desc() {
+        while (offset < parent->size() && command_block(*parent, offset).name() == custom_description_constant)
+          offset += command_block(*parent, offset).size();
+      }
+      command_block operator*() const { return command_block(*parent, offset); }
+      child_iterator& operator++() { offset += command_block(*parent, offset).size(); skip_desc(); return *this; }
+      bool operator==(const child_iterator& o) const { return offset == o.offset; }
+      bool operator!=(const child_iterator& o) const { return offset != o.offset; }
+      // true when no further non-description child follows the current one.
+      bool is_last() const { child_iterator n = *this; ++n; return n.offset >= parent->size(); }
+    };
+    struct children_view {
+      const command_block* parent;
+      child_iterator begin() const { child_iterator it{parent, 1}; it.skip_desc(); return it; }
+      child_iterator end() const { return child_iterator{parent, parent->size()}; }
+    };
+    children_view children() const { return children_view{this}; }
   };
 
   struct parse_ctx {

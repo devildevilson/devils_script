@@ -743,13 +743,10 @@ void system::init_basic_functions() {
 
     auto end = e.make_label();   // a matched clause jumps past all the rest
 
-    size_t offset = 1;
-    while (offset < args.size()) {
-      auto block = command_block(args, offset);
-      offset += block.size();
-      const bool last_block = command_block(args, offset).empty();
-
-      if (block.name() == custom_description_constant) continue;
+    const auto kids = args.children();
+    for (auto it = kids.begin(); it != kids.end(); ++it) {
+      const auto block = *it;
+      const bool last_block = it.is_last();
 
       const auto cond = block.find("condition");
       if (requires_at_least_one_value && !last_block && cond.empty()) sys->raise_error(std::format("Each script block in 'select' except last one requires 'condition'"));
@@ -799,13 +796,7 @@ void system::init_basic_functions() {
 
     auto end = e.make_label();   // a failed condition jumps out of the whole sequence
 
-    size_t offset = 1;
-    while (offset < args.size()) {
-      auto block = command_block(args, offset);
-      offset += block.size();
-
-      if (block.name() == custom_description_constant) continue;
-
+    for (const auto& block : args.children()) {
       const auto cond = block.find("condition");
       if (cond.empty()) sys->raise_error(std::format("Each script block in 'sequence' requires 'condition'"));
 
@@ -938,13 +929,7 @@ void system::init_basic_functions() {
     size_t last_index = stack_index;
 
     {
-      size_t offset = 1;
-      while (offset < args.size()) {
-        const auto curblock = command_block(args, offset);
-        offset += curblock.size();
-
-        if (curblock.name() == custom_description_constant) continue;
-
+      for (const auto& curblock : args.children()) {
         const auto wnode = curblock.find("weight");
         if (wnode.empty()) sys->raise_error(std::format("'random' node requires all of nodes to have node 'weight'"));
 
@@ -971,12 +956,7 @@ void system::init_basic_functions() {
     std::string_view value_type = exp;
 
     size_t counter = 0;
-    size_t offset = 1;
-    while (offset < args.size()) {
-      const auto curblock = command_block(args, offset);
-      offset += curblock.size();
-      if (curblock.name() == custom_description_constant) continue;
-
+    for (const auto& curblock : args.children()) {
       const size_t arg_index = counter;
       counter += 1;
 
