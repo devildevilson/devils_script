@@ -12,6 +12,15 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 #endif
 
 namespace detail {
+template <typename T>
+struct is_script_function : std::false_type {};
+
+template <typename R, typename Arg>
+struct is_script_function<script_function<R(Arg)>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_script_function_v = is_script_function<std::remove_cvref_t<T>>::value;
+
 template <size_t OFF, size_t COUNT, typename F, F f, typename HT, is_valid_t<HT> vt, size_t... I>
 int64_t invoke_mathfunc(int64_t val, context* ctx, const container* scr, std::index_sequence<I...>);
 
@@ -527,7 +536,9 @@ int64_t useriter(int64_t val, context* ctx, const container* scr) {
     static_assert(utils::is_function_v<fn_t>);
 
     if (cmd_ends[index] == 0) std::get<cur_index>(args_tuple) = nullptr;
-    else {
+    else if constexpr (detail::is_script_function_v<fn_t>) {
+      std::get<cur_index>(args_tuple) = fn_t(ctx, scr, cmd_starts[index], cmd_ends[index]);
+    } else {
       container_view v(scr, cmd_starts[index], cmd_ends[index]); // copy? 
       std::get<cur_index>(args_tuple) = [v, ctx](input_type in) -> value_type {
         ctx->stack.push(in);
@@ -786,7 +797,9 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
     using input_type = utils::function_argument_type<fn_t, 0>;
 
     if (cmd_ends[index] == 0) std::get<cur_index>(args_tuple) = nullptr;
-    else {
+    else if constexpr (detail::is_script_function_v<fn_t>) {
+      std::get<cur_index>(args_tuple) = fn_t(ctx, scr, cmd_starts[index], cmd_ends[index]);
+    } else {
       container_view v(scr, cmd_starts[index], cmd_ends[index]); // copy? 
       std::get<cur_index>(args_tuple) = [v, ctx](input_type in) -> value_type {
         ctx->stack.push(in);

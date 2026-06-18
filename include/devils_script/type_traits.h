@@ -22,6 +22,9 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 #endif
 
+template <typename Signature>
+struct script_function;
+
 namespace utils {
   enum class function_class {
     type,
@@ -298,6 +301,23 @@ namespace utils {
   };
 
   template<typename R, typename... Args>
+  struct function_traits_v2<script_function<R(Args...)>> {
+    using member_of = void_t;
+    using result_type = R;
+    using argument_types = std::tuple<Args..., void_t>;
+    using arguments_tuple_t = std::tuple<std::remove_cvref_t<Args>...>;
+    static constexpr bool is_function = true;
+    static constexpr size_t argument_count = std::tuple_size_v<argument_types>-1;
+    static constexpr bool is_function_type = false;
+    static constexpr bool is_function_pointer = false;
+    static constexpr bool is_std_function = false;
+    static constexpr bool is_member_function = false;
+    static constexpr bool is_const = false;
+    static constexpr bool is_volatile = false;
+    static constexpr bool is_noexcept = false;
+  };
+
+  template<typename R, typename... Args>
   struct function_traits_v2<R(*)(Args...)> {
     using member_of = void_t;
     using result_type = R;
@@ -563,6 +583,7 @@ namespace utils {
   template<typename R, typename... Args> constexpr bool is_function_impl_v<std::function<R(Args...) const noexcept>> = true;
   template<typename R, typename... Args> constexpr bool is_function_impl_v<std::function<R(Args...) volatile noexcept>> = true;
   template<typename R, typename... Args> constexpr bool is_function_impl_v<std::function<R(Args...) volatile const noexcept>> = true;
+  template<typename R, typename... Args> constexpr bool is_function_impl_v<script_function<R(Args...)>> = true;
   template<typename R, typename... Args> constexpr bool is_function_impl_v<R(*)(Args...)> = true;
   template<typename R, typename... Args> constexpr bool is_function_impl_v<R(*)(Args...) noexcept> = true;
   template<typename R, typename C, typename... Args> constexpr bool is_function_impl_v<R(C::*)(Args...)> = true;

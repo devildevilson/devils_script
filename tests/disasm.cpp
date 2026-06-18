@@ -28,20 +28,15 @@ static std::string disasm_bool(const char* script) {
 TEST_CASE("disassembly golden") {
   SUBCASE("equality (bool root folds the single operand as AND)") {
     const std::string expected =
-      "  0: pushvalue 10\n"
-      "  1: pushvalue 20\n"
-      "  2: ==\n"
-      "  3: condjump_get -> 4\n"
-      "  4: pushreturn\n";
+      "  0: pushbool false\n"
+      "  1: pushreturn\n";
     CHECK_EQ(disasm_bool("10 == 20"), expected);
   }
 
   SUBCASE("sum") {
     const std::string expected =
-      "  0: pushvalue 5\n"
-      "  1: pushvalue 5\n"
-      "  2: + 9223372036854775807\n"
-      "  3: pushreturn\n";
+      "  0: pushvalue 10\n"
+      "  1: pushreturn\n";
     CHECK_EQ(disasm_double("5 + 5"), expected);
   }
 

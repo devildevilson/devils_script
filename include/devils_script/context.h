@@ -2,7 +2,8 @@
 
 #include <cstdint>
 #include <cstddef> 
-#include <array> 
+#include <array>
+#include <vector>
 #include <string_view>
 #include <string>
 #include <cstring>
@@ -24,13 +25,12 @@ struct context {
   static constexpr size_t stack_size = DEVILS_SCRIPT_DEFAULT_STACK_SIZE;
   static constexpr size_t local_vars_size = 16;
 
-  template <size_t N>
   struct stack_t {
     size_t _size;
-    std::array<stack_element, N> _data;
-    std::array<std::string_view, N> _types;
+    std::vector<stack_element> _data;
+    std::vector<std::string_view> _types;
 
-    stack_t() noexcept;
+    stack_t(const size_t max) noexcept;
 
     template <typename T> requires(valid_stack_type<T>)
     bool is() const;
@@ -80,9 +80,9 @@ struct context {
     auto rawget(const size_t index) const -> final_stack_el_t<T>*;
   };
 
-  struct stack_t<stack_size> stack;
-  struct stack_t<local_vars_size> saved_stack;
-  struct stack_t<script_arguments_size> args_stack;
+  stack_t stack;
+  stack_t saved_stack;
+  stack_t args_stack;
 
   uint64_t prng_state;
   size_t current_index;
@@ -93,9 +93,11 @@ struct context {
   std::vector<std::vector<stack_element>> lists;
 
   // prng_state - any non 0
-  inline context() noexcept : prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr) {
+  inline context() noexcept
+    : stack(stack_size), saved_stack(local_vars_size), args_stack(script_arguments_size),
+      prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr) {
     // resize saved_stack because indices are controlled by script, no push/pop (?)
-    saved_stack._size = saved_stack._data.size(); 
+    saved_stack._size = saved_stack._data.size();
     // resize args_stack because indices are controlled by script, no push/pop (?)
     args_stack._size = args_stack._data.size();
   }
@@ -144,12 +146,10 @@ struct context {
   void create_lists(const container* scr);
 };
 
-template <size_t N>
-context::stack_t<N>::stack_t() noexcept : _size(0) {}
+inline context::stack_t::stack_t(const size_t max) noexcept : _size(0) { _data.resize(max); _types.resize(max); }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-bool context::stack_t<N>::is() const {
+bool context::stack_t::is() const {
   using basic_T = final_stack_el_t<T>;
   if constexpr (is_typeless_v<basic_T>) {
     return true;
@@ -159,9 +159,8 @@ bool context::stack_t<N>::is() const {
   } else return _size > 0 && _types[_size - 1] == utils::type_name<basic_T>();
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-bool context::stack_t<N>::is(const int64_t index) const {
+bool context::stack_t::is(const int64_t index) const {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   if constexpr (is_typeless_v<basic_T>) {
@@ -172,18 +171,16 @@ bool context::stack_t<N>::is(const int64_t index) const {
   } else return final_index >= 0 && final_index < int64_t(_size) && _types[final_index] == utils::type_name<basic_T>();
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t<N>::get() const -> final_stack_el_t<T> {
+auto context::stack_t::get() const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   if constexpr (is_typeless_v<basic_T>) {
     return basic_T(_data[_size-1].mem, _types[_size-1]);
   } else return _data[_size-1].template get<basic_T>();
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t<N>::safe_get() const -> final_stack_el_t<T> {
+auto context::stack_t::safe_get() const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   if (!is<basic_T>()) throw std::runtime_error(std::format("Top of the stack has element with type '{}', but trying to get '{}'", type(), utils::type_name<basic_T>()));
   if constexpr (is_typeless_v<basic_T>) {
@@ -192,9 +189,8 @@ auto context::stack_t<N>::safe_get() const -> final_stack_el_t<T> {
 }
 
 // пушить без типа? врядли имеет большой смысл
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-void context::stack_t<N>::push(const T& val) {
+void context::stack_t::push(const T& val) {
   using basic_T = final_stack_el_t<T>;
   if (_size >= _data.size()) throw std::runtime_error("Stack overflow");
   if constexpr (is_typeless_v<basic_T>) {
@@ -208,9 +204,8 @@ void context::stack_t<N>::push(const T& val) {
   _size += 1;
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t<N>::get(const int64_t index) const -> final_stack_el_t<T> {
+auto context::stack_t::get(const int64_t index) const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   if constexpr (is_typeless_v<basic_T>) {
@@ -218,9 +213,8 @@ auto context::stack_t<N>::get(const int64_t index) const -> final_stack_el_t<T> 
   } else return _data[final_index].template get<basic_T>();
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t<N>::safe_get(const int64_t index) const -> final_stack_el_t<T> {
+auto context::stack_t::safe_get(const int64_t index) const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   if (!is<basic_T>(index)) throw std::runtime_error(std::format("Stack element #{} has element with type '{}', but trying to get '{}'", index, type(index), utils::type_name<basic_T>()));
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
@@ -230,9 +224,8 @@ auto context::stack_t<N>::safe_get(const int64_t index) const -> final_stack_el_
 }
 
 // set без типа тоже имеет немного смысла
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-void context::stack_t<N>::set(const int64_t index, const T& val) {
+void context::stack_t::set(const int64_t index, const T& val) {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   if (final_index >= int64_t(_size)) throw std::runtime_error("Stack overflow");
@@ -246,9 +239,8 @@ void context::stack_t<N>::set(const int64_t index, const T& val) {
   }
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t<N>::pop() -> final_stack_el_t<T> {
+auto context::stack_t::pop() -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   if (_size == 0) throw std::runtime_error("Stack is empty");
   _size -= 1;
@@ -257,9 +249,8 @@ auto context::stack_t<N>::pop() -> final_stack_el_t<T> {
   } else return _data[_size].template get<basic_T>();
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t<N>::safe_pop() -> final_stack_el_t<T> {
+auto context::stack_t::safe_pop() -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   if (_size == 0) throw std::runtime_error("Stack is empty");
   if (!is<basic_T>()) throw std::runtime_error(std::format("Top of the stack has element with type '{}', but trying to get '{}'", type(), utils::type_name<basic_T>()));
@@ -269,26 +260,22 @@ auto context::stack_t<N>::safe_pop() -> final_stack_el_t<T> {
   } else return _data[_size].template get<basic_T>();
 }
 
-template <size_t N>
-auto context::stack_t<N>::get_view() const -> stack_element::view {
+inline auto context::stack_t::get_view() const -> stack_element::view {
   if (_size == 0) return stack_element::view();
   return stack_element::view(_data[_size-1].mem, _types[_size-1]);
 }
 
-template <size_t N>
-auto context::stack_t<N>::get_view(const int64_t index) const -> stack_element::view {
+inline auto context::stack_t::get_view(const int64_t index) const -> stack_element::view {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   if (final_index >= int64_t(_size)) return stack_element::view();
   return stack_element::view(_data[final_index].mem, _types[final_index]);
 }
 
-template <size_t N>
-void context::stack_t<N>::erase() {
+inline void context::stack_t::erase() {
   _size = _size > 0 ? _size-1 : _size;
 }
 
-template <size_t N>
-void context::stack_t<N>::erase(const int64_t index) {
+inline void context::stack_t::erase(const int64_t index) {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   if (final_index == int64_t(_size)-1) erase();
   else if (final_index < int64_t(_size)-1) {
@@ -298,54 +285,45 @@ void context::stack_t<N>::erase(const int64_t index) {
   }
 }
 
-template <size_t N>
-void context::stack_t<N>::resize(const size_t size) {
+inline void context::stack_t::resize(const size_t size) {
   if (size > _data.size()) throw std::runtime_error("Stack overflow");
   _size = size;
 }
 
-template <size_t N>
-stack_element context::stack_t<N>::element() const {
+inline stack_element context::stack_t::element() const {
   return _size > 0 ? _data[_size - 1] : stack_element();
 }
 
-template <size_t N>
-stack_element context::stack_t<N>::element(const int64_t index) const {
+inline stack_element context::stack_t::element(const int64_t index) const {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   return final_index < int64_t(_size) ? _data[final_index] : stack_element();
 }
 
-template <size_t N>
-std::string_view context::stack_t<N>::type() const {
+inline std::string_view context::stack_t::type() const {
   return _size > 0 ? _types[_size - 1] : std::string_view();
 }
 
-template <size_t N>
-std::string_view context::stack_t<N>::type(const int64_t index) const {
+inline std::string_view context::stack_t::type(const int64_t index) const {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   return final_index < int64_t(_size) ? _types[final_index] : std::string_view();
 }
 
-template <size_t N>
-size_t context::stack_t<N>::size() const { return _size; }
+inline size_t context::stack_t::size() const { return _size; }
 
-template <size_t N>
-void context::stack_t<N>::push(const std::string_view& type, const stack_element& el) {
+inline void context::stack_t::push(const std::string_view& type, const stack_element& el) {
   if (_size >= _data.size()) throw std::runtime_error("Stack overflow");
   _data[_size] = el;
   _types[_size] = type;
   _size += 1;
 }
 
-template <size_t N>
-bool context::stack_t<N>::invalid(const int64_t index) const {
+inline bool context::stack_t::invalid(const int64_t index) const {
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   return final_index < int64_t(_size) ? _data[final_index].invalid() : true;
 }
 
-template <size_t N>
 template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t<N>::rawget(const size_t index) const -> final_stack_el_t<T>* {
+auto context::stack_t::rawget(const size_t index) const -> final_stack_el_t<T>* {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   return final_index < int64_t(_size) ? _data[final_index].template rawget<basic_T>() : nullptr;
@@ -420,6 +398,17 @@ void context::set_return(const T& val) {
     _return_value = any_stack(val._mem, val.type());
   } else {
     _return_value = any_stack(val);
+  }
+}
+
+template <typename R, typename Arg>
+R script_function<R(Arg)>::operator()(Arg in) const {
+  if (!*this) throw std::runtime_error("Trying to call empty script_function");
+  ctx->stack.push(in);
+  container_view v(scr, start, end);
+  v.process(ctx);
+  if constexpr (!utils::is_void_v<R>) {
+    return ctx->stack.safe_pop<R>();
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <format>
+#include <algorithm>
 #include <string>
 #include "devils_script/context.h"
 #include <iostream>
@@ -80,6 +81,145 @@ void container::make_table(context* ctx, std::vector<std::tuple<any_stack, any_s
 
 void container::make_table(context* ctx, node_view& viewer) const {
   make_table(ctx, viewer.table);
+}
+
+void container::build_description_index() {
+  description_cmd_index_offsets.assign(cmds.size() + 1, 0);
+  description_cmd_index_nodes.clear();
+
+  for (size_t node = 0; node < block_descs.size(); ++node) {
+    const auto& bd = block_descs[node];
+    if (bd.cmd_start >= cmds.size()) continue;
+    if (bd.cmd_start == bd.cmd_index) continue;
+    description_cmd_index_offsets[bd.cmd_start + 1] += 1;
+  }
+
+  for (size_t i = 1; i < description_cmd_index_offsets.size(); ++i)
+    description_cmd_index_offsets[i] += description_cmd_index_offsets[i - 1];
+
+  description_cmd_index_nodes.resize(description_cmd_index_offsets.back());
+  auto cursor = description_cmd_index_offsets;
+  for (size_t node = 0; node < block_descs.size(); ++node) {
+    const auto& bd = block_descs[node];
+    if (bd.cmd_start >= cmds.size()) continue;
+    if (bd.cmd_start == bd.cmd_index) continue;
+    description_cmd_index_nodes[cursor[bd.cmd_start]++] = node;
+  }
+}
+
+void container::describe(context* ctx, const description_callback_t& fn) const {
+  struct eval_entry {
+    bool visited = false;
+    bool has_value = false;
+    any_stack value;
+    any_stack scope;
+    std::string error;
+  };
+
+  std::vector<eval_entry> table(block_descs.size());
+  context work = *ctx;
+  work.current_index = 0;
+
+  size_t counter = 0;
+  for (size_t i = 0; i < cmds.size(); ++i) {
+    const bool reached = i >= work.current_index;
+    bool ok = reached;
+    std::string error;
+
+    if (reached && !descs[i].effect) {
+      context before = work;
+      try {
+        const auto& cmd = cmds[i];
+        std::invoke(cmd.fp, cmd.arg, &work, this);
+        work.current_index += 1;
+      } catch (const std::exception& e) {
+        ok = false;
+        error = e.what();
+        work = std::move(before);
+        work.current_index = i + 1;
+      } catch (...) {
+        ok = false;
+        error = "unknown evaluation error";
+        work = std::move(before);
+        work.current_index = i + 1;
+      }
+    } else if (reached) {
+      work.current_index += 1;
+    }
+
+    const auto record = [&](const size_t node) {
+      auto& entry = table[node];
+      if (entry.has_value) return;
+      entry.visited = reached;
+      if (ok && reached && !descs[i].effect && work.stack.size() > 0) {
+        entry.has_value = true;
+        entry.value = work.stack.get<any_stack>();
+        const auto si = block_descs[node].scope_index;
+        if (si >= 0 && !work.stack.invalid(si)) entry.scope = work.stack.get<any_stack>(si);
+      } else if (!error.empty()) {
+        entry.error = error;
+      }
+    };
+
+    if (description_cmd_index_offsets.size() == cmds.size() + 1) {
+      for (size_t offset = description_cmd_index_offsets[i]; offset < description_cmd_index_offsets[i + 1]; ++offset) {
+        const size_t node = description_cmd_index_nodes[offset];
+        if (get_string(block_descs[node].name) != get_string(descs[i].name)) continue;
+        record(node);
+      }
+    } else {
+      for (size_t node = 0; node < block_descs.size(); ++node) {
+        const auto& bd = block_descs[node];
+        if (bd.cmd_start != i || bd.cmd_start == bd.cmd_index) continue;
+        if (get_string(bd.name) != get_string(descs[i].name)) continue;
+        record(node);
+      }
+    }
+
+    while (counter < block_descs.size() && i == block_descs[counter].cmd_index) {
+      record(counter);
+      counter += 1;
+    }
+  }
+
+  const auto traverse = [&](const auto& self, const size_t offset, const size_t nest_level) -> bool {
+    const auto& desc = block_descs[offset];
+    const auto& val = table[offset];
+
+    const auto state = desc.placeholder
+      ? description_value_state::placeholder
+      : (val.has_value ? description_value_state::value : description_value_state::unavailable);
+
+    description_entry entry{
+      offset,
+      get_string(desc.name),
+      get_string(desc.custom_description),
+      nest_level,
+      desc.kind,
+      state,
+      val.value,
+      val.scope,
+      val.error
+    };
+
+    std::invoke(fn, entry);
+
+    const size_t stack_start = offset >= desc.size ? offset - desc.size + 1 : 0;
+    std::vector<size_t> children;
+    size_t child_offset = 1;
+    while (child_offset < desc.size) {
+      const size_t child = offset - child_offset;
+      if (child < stack_start) break;
+      children.push_back(child);
+      child_offset += block_descs[child].size;
+    }
+
+    std::reverse(children.begin(), children.end());
+    for (const size_t child : children) self(self, child, nest_level + 1);
+    return true;
+  };
+
+  if (!block_descs.empty()) traverse(traverse, block_descs.size() - 1, 0);
 }
 
 std::string_view container::get_string(const size_t start, const size_t count) const {

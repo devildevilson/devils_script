@@ -47,7 +47,7 @@ set(HDR_LIST
   include/devils_script/container.h
   include/devils_script/common.h
   include/devils_script/system.h
-  include/devils_script/text.h
+  include/devils_script/system_templates.h
   include/devils_script/script_ast.h
   include/devils_script/basic_functions.h
   include/devils_script/template_functions.h
@@ -56,8 +56,9 @@ set(HDR_LIST
 
 set(SRC_LIST
   src/container.cpp
-  src/text.cpp
   src/script_ast.cpp
+  src/system_ast.cpp
+  src/system_builtins.cpp
   src/system.cpp
   src/basic_functions.cpp
   src/prng.cpp

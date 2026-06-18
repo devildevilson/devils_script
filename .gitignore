@@ -1,5 +1,6 @@
 .claude/
 build/
+build_linux/
 .vs/
 .aider*
 docs/

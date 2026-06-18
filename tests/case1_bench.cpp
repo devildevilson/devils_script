@@ -207,5 +207,27 @@ int main() {
     });
   }
 
+  std::printf("== description ==\n");
+  for (size_t i = 0; i < script_count; ++i) {
+    const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+    ds::context ctx;
+    ctx.set_arg(0, p1h);
+    ctx.create_lists(&cont);
+
+    char name[32];
+    std::snprintf(name, sizeof(name), "script%zu describe", i + 1);
+    bench(name, 100000, [&] {
+      ctx.clear();
+      size_t count = 0;
+      cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
+        count += 1;
+        if (entry.state == ds::container::description_value_state::value && entry.value.is<double>()) {
+          g_sink += entry.value.get<double>() * 0.0;
+        }
+      });
+      return double(count);
+    });
+  }
+
   return 0;
 }

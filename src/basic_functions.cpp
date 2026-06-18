@@ -177,7 +177,13 @@ int64_t cmpeq2(int64_t arg, context* ctx, const container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto &v1 = ctx->stack.get_view(id1);
   const auto &v2 = ctx->stack.get_view(id2);
-  ctx->stack.push(memcmp(v1._mem, v2._mem, MAXIMUM_STACK_VAL_SIZE) == 0 && v1.type() == v2.type());
+  if (v1.type() != v2.type()) {
+    ctx->stack.push(false);
+  } else if (v1.type() == utils::type_name<std::string_view>()) {
+    ctx->stack.push(ctx->stack.safe_get<std::string_view>(id1) == ctx->stack.safe_get<std::string_view>(id2));
+  } else {
+    ctx->stack.push(memcmp(v1._mem, v2._mem, MAXIMUM_STACK_VAL_SIZE) == 0);
+  }
   return 1;
 }
 
@@ -263,7 +269,13 @@ int64_t cmpeq2_unsafe(int64_t arg, context* ctx, const container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.get_view(id1);
   const auto& v2 = ctx->stack.get_view(id2);
-  ctx->stack.push(memcmp(v1._mem, v2._mem, MAXIMUM_STACK_VAL_SIZE) == 0);
+  if (v1.type() != v2.type()) {
+    ctx->stack.push(false);
+  } else if (v1.type() == utils::type_name<std::string_view>()) {
+    ctx->stack.push(ctx->stack.get<std::string_view>(id1) == ctx->stack.get<std::string_view>(id2));
+  } else {
+    ctx->stack.push(memcmp(v1._mem, v2._mem, MAXIMUM_STACK_VAL_SIZE) == 0);
+  }
   return 1;
 }
 
