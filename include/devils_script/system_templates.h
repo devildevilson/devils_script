@@ -533,7 +533,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
           if (index == 0) return;
 
-          constexpr function_t fs[] = { &userfunc_unsafe<F, f, HT, vf, eff>, &userfunc<F, f, HT, vf, eff> };
+          constexpr function_t fs[] = { &userfunc_unsafe<f, HT, vf, eff>, &userfunc<f, HT, vf, eff> };
           scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
           sys->setup_description<f, HT, vf>(ctx, scr, args.name());
           sys->patch_prev_functions_descriptions(scr, curpos);
@@ -547,7 +547,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
       } else {
         size_t offset = 1;
         offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, func_args_names);
-        constexpr function_t fs[] = { &userfunc_unsafe<F, f, HT, vf, eff>, &userfunc<F, f, HT, vf, eff> };
+        constexpr function_t fs[] = { &userfunc_unsafe<f, HT, vf, eff>, &userfunc<f, HT, vf, eff> };
         scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
         sys->setup_description<f, HT, vf>(ctx, scr, args.name());
         sys->patch_prev_functions_descriptions(scr, curpos);
@@ -711,7 +711,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
           sys->parse_args<first_argument>(ctx, scr, args, 1, 0, {}, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
             if (index == 0) return;
 
-            constexpr function_t fs[] = { &mathfunc_unsafe<F, f, HT, vf>, &mathfunc<F, f, HT, vf> };
+            constexpr function_t fs[] = { &mathfunc_unsafe<f, HT, vf>, &mathfunc<f, HT, vf> };
             scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
             sys->setup_description<f, HT, vf>(ctx, scr, args.name());
             sys->patch_prev_functions_descriptions(scr, curpos);
@@ -724,7 +724,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
           size_t curpos = scr->cmds.size();
           size_t offset = 1;
           offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, {});
-          constexpr function_t fs[] = { &mathfunc_unsafe<F, f, HT, vf>, &mathfunc<F, f, HT, vf> };
+          constexpr function_t fs[] = { &mathfunc_unsafe<f, HT, vf>, &mathfunc<f, HT, vf> };
           scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
           sys->setup_description<f, HT, vf>(ctx, scr, args.name());
           sys->patch_prev_functions_descriptions(scr, curpos);
@@ -821,7 +821,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
       if (init_f) {
         std::invoke(init_f, e, args, func_args_names);
       } else {
-        constexpr function_t fs[] = { &useriter_unsafe<F, f, HT, vf>, &useriter<F, f, HT, vf> };
+        constexpr function_t fs[] = { &useriter_unsafe<f, HT, vf>, &useriter<f, HT, vf> };
         scr->cmds.emplace_back(container::command(fs[size_t(sys->safety())], scope_index));
         sys->setup_description<f, HT, vf>(ctx, scr, args.name());
 

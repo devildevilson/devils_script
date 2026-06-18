@@ -92,11 +92,3 @@ if (DS_BUILD_TESTS)
   add_executable (devils_script_benchs tests/case1_bench.cpp)
   target_link_libraries(devils_script_benchs devils_script devils_script_options)
 endif()
-
-# optional lua converter? or another project?
-#target_link_libraries(devils_script2 lua54)
-#set(PROJECT_EXTERNAL_DEPENDENCY_DIR ${CMAKE_CURRENT_LIST_DIR}/libs)
-if (WIN32)
-  #target_link_directories(devils_script2 PRIVATE ${PROJECT_EXTERNAL_DEPENDENCY_DIR}/lua54)
-  #target_include_directories(devils_script2 PRIVATE ${PROJECT_EXTERNAL_DEPENDENCY_DIR}/lua54/include)
-endif()

@@ -36,10 +36,13 @@ container::command_description::command_description(
 // magic number
 container::container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {}
 void container::process(context* ctx) const {
+  const container* prev_script = ctx->current_script;
+  ctx->current_script = this;
   for (; ctx->current_index < cmds.size(); ++ctx->current_index) {
     const auto& cmd = cmds[ctx->current_index];
     std::invoke(cmd.fp, cmd.arg, ctx, this);
   }
+  ctx->current_script = prev_script;
 }
 
 void container::make_table(context* ctx, std::vector<std::tuple<any_stack, any_stack>>& table) const {
@@ -303,10 +306,13 @@ container_view::container_view(const container* scr, const size_t start, const s
 {}
 
 void container_view::process(context* ctx) const {
+  const container* prev_script = ctx->current_script;
+  ctx->current_script = scr;
   for (ctx->current_index = start; ctx->current_index < end; ++ctx->current_index) {
     const auto& cmd = scr->cmds[ctx->current_index];
     std::invoke(cmd.fp, cmd.arg, ctx, scr);
   }
+  ctx->current_script = prev_script;
 }
 
 std::string_view container_view::get_string(const size_t start, const size_t count) const {

@@ -96,6 +96,7 @@ int64_t savectxrvalue(int64_t, context*, const container*);
 int64_t savectxlvalue(int64_t, context*, const container*);
 
 int64_t pushlist(int64_t, context*, const container*);
+int64_t list_pipeline(int64_t, context*, const container*);
 //int64_t savelistvalue(int64_t, context*, const container*);
 //int64_t removelistvalue(int64_t, context*, const container*);
 //int64_t isinlist(int64_t, context*, const container*);

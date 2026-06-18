@@ -178,6 +178,7 @@ struct object_ref {
 };
 
 static object_ref liege(object_ref cur) { return object_ref{ cur.id + 10 }; }
+static object_ref even_child(object_ref) { return object_ref{ 2 }; }
 static object_ref first_child(object_ref cur) { return object_ref{ cur.id + 100 }; }
 static object_ref nemesis(object_ref cur) { return object_ref{ cur.id + 1000 }; }
 static bool is_married_to(object_ref cur, object_ref other) { return cur.id == 1 && other.id == 1111; }
@@ -192,6 +193,106 @@ static bool runtime_false() { return false; }
 static bool counted_true() { g_short_circuit_calls += 1; return true; }
 static bool counted_false() { g_short_circuit_calls += 1; return false; }
 static double runtime_five() { return 5.0; }
+
+struct effect_stats {
+  int calls = 0;
+  std::string_view name;
+  double ret = 0.0;
+  double arg0 = 0.0;
+  double arg1 = 0.0;
+  int64_t scope_id = 0;
+};
+
+static double effect_sum(double a, double b) { return a + b; }
+static void on_effect_sum(void* ptr, const std::string_view& name, const double& ret, const std::tuple<double, double>& args) {
+  auto* stats = static_cast<effect_stats*>(ptr);
+  stats->calls += 1;
+  stats->name = name;
+  stats->ret = ret;
+  stats->arg0 = std::get<0>(args);
+  stats->arg1 = std::get<1>(args);
+}
+
+static void effect_touch(double) {}
+static void on_effect_touch(void* ptr, const std::string_view& name, const std::tuple<double>& args) {
+  auto* stats = static_cast<effect_stats*>(ptr);
+  stats->calls += 1;
+  stats->name = name;
+  stats->arg0 = std::get<0>(args);
+}
+
+static double effect_object_score(object_ref scope, double bonus) { return double(scope.id) + bonus; }
+static void on_effect_object_score(void* ptr, const std::string_view& name, const double& ret, const std::tuple<object_ref, double>& args) {
+  auto* stats = static_cast<effect_stats*>(ptr);
+  stats->calls += 1;
+  stats->name = name;
+  stats->ret = ret;
+  stats->scope_id = std::get<0>(args).id;
+  stats->arg0 = std::get<1>(args);
+}
+
+TEST_CASE("on_effect callbacks") {
+  SUBCASE("callback receives function name return value and arguments") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&effect_sum, &on_effect_sum>("effect_sum");
+
+    const auto cont = sys.parse<double, void>("effect_sum = { 2, 3 }");
+    effect_stats stats;
+    ds::context ctx;
+    ctx.userptr = &stats;
+    cont.process(&ctx);
+
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 5.0);
+    CHECK(stats.calls == 1);
+    CHECK(stats.name == "effect_sum");
+    CHECK(stats.ret == 5.0);
+    CHECK(stats.arg0 == 2.0);
+    CHECK(stats.arg1 == 3.0);
+  }
+
+  SUBCASE("void function callback receives function name and arguments") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&effect_touch, &on_effect_touch>("effect_touch");
+
+    const auto cont = sys.parse<void, void>("effect_touch = 7");
+    effect_stats stats;
+    ds::context ctx;
+    ctx.userptr = &stats;
+    cont.process(&ctx);
+
+    CHECK(ctx.return_type().empty());
+    CHECK(stats.calls == 1);
+    CHECK(stats.name == "effect_touch");
+    CHECK(stats.arg0 == 7.0);
+  }
+
+  SUBCASE("scoped callback receives scope and script arguments") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&effect_object_score, object_ref, &on_effect_object_score>("effect_object_score");
+
+    const auto cont = sys.parse<double, object_ref>("effect_object_score = 5");
+    effect_stats stats;
+    ds::context ctx;
+    ctx.userptr = &stats;
+    ctx.set_arg(0, object_ref{ 11 });
+    cont.process(&ctx);
+
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 16.0);
+    CHECK(stats.calls == 1);
+    CHECK(stats.name == "effect_object_score");
+    CHECK(stats.ret == 16.0);
+    CHECK(stats.scope_id == 11);
+    CHECK(stats.arg0 == 5.0);
+  }
+}
 
 TEST_CASE("Advanced example") {
   const std::string script1 = "this"; // returns this
@@ -999,6 +1100,107 @@ TEST_CASE("Using arguments + save to context + lists") {
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
     REQUIRE(ctx.get_return<double>() == 10);
+  }
+
+  SUBCASE("ctx:list pipeline filter and count") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&liege>("liege");
+    sys.register_function<&even_child>("even_child");
+    sys.register_function<&child_is_even>("child_is_even");
+
+    const auto cont = sys.parse<double, object_ref>(
+      "{ ctx:list:children = { add_to = outer, add_to = outer.liege, add_to = outer.even_child }, ctx:list:children = { filter = child_is_even, count } }"
+    );
+    ds::context ctx;
+    ctx.set_arg(cont.find_arg("root"), object_ref{ 1 });
+    ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 1.0);
+  }
+
+  SUBCASE("ctx:list pipeline map and first with default") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&liege>("liege");
+    sys.register_function<&even_child>("even_child");
+    sys.register_function<&child_id>("child_id");
+
+    const auto cont = sys.parse<object_ref, object_ref>(
+      "{ ctx:list:children = { add_to = outer, add_to = outer.even_child, map = liege, first = { child_id >= 12 }, default = this } }"
+    );
+    ds::context ctx;
+    ctx.set_arg(cont.find_arg("root"), object_ref{ 1 });
+    ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<object_ref>());
+    CHECK(ctx.get_return<object_ref>().id == 12);
+  }
+
+  SUBCASE("ctx:list pipeline first default is required and used") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&liege>("liege");
+    sys.register_function<&child_is_even>("child_is_even");
+
+    CHECK_THROWS(sys.parse<object_ref, object_ref>("{ ctx:list:children = { add_to = outer, first = child_is_even } }"));
+
+    const auto cont = sys.parse<object_ref, object_ref>(
+      "{ ctx:list:children = { add_to = outer, add_to = outer.liege, first = child_is_even, default = this } }"
+    );
+    ds::context ctx;
+    ctx.set_arg(cont.find_arg("root"), object_ref{ 1 });
+    ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<object_ref>());
+    CHECK(ctx.get_return<object_ref>().id == 1);
+  }
+
+  SUBCASE("ctx:list pipeline numeric reducers with defaults") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&even_child>("even_child");
+    sys.register_function<&child_id>("child_id");
+
+    {
+      const auto cont = sys.parse<double, object_ref>(
+        "{ ctx:list:children = { add_to = outer, add_to = outer.even_child }, ctx:list:children = { sum = child_id } }"
+      );
+      ds::context ctx;
+      ctx.set_arg(cont.find_arg("root"), object_ref{ 1 });
+      ctx.create_lists(&cont);
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 3.0);
+    }
+
+    {
+      CHECK_THROWS(sys.parse<double, object_ref>("{ ctx:list:children = { min = child_id } }"));
+      const auto cont = sys.parse<double, object_ref>("{ ctx:list:children = { add_to = outer, clear, min = child_id, default = 42 } }");
+      ds::context ctx;
+      ctx.set_arg(cont.find_arg("root"), object_ref{ 1 });
+      ctx.create_lists(&cont);
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 42.0);
+    }
+
+    {
+      const auto cont = sys.parse<double, object_ref>(
+        "{ ctx:list:children = { add_to = outer, add_to = outer.even_child }, ctx:list:children = { average = child_id, default = 0 } }"
+      );
+      ds::context ctx;
+      ctx.set_arg(cont.find_arg("root"), object_ref{ 2 });
+      ctx.create_lists(&cont);
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 2.0);
+    }
   }
 
   SUBCASE("ctx_set args") {

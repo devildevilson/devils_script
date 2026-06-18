@@ -87,6 +87,7 @@ struct context {
   uint64_t prng_state;
   size_t current_index;
   void* userptr;
+  const container* current_script;
 
   any_stack _return_value;
 
@@ -95,7 +96,7 @@ struct context {
   // prng_state - any non 0
   inline context() noexcept
     : stack(stack_size), saved_stack(local_vars_size), args_stack(script_arguments_size),
-      prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr) {
+      prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr), current_script(nullptr) {
     // resize saved_stack because indices are controlled by script, no push/pop (?)
     saved_stack._size = saved_stack._data.size();
     // resize args_stack because indices are controlled by script, no push/pop (?)

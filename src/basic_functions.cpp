@@ -1,4 +1,5 @@
 #include "devils_script/basic_functions.h"
+#include <algorithm>
 #include <cmath>
 #include "devils_script/context.h"
 #include "devils_script/container.h"
@@ -438,6 +439,171 @@ int64_t savectxlvalue(int64_t arg, context* ctx, const container*) {
 int64_t pushlist(int64_t arg, context* ctx, const container*) {
   ctx->stack.push(internal::thisctxlist{ ctx, size_t(arg) });
   return 1;
+}
+
+namespace {
+template <typename T>
+T run_list_callback(context* ctx, const container* scr, const size_t start, const size_t end, const std::string_view& type, const stack_element& input) {
+  ctx->stack.push(type, input);
+  container_view v(scr, start, end);
+  v.process(ctx);
+  return ctx->stack.safe_pop<T>();
+}
+
+any_stack run_default_callback(context* ctx, const container* scr, const size_t start, const size_t end) {
+  container_view v(scr, start, end);
+  v.process(ctx);
+  return ctx->stack.safe_pop<any_stack>();
+}
+
+void push_any_to_list(std::vector<stack_element>& list, const any_stack& val) {
+  stack_element el;
+  el.set(val.view());
+  list.emplace_back(el);
+}
+}
+
+int64_t list_pipeline(int64_t arg, context* ctx, const container* scr) {
+  const auto& op = scr->list_pipeline_ops[size_t(arg)];
+  auto& list = ctx->lists[op.list_index];
+  const auto type = scr->lists[op.list_index].type;
+  const auto input_type = op.input_type.empty() ? type : op.input_type;
+
+  switch (op.kind) {
+    case container::list_pipeline_kind::add_to: {
+      const auto val = run_default_callback(ctx, scr, op.default_start, op.default_end);
+      if (!type.empty() && val.type() != type) throw std::runtime_error(std::format("List expects '{}', got '{}'", type, val.type()));
+      push_any_to_list(list, val);
+      break;
+    }
+
+    case container::list_pipeline_kind::clear: {
+      list.clear();
+      break;
+    }
+
+    case container::list_pipeline_kind::filter: {
+      size_t out = 0;
+      for (size_t i = 0; i < list.size(); ++i) {
+        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, list[i])) {
+          if (out != i) list[out] = list[i];
+          out += 1;
+        }
+      }
+      list.resize(out);
+      break;
+    }
+
+    case container::list_pipeline_kind::map: {
+      std::vector<stack_element> tmp;
+      tmp.reserve(list.size());
+      std::string_view mapped_type;
+      for (auto& item : list) {
+        const auto val = run_list_callback<any_stack>(ctx, scr, op.value_start, op.value_end, input_type, item);
+        if (mapped_type.empty()) mapped_type = val.type();
+        if (mapped_type != val.type()) throw std::runtime_error(std::format("List map returned mixed types '{}' and '{}'", mapped_type, val.type()));
+        push_any_to_list(tmp, val);
+      }
+      list.swap(tmp);
+      break;
+    }
+
+    case container::list_pipeline_kind::count: {
+      ctx->stack.push(double(list.size()));
+      break;
+    }
+
+    case container::list_pipeline_kind::empty: {
+      ctx->stack.push(list.empty());
+      break;
+    }
+
+    case container::list_pipeline_kind::any: {
+      bool ret = false;
+      for (auto& item : list) {
+        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item)) { ret = true; break; }
+      }
+      ctx->stack.push(ret);
+      break;
+    }
+
+    case container::list_pipeline_kind::all: {
+      bool ret = true;
+      for (auto& item : list) {
+        if (!run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item)) { ret = false; break; }
+      }
+      ctx->stack.push(ret);
+      break;
+    }
+
+    case container::list_pipeline_kind::none: {
+      bool ret = true;
+      for (auto& item : list) {
+        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item)) { ret = false; break; }
+      }
+      ctx->stack.push(ret);
+      break;
+    }
+
+    case container::list_pipeline_kind::count_if: {
+      double ret = 0.0;
+      for (auto& item : list) ret += double(run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item));
+      ctx->stack.push(ret);
+      break;
+    }
+
+    case container::list_pipeline_kind::sum: {
+      double ret = 0.0;
+      for (auto& item : list) ret += run_list_callback<double>(ctx, scr, op.value_start, op.value_end, input_type, item);
+      ctx->stack.push(ret);
+      break;
+    }
+
+    case container::list_pipeline_kind::min:
+    case container::list_pipeline_kind::max:
+    case container::list_pipeline_kind::average: {
+      bool found = false;
+      double ret = 0.0;
+      double sum = 0.0;
+      size_t count = 0;
+      for (auto& item : list) {
+        const double val = run_list_callback<double>(ctx, scr, op.value_start, op.value_end, input_type, item);
+        if (!found) { ret = val; found = true; }
+        else if (op.kind == container::list_pipeline_kind::min) ret = std::min(ret, val);
+        else if (op.kind == container::list_pipeline_kind::max) ret = std::max(ret, val);
+        sum += val;
+        count += 1;
+      }
+      if (!found) {
+        const auto def = run_default_callback(ctx, scr, op.default_start, op.default_end);
+        ctx->stack.push(def);
+      } else {
+        ctx->stack.push(op.kind == container::list_pipeline_kind::average ? sum / double(count) : ret);
+      }
+      break;
+    }
+
+    case container::list_pipeline_kind::first:
+    case container::list_pipeline_kind::last: {
+      int64_t found = -1;
+      for (size_t i = 0; i < list.size(); ++i) {
+        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, list[i])) {
+          found = int64_t(i);
+          if (op.kind == container::list_pipeline_kind::first) break;
+        }
+      }
+      if (found >= 0) {
+        ctx->stack.push(type, list[size_t(found)]);
+      } else {
+        const auto def = run_default_callback(ctx, scr, op.default_start, op.default_end);
+        ctx->stack.push(def);
+      }
+      break;
+    }
+  }
+
+  ctx->current_index = op.end - 1;
+  return 0;
 }
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

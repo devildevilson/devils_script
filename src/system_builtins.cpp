@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <optional>
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -187,7 +188,7 @@ static any_stack randomfn(double, const element_view&) { return any_stack{}; }
 template <auto f>
 static void add_cmd(const system* sys, container* scr) {
   using F = decltype(f);
-  constexpr function_t fs[] = { &mathfunc_unsafe<F, f>, &mathfunc<F, f> };
+  constexpr function_t fs[] = { &mathfunc_unsafe<f>, &mathfunc<f> };
   scr->cmds.emplace_back(fs[size_t(sys->safety())], INT64_C(0));
 }
 
@@ -916,12 +917,217 @@ void system::init_basic_functions() {
     sys->push_basic_function(ctx, scr, basicf::pushlist, index);
     if (ctx->ftype != function_type::lvalue) sys->raise_error(std::format("Trying to use function 'list' as rvalue"));
 
+    const auto nextblock = command_block(args, 1 + child.size());
+
+    const auto op_kind = [](const std::string_view name) -> std::optional<container::list_pipeline_kind> {
+      using k = container::list_pipeline_kind;
+      if (name == "add_to") return k::add_to;
+      if (name == "clear") return k::clear;
+      if (name == "filter") return k::filter;
+      if (name == "map") return k::map;
+      if (name == "count") return k::count;
+      if (name == "empty") return k::empty;
+      if (name == "any") return k::any;
+      if (name == "all") return k::all;
+      if (name == "none") return k::none;
+      if (name == "count_if") return k::count_if;
+      if (name == "sum") return k::sum;
+      if (name == "min") return k::min;
+      if (name == "max") return k::max;
+      if (name == "average") return k::average;
+      if (name == "first") return k::first;
+      if (name == "last") return k::last;
+      return std::nullopt;
+    };
+
+    bool is_pipeline = false;
+    if (!nextblock.empty()) {
+      bool has_pipeline_op = false;
+      bool has_non_pipeline_op = false;
+      for (const auto& op : nextblock.children()) {
+        if (op.name() == custom_description_constant) continue;
+        const bool is_default = op.name() == "default";
+        const bool is_op = op_kind(op.name()).has_value();
+        has_pipeline_op = has_pipeline_op || is_op;
+        has_non_pipeline_op = has_non_pipeline_op || (!is_op && !is_default);
+      }
+      is_pipeline = has_pipeline_op && !has_non_pipeline_op;
+    }
+
+    if (is_pipeline) {
+      const auto requires_default = [](const container::list_pipeline_kind kind) {
+        using k = container::list_pipeline_kind;
+        return kind == k::first || kind == k::last || kind == k::min || kind == k::max || kind == k::average;
+      };
+      const auto is_reducer = [](const container::list_pipeline_kind kind) {
+        using k = container::list_pipeline_kind;
+        return kind == k::count || kind == k::empty || kind == k::any || kind == k::all || kind == k::none ||
+               kind == k::count_if || kind == k::sum || kind == k::min || kind == k::max || kind == k::average ||
+               kind == k::first || kind == k::last;
+      };
+      const auto has_value_callback = [](const container::list_pipeline_kind kind) {
+        using k = container::list_pipeline_kind;
+        return kind == k::filter || kind == k::map || kind == k::any || kind == k::all || kind == k::none ||
+               kind == k::count_if || kind == k::sum || kind == k::min || kind == k::max || kind == k::average ||
+               kind == k::first || kind == k::last;
+      };
+      const auto callback_expected = [](const container::list_pipeline_kind kind) {
+        using k = container::list_pipeline_kind;
+        if (kind == k::map) return utils::type_name<any_stack>();
+        if (kind == k::sum || kind == k::min || kind == k::max || kind == k::average) return utils::type_name<double>();
+        return utils::type_name<bool>();
+      };
+
+      auto direct_body = [](const command_block& op) {
+        return op.size() > 1 ? command_block(op, 1) : command_block();
+      };
+
+      auto emit_desc = [&](const command_block& op, const bool has_return) {
+        using sv_t = container::command_description::global_string_view;
+        sv_t name{ static_cast<size_t>(basicf::invalid), SIZE_MAX };
+        if (check_is_str_part_of(scr->globals[0], op.name())) name = { size_t(op.name().data() - scr->globals[0].data()), op.name().size() };
+        scr->descs.emplace_back(name, 1, true, true, has_return, false, ctx->nest_level, SIZE_MAX);
+      };
+
+      auto compile_value_section = [&](const command_block& body, const std::string_view expected) {
+        const size_t section_start = scr->cmds.size();
+        if (body.empty()) sys->raise_error("List pipeline operation requires a script body");
+
+        const size_t before = ctx->stack_types.size();
+        const auto prev_scope_upvalue = ctx->scope_type_upvalue;
+        ctx->scope_type_upvalue = std::string_view();
+        const auto input_type = scr->lists[index].type.empty() ? utils::type_name<element_view>() : scr->lists[index].type;
+        ctx->push(input_type);
+        ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+        {
+          set_expected_type set(ctx, expected);
+          sys->dispatch_node(ctx, scr, body);
+        }
+        sys->scope_exit(ctx, scr, 1);
+
+        if (ctx->stack_types.size() <= before) sys->raise_error(std::format("List pipeline body '{}' produced no value", body.name()));
+        const auto result_type = ctx->top();
+        if (!type_is_any_type(expected) && result_type != expected) sys->raise_error(std::format("List pipeline body '{}' expected '{}', got '{}'", body.name(), expected, result_type));
+        ctx->pop();
+
+        if (scr->lists[index].type.empty() && !ctx->scope_type_upvalue.empty()) scr->lists[index].type = ctx->scope_type_upvalue;
+        ctx->scope_type_upvalue = prev_scope_upvalue;
+        return std::make_tuple(section_start, scr->cmds.size(), result_type);
+      };
+
+      auto compile_default_section = [&](const command_block& body, const std::string_view expected) {
+        const size_t section_start = scr->cmds.size();
+        if (body.empty()) sys->raise_error("'default' requires a script body");
+        bool pushed_outer_scope = false;
+        if (!ctx->scope_stack.empty()) {
+          const auto& curtype = ctx->current_scope_type();
+          if (curtype == utils::type_name<internal::thisarg>() ||
+              curtype == utils::type_name<internal::thisctx>() ||
+              curtype == utils::type_name<internal::thisctxlist>()) {
+            for (auto itr = ctx->scope_stack.rbegin(); itr != ctx->scope_stack.rend(); ++itr) {
+              const auto& type = ctx->stack_types[*itr];
+              if (type != utils::type_name<internal::thisarg>() &&
+                  type != utils::type_name<internal::thisctx>() &&
+                  type != utils::type_name<internal::thisctxlist>()) {
+                ctx->scope_stack.push_back(*itr);
+                pushed_outer_scope = true;
+                break;
+              }
+            }
+          }
+        }
+        {
+          set_expected_type set(ctx, expected);
+          sys->dispatch_node(ctx, scr, body);
+        }
+        if (pushed_outer_scope) ctx->scope_stack.pop_back();
+        if (ctx->stack_types.size() <= start) sys->raise_error("'default' produced no value");
+        const auto result_type = ctx->top();
+        if (!type_is_any_type(expected) && result_type != expected) sys->raise_error(std::format("'default' expected '{}', got '{}'", expected, result_type));
+        ctx->pop();
+        return std::make_tuple(section_start, scr->cmds.size(), result_type);
+      };
+
+      bool reduced = false;
+      size_t offset = 1;
+      while (offset < nextblock.size()) {
+        const auto op = command_block(nextblock, offset);
+        offset += op.size();
+        if (op.name() == custom_description_constant) continue;
+        if (op.name() == "default") sys->raise_error("'default' must immediately follow first/last/min/max/average");
+        if (reduced) sys->raise_error(std::format("List reducer must be the last significant operation, found '{}'", op.name()));
+
+        const auto maybe_kind = op_kind(op.name());
+        if (!maybe_kind) sys->raise_error(std::format("Unknown list pipeline operation '{}'", op.name()));
+        const auto kind = *maybe_kind;
+
+        command_block default_body;
+        if (requires_default(kind)) {
+          if (offset >= nextblock.size()) sys->raise_error(std::format("List operation '{}' requires 'default' immediately after it", op.name()));
+          const auto def = command_block(nextblock, offset);
+          if (def.name() != "default") sys->raise_error(std::format("List operation '{}' requires 'default' immediately after it", op.name()));
+          default_body = direct_body(def);
+          offset += def.size();
+        }
+
+        container::list_pipeline_op meta{ kind, index, scr->lists[index].type, 0, 0, 0, 0, 0 };
+        const size_t meta_index = scr->list_pipeline_ops.size();
+        scr->list_pipeline_ops.push_back(meta);
+        scr->cmds.emplace_back(container::command(&list_pipeline, int64_t(meta_index)));
+        emit_desc(op, is_reducer(kind));
+
+        if (kind == container::list_pipeline_kind::add_to) {
+          const auto [s, en, result_type] = compile_default_section(direct_body(op), utils::type_name<any_stack>());
+          scr->list_pipeline_ops[meta_index].default_start = s;
+          scr->list_pipeline_ops[meta_index].default_end = en;
+          if (type_is_ignore(result_type) || type_is_void(result_type)) sys->raise_error(std::format("List operation '{}' cannot add '{}'", op.name(), result_type));
+          if (scr->lists[index].type.empty()) scr->lists[index].type = result_type;
+          else if (scr->lists[index].type != result_type) sys->raise_error(std::format("List '{}' expects '{}', got '{}'", child.name(), scr->lists[index].type, result_type));
+        } else if (has_value_callback(kind)) {
+          const auto [s, en, result_type] = compile_value_section(direct_body(op), callback_expected(kind));
+          scr->list_pipeline_ops[meta_index].value_start = s;
+          scr->list_pipeline_ops[meta_index].value_end = en;
+          if (kind == container::list_pipeline_kind::map) {
+            if (type_is_ignore(result_type) || type_is_void(result_type)) sys->raise_error(std::format("List operation '{}' cannot map to '{}'", op.name(), result_type));
+            scr->lists[index].type = result_type;
+          }
+        }
+
+        if (requires_default(kind)) {
+          const auto expected = (kind == container::list_pipeline_kind::min || kind == container::list_pipeline_kind::max || kind == container::list_pipeline_kind::average)
+            ? utils::type_name<double>()
+            : (scr->lists[index].type.empty() ? utils::type_name<any_stack>() : scr->lists[index].type);
+          const auto [s, en, result_type] = compile_default_section(default_body, expected);
+          scr->list_pipeline_ops[meta_index].default_start = s;
+          scr->list_pipeline_ops[meta_index].default_end = en;
+        }
+
+        scr->list_pipeline_ops[meta_index].end = scr->cmds.size();
+        if (kind == container::list_pipeline_kind::filter || kind == container::list_pipeline_kind::map || kind == container::list_pipeline_kind::clear) {
+          // no stack value
+        } else if (kind == container::list_pipeline_kind::count || kind == container::list_pipeline_kind::count_if || kind == container::list_pipeline_kind::sum ||
+                   kind == container::list_pipeline_kind::min || kind == container::list_pipeline_kind::max || kind == container::list_pipeline_kind::average) {
+          ctx->push<double>();
+        } else if (kind == container::list_pipeline_kind::empty || kind == container::list_pipeline_kind::any || kind == container::list_pipeline_kind::all || kind == container::list_pipeline_kind::none) {
+          ctx->push<bool>();
+        } else if (kind == container::list_pipeline_kind::first || kind == container::list_pipeline_kind::last) {
+          ctx->push(scr->lists[index].type.empty() ? utils::type_name<any_stack>() : scr->lists[index].type);
+        }
+
+        reduced = is_reducer(kind);
+      }
+
+      sys->push_basic_function(ctx, scr, basicf::erase, start);
+      ctx->erase(start);
+      if (!reduced) ctx->push<ignore_value>();
+      return args.size();
+    }
+
     // if this block has 1 arg with str, then next child would be __empty_lvalue
     // description?
     //const size_t desc_start = scr->block_descs.size();
 
     push_list_index_upvalue pliu(ctx, index);
-    const auto nextblock = command_block(args, 1 + child.size());
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
     sys->dispatch_node(ctx, scr, nextblock);
     sys->scope_exit(ctx, scr, 1);

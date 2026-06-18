@@ -338,26 +338,17 @@ template <typename Tuple>
 using on_effect2_t = void(*)(void*, const std::string_view&, const Tuple&);
 
 template <typename F, typename HT>
+using on_effect_args_t = std::conditional_t<
+  utils::is_void_v<HT>,
+  utils::function_arguments_tuple_t<F>,
+  utils::tuple_cat_t<std::tuple<HT>, args_t<F, HT>>
+>;
+
+template <typename F, typename HT>
 using on_effect_t = std::conditional_t<
-  utils::is_void_v<HT>, 
-    std::conditional_t<
-    utils::is_void_v<utils::function_result_type<F>>, 
-      on_effect2_t<utils::function_arguments_tuple_t<F>>,
-      on_effect1_t<std::remove_cvref_t<utils::void_or_t<utils::function_result_type<F>>>, utils::function_arguments_tuple_t<F>>
-    >,
-    std::conditional_t<
-    !utils::is_void_v<utils::function_member_of<F>>,
-      std::conditional_t<
-      utils::is_void_v<utils::function_result_type<F>>,
-        on_effect2_t<utils::function_arguments_tuple_t<F>>,
-        on_effect1_t<std::remove_cvref_t<utils::void_or_t<utils::function_result_type<F>>>, utils::function_arguments_tuple_t<F>>
-      >,
-      std::conditional_t<
-      utils::is_void_v<utils::function_result_type<F>>,
-        on_effect2_t<utils::tuple_cat_t<std::tuple<HT>, utils::function_arguments_tuple_t<F>>>,
-        on_effect1_t<std::remove_cvref_t<utils::void_or_t<utils::function_result_type<F>>>, utils::tuple_cat_t<std::tuple<HT>, utils::function_arguments_tuple_t<F>>>
-      >
-    >
+  utils::is_void_v<utils::function_result_type<F>>,
+  on_effect2_t<on_effect_args_t<F, HT>>,
+  on_effect1_t<std::remove_cvref_t<utils::void_or_t<utils::function_result_type<F>>>, on_effect_args_t<F, HT>>
   >;
 
 bool is_valid_function_name(const std::string_view &name) noexcept;

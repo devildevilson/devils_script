@@ -124,6 +124,36 @@ struct container {
     std::string_view type;
   };
 
+  enum class list_pipeline_kind {
+    add_to,
+    clear,
+    filter,
+    map,
+    count,
+    empty,
+    any,
+    all,
+    none,
+    count_if,
+    sum,
+    min,
+    max,
+    average,
+    first,
+    last
+  };
+
+  struct list_pipeline_op {
+    list_pipeline_kind kind;
+    size_t list_index;
+    std::string_view input_type;
+    size_t value_start;
+    size_t value_end;
+    size_t default_start;
+    size_t default_end;
+    size_t end;
+  };
+
   uint64_t prng_state;
 
   std::vector<command> cmds;
@@ -137,6 +167,7 @@ struct container {
   std::vector<argument_data> args;
   std::vector<argument_data> saved;
   std::vector<argument_data> lists;
+  std::vector<list_pipeline_op> list_pipeline_ops;
 
   container() noexcept;
   void process(context* ctx) const; // dont forget 'ctx->clear()' and 'ctx->create_lists(this)'
