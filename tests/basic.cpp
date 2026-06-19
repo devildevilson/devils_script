@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <optional>
 #include "devils_script/system.h"
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -171,11 +172,21 @@ static scope3 to_scope3(scope2) { return scope3{}; }
 static scope2 to_scope2(scope1) { return scope2{}; }
 static scope3 func8(scope2, std::string_view) { return scope3{}; }
 static double func9(scope1, double) { return 10; }
+static double overloaded_score(scope1) { return 1; }
+static double overloaded_score2(scope2) { return 2; }
 
 struct object_ref {
   int64_t id;
   bool valid() const { return id != 0; }
 };
+
+struct checked_ref {
+  int64_t id;
+  bool valid() const { return id != 0; }
+};
+
+static double checked_score(checked_ref cur) { return double(cur.id); }
+static bool checked_ref_is_even(const checked_ref& cur) { return cur.id % 2 == 0; }
 
 static object_ref liege(object_ref cur) { return object_ref{ cur.id + 10 }; }
 static object_ref even_child(object_ref) { return object_ref{ 2 }; }
@@ -193,6 +204,26 @@ static bool runtime_false() { return false; }
 static bool counted_true() { g_short_circuit_calls += 1; return true; }
 static bool counted_false() { g_short_circuit_calls += 1; return false; }
 static double runtime_five() { return 5.0; }
+
+enum class title_rank : int64_t {
+  barony = 1,
+  duchy = 2,
+  kingdom = 3,
+  empire = 4,
+};
+
+static title_rank rank(object_ref cur) { return static_cast<title_rank>(cur.id); }
+static bool rank_is_at_least(object_ref cur, title_rank r) { return cur.id >= static_cast<int64_t>(r); }
+static double kingdom() { return 30.0; }
+static bool object_ref_is_eleven(object_ref cur) { return cur.id == 11; }
+static std::string_view object_ref_name(object_ref cur) { return cur.id == 11 ? "liege" : "fallback"; }
+static std::optional<title_rank> parse_title_rank(const std::string_view name) {
+  if (name == "barony") return title_rank::barony;
+  if (name == "duchy") return title_rank::duchy;
+  if (name == "kingdom") return title_rank::kingdom;
+  if (name == "empire") return title_rank::empire;
+  return std::nullopt;
+}
 
 struct effect_stats {
   int calls = 0;
@@ -418,6 +449,99 @@ TEST_CASE("Object rvalue scripts") {
 
   SUBCASE("wrong object type is rejected in object context") {
     CHECK_THROWS(sys.parse<object_ref, object_ref>("wrong_object"));
+  }
+}
+
+TEST_CASE("Scoped overload resolution") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_function<&to_scope2>("to_scope2");
+  sys.register_function<&overloaded_score>("overloaded");
+  sys.register_function<&overloaded_score2>("overloaded");
+
+  SUBCASE("same script name dispatches by root scope") {
+    {
+      const auto cont = sys.parse<double, scope1>("overloaded");
+      ds::context ctx;
+      ctx.set_arg(0, scope1{});
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 1.0);
+    }
+
+    {
+      const auto cont = sys.parse<double, scope2>("overloaded");
+      ds::context ctx;
+      ctx.set_arg(0, scope2{});
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 2.0);
+    }
+  }
+
+  SUBCASE("scope chain uses overload for current scope") {
+    const auto cont = sys.parse<double, scope1>("to_scope2.overloaded");
+    ds::context ctx;
+    ctx.set_arg(0, scope1{});
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 2.0);
+  }
+}
+
+TEST_CASE("Enum literals") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_enum<title_rank>(&parse_title_rank);
+  sys.register_function<&rank>("rank");
+  sys.register_function<&rank_is_at_least>("rank_is_at_least");
+
+  SUBCASE("enum callback resolves function arguments") {
+    const auto cont = sys.parse<bool, object_ref>("rank_is_at_least = { kingdom }");
+    ds::context ctx;
+    ctx.set_arg(0, object_ref{ 3 });
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<bool>());
+    CHECK(ctx.get_return<bool>() == true);
+  }
+
+  SUBCASE("enum return compares with enum literal") {
+    const auto cont = sys.parse<bool, object_ref>("rank >= kingdom");
+    ds::context ctx;
+    ctx.set_arg(0, object_ref{ 4 });
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<bool>());
+    CHECK(ctx.get_return<bool>() == true);
+  }
+
+  SUBCASE("enum literals compare with numbers") {
+    {
+      const auto cont = sys.parse<bool, void>("kingdom >= 3");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      CHECK(ctx.get_return<bool>() == true);
+    }
+
+    {
+      const auto cont = sys.parse<bool, void>("2 < kingdom");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      CHECK(ctx.get_return<bool>() == true);
+    }
+  }
+
+  SUBCASE("function names have priority over enum literals") {
+    sys.register_function<&kingdom>("kingdom");
+
+    const auto cont = sys.parse<double, void>("kingdom");
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 30.0);
   }
 }
 
@@ -835,6 +959,64 @@ TEST_CASE("Type checking and valid argument checks") {
     CHECK_THROWS(cont.process(&ctx));
   }
 
+  SUBCASE("root argument runtime type is checked") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&object_id_is>("object_id_is");
+
+    const auto cont = sys.parse<bool, object_ref>("object_id_is = { 1 }");
+    ds::context ctx;
+    ctx.set_arg(0, 1.0);
+    CHECK_THROWS(cont.process(&ctx));
+  }
+
+  SUBCASE("default is_valid<HT> guards scoped functions") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&checked_score>("checked_score");
+
+    const auto cont = sys.parse<double, checked_ref>("checked_score");
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, checked_ref{ 7 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 7.0);
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, checked_ref{ 0 });
+      CHECK_THROWS(cont.process(&ctx));
+    }
+  }
+
+  SUBCASE("custom is_valid<HT> guard is used when registering scoped functions") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&checked_score, checked_ref, &checked_ref_is_even>("checked_score");
+
+    const auto cont = sys.parse<double, checked_ref>("checked_score");
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, checked_ref{ 4 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 4.0);
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, checked_ref{ 3 });
+      CHECK_THROWS(cont.process(&ctx));
+    }
+  }
+
   SUBCASE("return values keep declared type") {
     {
       ds::system sys;
@@ -992,6 +1174,153 @@ TEST_CASE("Script description evaluation") {
     }));
     CHECK(saw_effect);
   }
+
+  SUBCASE("custom_description folds described children") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&runtime_num>("runtime_num");
+
+    const auto cont = sys.parse<double, void>("{ custom_description = summary, runtime_num, 5 }");
+    ds::context ctx;
+    size_t nodes = 0;
+    bool saw_summary = false;
+    bool saw_runtime_num = false;
+
+    cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
+      nodes += 1;
+      saw_summary = saw_summary || entry.custom_description == "summary";
+      saw_runtime_num = saw_runtime_num || entry.name == "runtime_num";
+    });
+
+    CHECK(saw_summary);
+    CHECK_FALSE(saw_runtime_num);
+    CHECK(nodes == 1);
+  }
+}
+
+TEST_CASE("Debug assert and trace") {
+  SUBCASE("assert fails loudly with message and environment") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    const auto cont = sys.parse<void, void>("assert = { false, failed_check }");
+    {
+      ds::context ctx;
+      CHECK_THROWS_WITH_AS(cont.process(&ctx), doctest::Contains("failed_check"), std::runtime_error);
+    }
+    {
+      ds::context ctx;
+      CHECK_THROWS_WITH_AS(cont.process(&ctx), doctest::Contains("line 1"), std::runtime_error);
+    }
+  }
+
+  SUBCASE("trace sends formatted message to callback") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    const auto cont = sys.parse<void, void>("trace = { reached_here }");
+    ds::context ctx;
+    std::string out;
+    ctx.trace = [&](const std::string& msg) { out = msg; };
+    cont.process(&ctx);
+    CHECK(out.find("reached_here") != std::string::npos);
+    CHECK(out.find("line 1") != std::string::npos);
+  }
+}
+
+TEST_CASE("Nullable scope operator") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_function<&liege>("liege");
+  sys.register_function<&object_ref_is_eleven>("object_ref_is_eleven");
+  sys.register_function<&child_id>("child_id");
+  sys.register_function<&first_child>("first_child");
+  sys.register_function<&nemesis>("nemesis");
+  sys.register_function<&object_ref_name>("object_ref_name");
+
+  SUBCASE("?= returns false in condition blocks when scope is invalid") {
+    const auto cont = sys.parse<bool, object_ref>("liege ?= { object_ref_is_eleven }");
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ -10 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      CHECK(ctx.get_return<bool>() == false);
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ 1 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      CHECK(ctx.get_return<bool>() == true);
+    }
+  }
+
+  SUBCASE("?= returns zero in numeric blocks when scope is invalid") {
+    const auto cont = sys.parse<double, object_ref>("liege ?= { child_id }");
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ -10 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 0.0);
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ 1 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 11.0);
+    }
+  }
+
+  SUBCASE("?= skips invalid object branches") {
+    const auto cont = sys.parse<object_ref, object_ref>("{ liege ?= { first_child }, nemesis }");
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ -10 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<object_ref>());
+      CHECK(ctx.get_return<object_ref>().id == 990);
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ 1 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<object_ref>());
+      CHECK(ctx.get_return<object_ref>().id == 111);
+    }
+  }
+
+  SUBCASE("?= skips invalid string branches") {
+    const auto cont = sys.parse<std::string_view, object_ref>("{ liege ?= { object_ref_name }, object_ref_name }");
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ -10 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<std::string_view>());
+      CHECK(ctx.get_return<std::string_view>() == "fallback");
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(0, object_ref{ 1 });
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<std::string_view>());
+      CHECK(ctx.get_return<std::string_view>() == "liege");
+    }
+  }
 }
 
 static double every_on_list(const ds::internal::thisctxlist &l, const std::function<double(scope2)>& fn) {
@@ -1036,6 +1365,32 @@ TEST_CASE("Using arguments + save to context + lists") {
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
     REQUIRE(ctx.get_return<double>() == 10);
+  }
+
+  SUBCASE("ctx:arg runtime type checks") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    const auto cont = sys.parse<double, void>("{ ctx:arg:first }");
+
+    {
+      ds::context ctx;
+      CHECK_THROWS(cont.process(&ctx));
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(cont.find_arg("first"), std::string_view("wrong"));
+      CHECK_THROWS(cont.process(&ctx));
+    }
+
+    {
+      ds::context ctx;
+      ctx.set_arg(cont.find_arg("first"), 9.0);
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 9.0);
+    }
   }
 
   SUBCASE("ctx_save objects") {

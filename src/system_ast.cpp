@@ -88,6 +88,7 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
 
   std::string_view lvalue;
   const tavl::node* rhs = row;
+  bool nullable_call = false;
   if (row->type == tavl::node_type::pair) {
     const auto op = node_text(row, src);
     if (op == "=" || op == "?=") {            // call/assignment: lhs = function, rhs = its argument
@@ -96,6 +97,7 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
         throw std::runtime_error(std::format("Assignment operator '{}' expects a plain function name on the left side", op));
       lvalue = node_text(ch[0], src);          // lhs is a single token (scope paths arrive whole)
       rhs = ch[1];
+      nullable_call = op == "?=";
     }
   }
 
@@ -128,6 +130,7 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
   if (lfn_index != SIZE_MAX) {
     output[lfn_index].args_count = arguments_count;
     output[lfn_index].size += size;
+    output[lfn_index].nullable = nullable_call;
   }
 }
 
@@ -221,6 +224,7 @@ system::command_block system::command_block::at(const size_t index) const {
 std::string_view system::command_block::name() const { return !data.empty() ? data[0].token : std::string_view(); }
 size_t system::command_block::args_count() const { return !data.empty() ? data[0].args_count : 0; }
 size_t system::command_block::size() const { return data.size(); }
+bool system::command_block::nullable() const { return !data.empty() && data[0].nullable; }
 bool system::command_block::empty() const { return data.empty(); }
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

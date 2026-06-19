@@ -1,4 +1,4 @@
-// Golden tests for the introspection mode (make_table + node_view::traverse).
+// Golden tests for the human-readable description mode (container::describe).
 // Locks the current partial-evaluation output so future stack/context
 // refactors can be checked against a known-good baseline.
 #include <doctest/doctest.h>
@@ -91,7 +91,7 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
 namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 #endif
 
-// Formats a single introspection node exactly like examples/desc.cpp prints it.
+// Formats a single description node exactly like examples/desc.cpp prints it.
 static bool collect(std::string& out, const std::string_view& name, const size_t nest, const ds::any_stack& value, const ds::any_stack& scope) {
   std::ostringstream ss;
   for (size_t i = 0; i < nest; ++i) ss << "  ";
@@ -105,7 +105,7 @@ static bool collect(std::string& out, const std::string_view& name, const size_t
   return true;
 }
 
-TEST_CASE("Introspection golden (partial evaluation)") {
+TEST_CASE("Description golden (partial evaluation)") {
   person p1{ "Mary", 20, 5, nullptr, nullptr };
   person p2{ "Alaska", 13, 2, nullptr, nullptr };
   person p3{ "Alexey", 26, 7, nullptr, nullptr };
@@ -167,6 +167,18 @@ TEST_CASE("Introspection golden (partial evaluation)") {
     ds::context ctx;
     ctx.set_arg(0, p1h);
     ctx.clear();
+    std::string out;
+    cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
+      collect(out, entry.name, entry.nest_level, entry.value, entry.scope);
+    });
+    return out;
+  };
+
+  const auto run_legacy = [&](const std::string& script) {
+    const auto cont = sys.parse<double, handle<person>>(script);
+    ds::context ctx;
+    ctx.set_arg(0, p1h);
+    ctx.clear();
     ds::node_view v;
     cont.make_table(&ctx, v);
     std::string out;
@@ -176,11 +188,16 @@ TEST_CASE("Introspection golden (partial evaluation)") {
     return out;
   };
 
+  SUBCASE("legacy make_table matches describe") {
+    const std::string script = "country = { each_city = { value = population } }";
+    CHECK(run_legacy(script) == run(script));
+  }
+
   SUBCASE("scope path") {
     const std::string expected =
       "'ADD' value: '26' scope: 'handle<person>'\n"
-      "  'country' value: '26' scope: 'handle<person>'\n"
-      "    'leader' value: '26' scope: 'country*'\n"
+      "  'country' value: 'country*' scope: 'handle<person>'\n"
+      "    'leader' value: 'handle<person>' scope: 'country*'\n"
       "      'age' value: '26' scope: 'handle<person>'\n";
     CHECK(run("country.leader:age") == expected);
   }
@@ -188,8 +205,8 @@ TEST_CASE("Introspection golden (partial evaluation)") {
   SUBCASE("iterator single") {
     const std::string expected =
       "'ADD' value: '343' scope: 'handle<person>'\n"
-      "  'country' value: '343' scope: 'handle<person>'\n"
-      "    'each_city' value: 'no value' scope: 'no scope'\n"
+      "  'country' value: 'country*' scope: 'handle<person>'\n"
+      "    'each_city' value: '343' scope: 'country*'\n"
       "      'value' value: 'no value' scope: 'no scope'\n"
       "        'population' value: 'no value' scope: 'no scope'\n";
     CHECK(run("country = { each_city = { value = population } }") == expected);
@@ -198,8 +215,8 @@ TEST_CASE("Introspection golden (partial evaluation)") {
   SUBCASE("iterator nested") {
     const std::string expected =
       "'ADD' value: '18' scope: 'handle<person>'\n"
-      "  'country' value: '18' scope: 'handle<person>'\n"
-      "    'each_city' value: 'no value' scope: 'no scope'\n"
+      "  'country' value: 'country*' scope: 'handle<person>'\n"
+      "    'each_city' value: '18' scope: 'country*'\n"
       "      'value' value: 'no value' scope: 'no scope'\n"
       "        'each_notable_person' value: 'no value' scope: 'no scope'\n"
       "          'value' value: 'no value' scope: 'no scope'\n"
@@ -211,9 +228,9 @@ TEST_CASE("Introspection golden (partial evaluation)") {
     const std::string expected =
       "'ADD' value: '0.0606061' scope: 'handle<person>'\n"
       "  'this' value: '0.0606061' scope: 'handle<person>'\n"
-      "    'living_in' value: '0.0606061' scope: 'handle<person>'\n"
+      "    'living_in' value: 'city*' scope: 'handle<person>'\n"
       "      'ctx_save' value: 'city*' scope: 'city*'\n"
-      "        'each_notable_person' value: 'no value' scope: 'no scope'\n"
+      "        'each_notable_person' value: '33' scope: 'city*'\n"
       "          'value' value: 'no value' scope: 'no scope'\n"
       "            'age' value: 'no value' scope: 'no scope'\n"
       "      '/' value: '0.0606061' scope: 'city*'\n"
@@ -229,8 +246,8 @@ TEST_CASE("Introspection golden (partial evaluation)") {
       "  'ctx_save' value: 'handle<person>' scope: 'handle<person>'\n"
       "    'this' value: 'handle<person>' scope: 'handle<person>'\n"
       "  'this' value: '13' scope: 'handle<person>'\n"
-      "    'living_in' value: '13' scope: 'handle<person>'\n"
-      "      'each_notable_person' value: 'no value' scope: 'no scope'\n"
+      "    'living_in' value: 'city*' scope: 'handle<person>'\n"
+      "      'each_notable_person' value: '13' scope: 'city*'\n"
       "        'filter' value: 'no value' scope: 'no scope'\n"
       "          '!=' value: 'no value' scope: 'no scope'\n"
       "            'this' value: 'no value' scope: 'no scope'\n"

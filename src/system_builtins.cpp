@@ -183,6 +183,40 @@ static ignore_value remove_from(const thisctxlist& l, const any_stack& val) {
 //static any_stack pushcurrent() { return any_stack{}; }
 static double chance() { return 1; }
 static any_stack randomfn(double, const element_view&) { return any_stack{}; }
+
+static size_t line_for_command(const context* ctx, const container* scr) {
+  if (scr == nullptr || ctx->current_index >= scr->descs.size()) return 0;
+  const auto name = scr->descs[ctx->current_index].name;
+  if (name.count == SIZE_MAX || scr->globals.empty()) return 0;
+  size_t line = 1;
+  const size_t end = std::min(name.start, scr->globals[0].size());
+  for (size_t i = 0; i < end; ++i) line += size_t(scr->globals[0][i] == '\n');
+  return line;
+}
+
+static std::string debug_environment(const context* ctx, const container* scr, const size_t consumed_args) {
+  const auto fn = scr != nullptr && ctx->current_index < scr->descs.size()
+    ? scr->get_string(scr->descs[ctx->current_index].name)
+    : std::string_view();
+  const int64_t scope_index = int64_t(ctx->stack.size()) - int64_t(consumed_args) - 1;
+  const auto scope = scope_index >= 0 ? ctx->stack.type(scope_index) : std::string_view();
+  return std::format("line {}, function '{}', scope '{}'", line_for_command(ctx, scr), fn, scope);
+}
+
+static int64_t debug_assert(int64_t, context* ctx, const container* scr) {
+  const auto message = ctx->stack.safe_pop<std::string_view>();
+  const bool condition = ctx->stack.safe_pop<bool>();
+  if (!condition) {
+    throw std::runtime_error(std::format("Script assert failed: '{}' ({})", message, debug_environment(ctx, scr, 2)));
+  }
+  return -2;
+}
+
+static int64_t debug_trace(int64_t, context* ctx, const container* scr) {
+  const auto message = ctx->stack.safe_pop<std::string_view>();
+  if (ctx->trace) ctx->trace(std::format("Script trace: '{}' ({})", message, debug_environment(ctx, scr, 1)));
+  return -1;
+}
 }
 
 template <auto f>
@@ -213,6 +247,40 @@ void system::init_basic_functions() {
   });
   RFI(internal::rawadd)("ADD");
   RFI(internal::rawmul)("MUL");
+
+  RFI(internal::ctx_save)("assert", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    size_t offset = 1;
+    auto cond = command_block(args, offset);
+    if (cond.name() == custom_description_constant) { offset += cond.size(); cond = command_block(args, offset); }
+    offset += sys->parse_arg<bool>(ctx, scr, cond, 0, utils::type_name<bool>(), std::string_view(), {});
+
+    auto message = command_block(args, offset);
+    if (message.name() == custom_description_constant) { offset += message.size(); message = command_block(args, offset); }
+    offset += sys->parse_arg<std::string_view>(ctx, scr, message, 1, utils::type_name<std::string_view>(), std::string_view(), {});
+    if (offset < args.size()) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
+
+    scr->cmds.emplace_back(&internal::debug_assert, INT64_C(0));
+    sys->setup_description<&internal::ctx_save, void, is_valid_t<void>(nullptr)>(ctx, scr, args.name());
+    ctx->pop();
+    ctx->pop();
+    return args.size();
+  });
+
+  RFI(internal::ctx_save)("trace", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    size_t offset = 1;
+    auto message = command_block(args, offset);
+    if (message.name() == custom_description_constant) { offset += message.size(); message = command_block(args, offset); }
+    offset += sys->parse_arg<std::string_view>(ctx, scr, message, 0, utils::type_name<std::string_view>(), std::string_view(), {});
+    if (offset < args.size()) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
+
+    scr->cmds.emplace_back(&internal::debug_trace, INT64_C(0));
+    sys->setup_description<&internal::ctx_save, void, is_valid_t<void>(nullptr)>(ctx, scr, args.name());
+    ctx->pop();
+    return args.size();
+  });
+
   // is 'while (ctx->pop_while_ignore())' an overkill for this situations?
   RFI(internal::value_or)("value_or", {}, [](emitter& e, const command_block& args, const std::vector<std::string> &) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;

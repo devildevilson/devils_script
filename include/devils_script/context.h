@@ -7,6 +7,7 @@
 #include <string_view>
 #include <string>
 #include <cstring>
+#include <functional>
 #include "devils_script/type_traits.h"
 #include "devils_script/common.h"
 #include "devils_script/container.h"
@@ -88,6 +89,7 @@ struct context {
   size_t current_index;
   void* userptr;
   const container* current_script;
+  std::function<void(const std::string&)> trace;
 
   any_stack _return_value;
 

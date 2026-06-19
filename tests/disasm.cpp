@@ -25,6 +25,87 @@ static std::string disasm_bool(const char* script) {
   return ds::disassemble(sys.parse<bool, void>(script));
 }
 
+TEST_CASE("script AST row-level parsing") {
+  SUBCASE("builder returns at row_end") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    tavl::parser p;
+    sys.configure_parser(p);
+    p.flush("5, 6");
+    p.finish();
+
+    ds::script_ast_context ctx;
+    std::vector<tavl::node> nodes;
+
+    auto [ev1, err1] = ds::make_script_ast(p, ctx, nodes);
+    REQUIRE(err1.no_error());
+    CHECK(ev1.type == tavl::event_type::row_end);
+    REQUIRE(nodes.size() >= 2);
+    CHECK(p.content(nodes[1].token.span) == "5");
+
+    auto [ev2, err2] = ds::make_script_ast(p, ctx, nodes);
+    REQUIRE(err2.no_error());
+    CHECK(ev2.type == tavl::event_type::row_end);
+    REQUIRE(nodes.size() >= 2);
+    CHECK(p.content(nodes[1].token.span) == "6");
+  }
+
+  SUBCASE("partial parse stores script text for container get_string") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    tavl::parser p;
+    sys.configure_parser(p);
+    p.flush("red, 6");
+    p.finish();
+
+    ds::system::parse_context ctx;
+    ds::container cont;
+    ctx.init<std::string_view, void>(sys, cont);
+
+    auto [ev, err] = sys.parse(p, ctx, cont);
+    REQUIRE(err.no_error());
+    CHECK(ev.type == tavl::event_type::row_end);
+    REQUIRE(cont.globals.size() == 1);
+    CHECK(cont.globals[0] == "red, 6");
+    REQUIRE(!cont.block_descs.empty());
+    bool found_red = false;
+    for (const auto& desc : cont.block_descs) {
+      found_red = found_red || cont.get_string(desc.name) == "red";
+    }
+    CHECK(found_red);
+
+    ds::context runtime_ctx;
+    cont.process(&runtime_ctx);
+    REQUIRE(runtime_ctx.is_return<std::string_view>());
+    CHECK(runtime_ctx.get_return<std::string_view>() == "red");
+  }
+
+  SUBCASE("partial parse checks configured return type") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    CHECK_THROWS(sys.parse<double, void>("red"));
+
+    tavl::parser p;
+    sys.configure_parser(p);
+    p.flush("red");
+    p.finish();
+
+    ds::system::parse_context ctx;
+    ds::container cont;
+    ctx.init<double, void>(sys, cont);
+
+    auto [ev, err] = sys.parse(p, ctx, cont);
+    CHECK(ev.type == tavl::event_type::row_end);
+    CHECK_FALSE(err.no_error());
+  }
+}
+
 TEST_CASE("disassembly golden") {
   SUBCASE("equality (bool root folds the single operand as AND)") {
     const std::string expected =

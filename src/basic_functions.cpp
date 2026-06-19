@@ -1,6 +1,7 @@
 #include "devils_script/basic_functions.h"
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include "devils_script/context.h"
 #include "devils_script/container.h"
 #include "devils_script/prng.h"
@@ -9,6 +10,22 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 #endif
+
+namespace {
+
+void check_script_arg_type(const int64_t arg, const context* ctx, const container* scr) {
+  if (scr == nullptr || arg < 0 || static_cast<size_t>(arg) >= scr->args.size()) return;
+
+  const auto expected = scr->args[static_cast<size_t>(arg)].type;
+  if (expected.empty() || type_is_any_type(expected)) return;
+
+  const auto actual = ctx->arg_type(arg);
+  if (actual != expected) {
+    throw std::runtime_error(std::format("Script argument #{} has type '{}', expected '{}'", arg, actual, expected));
+  }
+}
+
+}
 
 static constexpr int64_t make_mask(const size_t count) {
   int64_t val = 0;
@@ -126,6 +143,15 @@ int64_t condjumpt_get_unsafe(int64_t arg, context* ctx, const container*) {
 
 int64_t jump(int64_t arg, context* ctx, const container*) {
   ctx->current_index = arg - 1;
+  return 0;
+}
+
+int64_t jumpinvalid(int64_t arg, context* ctx, const container*) {
+  if (ctx->stack.invalid(-1)) {
+    ctx->stack.erase();
+    ctx->current_index = arg - 1;
+    return -1;
+  }
   return 0;
 }
 
@@ -337,6 +363,7 @@ int64_t pushstring(int64_t arg, context* ctx, const container* scr) {
 }
 
 int64_t pushroot(int64_t, context* ctx, const container*) {
+  check_script_arg_type(0, ctx, ctx->current_script);
   ctx->stack.push(ctx->safe_get_arg<any_stack>(0));
   return 1;
 }
@@ -403,7 +430,8 @@ int64_t pushcontext(int64_t, context* ctx, const container*) {
   return 1;
 }
 
-int64_t pushargvalue(int64_t arg, context* ctx, const container*) {
+int64_t pushargvalue(int64_t arg, context* ctx, const container* scr) {
+  check_script_arg_type(arg, ctx, scr);
   ctx->stack.push(ctx->get_arg<any_stack>(arg));
   return 1;
 }

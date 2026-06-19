@@ -184,45 +184,19 @@ int main() {
   ds::context ctx;
   ctx.set_arg(0, p1h);
 
-  {
+  const auto describe_and_print = [&](const auto& cont) {
     ctx.clear();
-    ds::node_view v;
-    cont1.make_table(&ctx, v);
-    v.traverse(&cont1, &print);
+    cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
+      print(entry.name, entry.custom_description, entry.nest_level, entry.value, entry.scope);
+    });
     std::cout << "\n";
-  }
+  };
 
-  {
-    ds::node_view v;
-    ctx.clear();
-    cont2.make_table(&ctx, v);
-    v.traverse(&cont2, &print);
-    std::cout << "\n";
-  }
-
-  {
-    ds::node_view v;
-    ctx.clear();
-    cont3.make_table(&ctx, v);
-    v.traverse(&cont3, &print);
-    std::cout << "\n";
-  }
-
-  {
-    ds::node_view v;
-    ctx.clear();
-    cont4.make_table(&ctx, v);
-    v.traverse(&cont4, &print);
-    std::cout << "\n";
-  }
-
-  {
-    ds::node_view v;
-    ctx.clear();
-    cont5.make_table(&ctx, v);
-    v.traverse(&cont5, &print);
-    std::cout << "\n";
-  }
+  describe_and_print(cont1);
+  describe_and_print(cont2);
+  describe_and_print(cont3);
+  describe_and_print(cont4);
+  describe_and_print(cont5);
 
   return 0;
 }

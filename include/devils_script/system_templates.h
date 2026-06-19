@@ -52,9 +52,6 @@ size_t system::parse_args(
       if (arg_block.empty()) return offset;
       if constexpr (!is_optional) {
         if (arg_block.empty()) raise_error(std::format("Could not find argument #{} for function '{}'", index, curfname));
-        if constexpr (std::is_enum_v<cur_arg_type>) {
-          if (arg_block.args_count() != 1 || arg_block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg #{}", curfname, index));
-        }
       }
     }
 
@@ -109,18 +106,12 @@ size_t system::parse_args(parse_ctx* ctx, container* scr, const command_block& b
 
         arg_block = block.find(name);
         if (arg_block.empty()) raise_error(std::format("Could not find argument '{}' for function '{}'", name, curfname));
-        if constexpr (std::is_enum_v<cur_arg_type>) {
-          if (arg_block.args_count() != 1 || arg_block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg '{}'", curfname, name));
-        }
       } else {
         arg_block = command_block(block, offset);
         next_size = arg_block.size();
         if (LI >= args_count && arg_block.empty()) return 0;
         if constexpr (!is_optional) {
           if (arg_block.empty()) raise_error(std::format("Could not find argument #{} for function '{}'", LI, curfname));
-          if constexpr (std::is_enum_v<cur_arg_type>) {
-            if (arg_block.args_count() != 1 || arg_block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg #{}", curfname, LI));
-          }
         }
       }
 
@@ -176,14 +167,8 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   if constexpr (!is_optional) {
     if (!arg_name.empty()) {
       if (block.empty()) raise_error(std::format("Could not find argument '{}' for function '{}'", arg_name, curfname));
-      if constexpr (std::is_enum_v<cur_arg_type>) {
-        if (block.args_count() != 1 || block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg '{}'", curfname, arg_name));
-      }
     } else {
       if (block.empty()) raise_error(std::format("Could not find argument #{} for function '{}'", index, curfname));
-      if constexpr (std::is_enum_v<cur_arg_type>) {
-        if (block.args_count() != 1 || block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg #{}", curfname, index));
-      }
     }
   }
   
@@ -191,10 +176,6 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   if (!arg_name.empty()) {
     if constexpr (is_optional) {
       using opt_t = std::remove_cvref_t<utils::optional_value_t<cur_arg_type>>;
-      if constexpr (std::is_enum_v<opt_t>) {
-        if (block.args_count() != 1 || block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg '{}'", curfname, arg_name));
-      }
-
       if constexpr (std::is_same_v<bool, opt_t>) override_lvalue = "AND";
       else if constexpr (std::is_fundamental_v<opt_t>) override_lvalue = "ADD";
       else if constexpr (std::is_same_v<std::string_view, opt_t>) override_lvalue = "__string_block";
@@ -219,25 +200,17 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       push_basic_function(ctx, scr, basicf::pushinvalid, 0);
       ctx->push<cur_t>();
     } else {
-      if constexpr (std::is_enum_v<cur_t>) { // special case, expecting rvalue with string
-        const auto enum_str = command_block(block, 1).name();
+      if constexpr (std::is_enum_v<cur_t>) {
+        const auto enum_str = block.size() == 1 ? block.name() : command_block(block, 1).name();
         constexpr auto enum_name = utils::type_name<std::remove_cvref_t<cur_t>>();
-        const auto itr = enums.find(std::string(enum_name));
-        if (itr == enums.end()) raise_error(std::format("Could not find enum type '{}', did you registered them?", enum_name));
-        const auto inner_itr = itr->second.find(std::string(enum_str));
-        if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
-        push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
+        push_enum_literal(ctx, scr, enum_name, enum_str);
       } else dispatch_node(ctx, scr, block, override_lvalue);
     }
   } else {
-    if constexpr (std::is_enum_v<cur_arg_type>) { // special case, expecting rvalue with string
-      const auto enum_str = command_block(block, 1).name();
+    if constexpr (std::is_enum_v<cur_arg_type>) {
+      const auto enum_str = block.size() == 1 ? block.name() : command_block(block, 1).name();
       constexpr auto enum_name = utils::type_name<std::remove_cvref_t<cur_arg_type>>();
-      const auto itr = enums.find(std::string(enum_name));
-      if (itr == enums.end()) raise_error(std::format("Could not find enum type '{}', did you registered them?", enum_name));
-      const auto inner_itr = itr->second.find(std::string(enum_str));
-      if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
-      push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
+      push_enum_literal(ctx, scr, enum_name, enum_str);
     } else dispatch_node(ctx, scr, block, override_lvalue);
   }
 
@@ -256,8 +229,12 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
     }
   }
 
-  if (!is_typeless_v<cur_arg_type> && !ctx->is_ignore() && !ctx->is<cur_arg_type>())
+  if constexpr (std::is_enum_v<cur_arg_type>) {
+    if (!ctx->is_ignore() && !ctx->is<int64_t>())
+      raise_error(std::format("Could not parse argument {} for function '{}': function expects enum '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
+  } else if (!is_typeless_v<cur_arg_type> && !ctx->is_ignore() && !ctx->is<cur_arg_type>()) {
     raise_error(std::format("Could not parse argument {} for function '{}': function expects '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
+  }
 
   if (fn) std::invoke(fn, ctx, scr, index, block);
 
@@ -292,9 +269,6 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       }
     } else {
       if (block.empty()) raise_error(std::format("Could not find argument #{} for function '{}'", index, curfname));
-      if constexpr (std::is_enum_v<cur_arg_type>) {
-        if (block.args_count() != 1 || block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg #{}", curfname, index));
-      }
     }
   }
 
@@ -302,10 +276,6 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   if (!arg_name.empty()) {
     if constexpr (is_optional) {
       using opt_t = std::remove_cvref_t<utils::optional_value_t<cur_arg_type>>;
-      if constexpr (std::is_enum_v<opt_t>) {
-        if (block.args_count() != 1 || block.size() != 2) raise_error(std::format("Bad enum special case in function '{}' arg '{}'", curfname, arg_name));
-      }
-
       if constexpr (std::is_same_v<bool, opt_t>) local_override_block_behaviour = basicf::AND;
       else if constexpr (std::is_fundamental_v<opt_t>) local_override_block_behaviour = basicf::ADD;
       else if constexpr (std::is_same_v<std::string_view, opt_t>) local_override_block_behaviour = basicf::string_block;
@@ -330,25 +300,17 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       push_basic_function(ctx, scr, basicf::pushinvalid, 0);
       ctx->push<cur_t>();
     } else {
-      if constexpr (std::is_enum_v<cur_t>) { // special case, expecting rvalue with string
-        const auto enum_str = command_block(block, 1).name();
+      if constexpr (std::is_enum_v<cur_t>) {
+        const auto enum_str = block.size() == 1 ? block.name() : command_block(block, 1).name();
         constexpr auto enum_name = utils::type_name<std::remove_cvref_t<cur_t>>();
-        const auto itr = enums.find(std::string(enum_name));
-        if (itr == enums.end()) raise_error(std::format("Could not find enum type '{}', did you registered them?", enum_name));
-        const auto inner_itr = itr->second.find(std::string(enum_str));
-        if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
-        push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
+        push_enum_literal(ctx, scr, enum_name, enum_str);
       } else fold_block(ctx, scr, block, local_override_block_behaviour);
     }
   } else {
-    if constexpr (std::is_enum_v<cur_arg_type>) { // special case, expecting rvalue with string
-      const auto enum_str = command_block(block, 1).name();
+    if constexpr (std::is_enum_v<cur_arg_type>) {
+      const auto enum_str = block.size() == 1 ? block.name() : command_block(block, 1).name();
       constexpr auto enum_name = utils::type_name<std::remove_cvref_t<cur_arg_type>>();
-      const auto itr = enums.find(std::string(enum_name));
-      if (itr == enums.end()) raise_error(std::format("Could not find enum type '{}', did you registered them?", enum_name));
-      const auto inner_itr = itr->second.find(std::string(enum_str));
-      if (inner_itr == itr->second.end()) raise_error(std::format("Could not find value '{}' in registered enum type '{}'", enum_str, enum_name));
-      push_basic_function(ctx, scr, basicf::pushint, std::bit_cast<int64_t>(inner_itr->second));
+      push_enum_literal(ctx, scr, enum_name, enum_str);
     } else fold_block(ctx, scr, block, local_override_block_behaviour);
   }
 
@@ -367,8 +329,12 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
     }
   }
 
-  if (!is_typeless_v<cur_arg_type> && !ctx->is_ignore() && !ctx->is<cur_arg_type>())
+  if constexpr (std::is_enum_v<cur_arg_type>) {
+    if (!ctx->is_ignore() && !ctx->is<int64_t>())
+      raise_error(std::format("Could not parse argument {} for function '{}': function expects enum '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
+  } else if (!is_typeless_v<cur_arg_type> && !ctx->is_ignore() && !ctx->is<cur_arg_type>()) {
     raise_error(std::format("Could not parse argument {} for function '{}': function expects '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
+  }
 
   if (fn) std::invoke(fn, ctx, scr, index, block);
 
@@ -476,7 +442,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     using memder_of = utils::function_member_of<F>;
     using scope_type = std::conditional_t<utils::is_void_v<HT>, memder_of, std::remove_cvref_t<HT>>;
-    using ret_type = final_stack_el_t<utils::function_result_type<F>>;
+    using ret_type = script_stack_el_t<utils::function_result_type<F>>;
     constexpr bool is_not_member_func = utils::is_void_v<memder_of>;
     constexpr bool requires_scope = !utils::is_void_v<scope_type>;
     constexpr size_t sig_args_count = utils::function_arguments_count<F>;
@@ -574,13 +540,37 @@ void system::register_function(std::string name, std::vector<std::string> func_a
           // bad design?
           if (offset < args.size() && offset == 1) { // no args
             ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+            constexpr bool supports_nullable = !utils::is_void_v<ret_type> && !std::is_same_v<ret_type, ignore_value> && !is_typeless_v<ret_type>;
+            const bool nullable = supports_nullable && args.nullable();
+            const size_t guard_index = scr->cmds.size();
+            if constexpr (supports_nullable) if (nullable) {
+              constexpr function_t guard = &detail::nullable_scope_guard<ret_type, &is_valid<ret_type>>;
+              const int32_t mode = type_is_bool(ctx->expected_type) ? 1 : (type_is_fundamental(ctx->expected_type) ? 2 : 0);
+              scr->cmds.push_back(container::command(guard, pack2(0, mode)));
+              scr->descs.emplace_back(container::command_description(
+                { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
+              ));
+            }
             sys->fold_block(ctx, scr, args, basicf::invalid);
             sys->scope_exit(ctx, scr, 1);
+            if (nullable) scr->cmds[guard_index].arg = pack2(static_cast<int32_t>(scr->cmds.size()), std::get<1>(unpack2(scr->cmds[guard_index].arg)));
           } else if (offset < args.size() && ctx->ftype == function_type::lvalue) { // was args
             const auto remaining = command_block(args, offset);
             ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+            constexpr bool supports_nullable = !utils::is_void_v<ret_type> && !std::is_same_v<ret_type, ignore_value> && !is_typeless_v<ret_type>;
+            const bool nullable = supports_nullable && args.nullable();
+            const size_t guard_index = scr->cmds.size();
+            if constexpr (supports_nullable) if (nullable) {
+              constexpr function_t guard = &detail::nullable_scope_guard<ret_type, &is_valid<ret_type>>;
+              const int32_t mode = type_is_bool(ctx->expected_type) ? 1 : (type_is_fundamental(ctx->expected_type) ? 2 : 0);
+              scr->cmds.push_back(container::command(guard, pack2(0, mode)));
+              scr->descs.emplace_back(container::command_description(
+                { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
+              ));
+            }
             sys->dispatch_node(ctx, scr, remaining);
             sys->scope_exit(ctx, scr, 1);
+            if (nullable) scr->cmds[guard_index].arg = pack2(static_cast<int32_t>(scr->cmds.size()), std::get<1>(unpack2(scr->cmds[guard_index].arg)));
 
             offset += remaining.size();
             if (offset < args.size()) 
@@ -601,7 +591,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
   };
 
   using scope_type = std::remove_cvref_t<HT>;
-  using ret_type = final_stack_el_t<utils::function_result_type<F>>;
+  using ret_type = script_stack_el_t<utils::function_result_type<F>>;
   constexpr bool is_not_member_func = utils::is_void_v<utils::function_member_of<F>>;
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
@@ -890,38 +880,92 @@ template <typename T>
   requires (std::is_enum_v<T>)
 void system::register_enum(const std::span<std::tuple<std::string, T>>& values) {
   using enum_t = std::remove_cvref_t<T>;
-  constexpr auto enum_name = std::string(utils::type_name<enum_t>());
-  const auto itr = enums.find(enum_name);
-  if (itr != enums.end()) raise_error(std::format("Enum '{}' is already registered", enum_name));
-
-  for (const auto &[name, val] : values) {
-    itr->second[name] = std::bit_cast<size_t>(val);
+  std::unordered_map<std::string, enum_t> table;
+  for (const auto& [name, val] : values) {
+    table.emplace(name, val);
   }
+  register_enum<enum_t>([table = std::move(table)](const std::string_view name) -> std::optional<enum_t> {
+    const auto itr = table.find(std::string(name));
+    if (itr == table.end()) return std::nullopt;
+    return itr->second;
+  });
 }
 
 template <typename T>
   requires (std::is_enum_v<T>)
 void system::register_enum(const std::span<std::tuple<std::string_view, T>>& values) {
   using enum_t = std::remove_cvref_t<T>;
-  constexpr auto enum_name = std::string(utils::type_name<enum_t>());
-  const auto itr = enums.find(enum_name);
-  if (itr != enums.end()) raise_error(std::format("Enum '{}' is already registered", enum_name));
-
+  std::unordered_map<std::string, enum_t> table;
   for (const auto& [name, val] : values) {
-    itr->second[std::string(name)] = std::bit_cast<size_t>(val);
+    table.emplace(std::string(name), val);
+  }
+  register_enum<enum_t>([table = std::move(table)](const std::string_view name) -> std::optional<enum_t> {
+    const auto itr = table.find(std::string(name));
+    if (itr == table.end()) return std::nullopt;
+    return itr->second;
+  });
+}
+
+template <typename T, typename F>
+  requires (std::is_enum_v<T> && std::is_invocable_r_v<std::optional<T>, F, std::string_view>)
+void system::register_enum(F fn) {
+  using enum_t = std::remove_cvref_t<T>;
+  const auto enum_name = std::string(utils::type_name<enum_t>());
+  if (enums.contains(enum_name)) raise_error(std::format("Enum '{}' is already registered", enum_name));
+
+  enums.emplace(enum_name, [fn = std::move(fn)](const std::string_view name) -> std::optional<int64_t> {
+    const auto val = std::invoke(fn, name);
+    if (!val.has_value()) return std::nullopt;
+    using underlying_t = std::underlying_type_t<enum_t>;
+    return static_cast<int64_t>(static_cast<underlying_t>(*val));
+  });
+}
+
+template <typename RETURN_T, typename ROOT_T>
+void system::parse_context::init(const system& sys, container& c) {
+  using ret_type = script_stack_el_t<RETURN_T>;
+  using root_type_t = final_stack_el_t<ROOT_T>;
+
+       if constexpr (utils::is_void_v<ret_type>)                 root_block_name = "__effect_block";
+  else if constexpr (std::is_same_v<bool, ret_type>)             root_block_name = "AND";
+  else if constexpr (std::is_fundamental_v<ret_type>)            root_block_name = "ADD";
+  else if constexpr (std::is_same_v<std::string_view, ret_type>) root_block_name = "__string_block";
+  else                                                           root_block_name = "__object_block";
+
+  return_type = scope_type_name<ret_type>();
+  expected_type = return_type;
+  root_type = utils::is_void_v<root_type_t> ? std::string_view() : scope_type_name<root_type_t>();
+  unlimited_func_index = 0;
+  nest_level = 0;
+  ftype = function_type::lvalue;
+  prng_s = prng::xoshiro256starstar::init(sys.get_seed());
+  c.prng_state = gen_value();
+  initialized = true;
+
+  if constexpr (!utils::is_void_v<root_type_t>) {
+    if (c.args.empty()) {
+      c.args.push_back({ { static_cast<size_t>(basicf::root), SIZE_MAX }, root_type });
+      sys.push_basic_function(this, &c, basicf::pushroot, 0);
+      scope_stack.push_back(stack_types.size()-1);
+    }
   }
 }
 
 template <typename RETURN_T, typename ROOT_T>
+std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_context& ctx, container& c) const {
+  if (!ctx.initialized) ctx.init<RETURN_T, ROOT_T>(*this, c);
+  return parse(p, ctx, c);
+}
+
+template <typename RETURN_T, typename ROOT_T>
 container system::parse(std::string text) const {
-  using ret_type = final_stack_el_t<RETURN_T>;
+  using ret_type = script_stack_el_t<RETURN_T>;
   using root_type = final_stack_el_t<ROOT_T>;
 
   container scr;
-  parse_ctx ctx;
-  ctx.prng_s = prng::xoshiro256starstar::init(get_seed());
+  parse_context ctx;
   scr.globals.emplace_back(std::move(text));
-  scr.prng_state = ctx.gen_value();
+  ctx.init<RETURN_T, ROOT_T>(*this, scr);
   const auto script_block = std::string_view(scr.globals[0]);
 
   // Path N: tavl lexes/structures/precedences the script (make_script_ast); normalize() turns its
@@ -933,12 +977,7 @@ container system::parse(std::string text) const {
   const size_t cmds = ctx.rpn_ctx.normalize(tree, script_block);
   auto output = ctx.rpn_ctx.output;
   ctx.rpn_ctx.clear();
-
-       if constexpr (utils::is_void_v<ret_type>)                 output.emplace(output.begin(), rpn_conversion_ctx::block{ "__effect_block", cmds, output.size()+1 });
-  else if constexpr (std::is_same_v<bool, ret_type>)             output.emplace(output.begin(), rpn_conversion_ctx::block{ "AND", cmds, output.size()+1 });
-  else if constexpr (std::is_fundamental_v<ret_type>)            output.emplace(output.begin(), rpn_conversion_ctx::block{ "ADD", cmds, output.size()+1 });
-  else if constexpr (std::is_same_v<std::string_view, ret_type>) output.emplace(output.begin(), rpn_conversion_ctx::block{ "__string_block", cmds, output.size()+1 });
-  else                                                           output.emplace(output.begin(), rpn_conversion_ctx::block{ "__object_block", cmds, output.size()+1 });
+  output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.root_block_name, cmds, output.size()+1 });
 
   /*const auto print_block = [](const std::vector<system::rpn_conversion_ctx::block>& arr) {
     for (const auto& b : arr) {
@@ -950,19 +989,9 @@ container system::parse(std::string text) const {
 
   print_block(output);*/
 
-  ctx.unlimited_func_index = 0;
-  ctx.nest_level = 0;
-  ctx.expected_type = scope_type_name<ret_type>();
   set_function_type sft(&ctx, function_type::lvalue);
 
   auto script_cmds = command_block(std::span<rpn_conversion_ctx::block>(output));
-
-  if constexpr (!utils::is_void_v<root_type>) {
-    constexpr auto root_name = scope_type_name<root_type>();
-    scr.args.push_back({ { static_cast<size_t>(basicf::root), SIZE_MAX }, root_name});
-    push_basic_function(&ctx, &scr, basicf::pushroot, 0);
-    ctx.scope_stack.push_back(ctx.stack_types.size()-1);
-  }
 
   {
     set_expected_type set(&ctx, scope_type_name<ret_type>());
@@ -989,7 +1018,7 @@ container system::parse(std::string text) const {
 }
 
 template <typename T>
-bool system::parse_ctx::is_scope() const {
+bool system::parse_context::is_scope() const {
   using basic_T = final_stack_el_t<T>;
   /*if constexpr (std::is_pointer_v<basic_T>) {
     using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
@@ -1002,7 +1031,7 @@ bool system::parse_ctx::is_scope() const {
 }
 
 template <typename T>
-bool system::parse_ctx::is() const {
+bool system::parse_context::is() const {
   using basic_T = final_stack_el_t<T>;
   //if constexpr (std::is_pointer_v<basic_T>) {
   //  using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
@@ -1015,7 +1044,7 @@ bool system::parse_ctx::is() const {
 }
 
 template <typename T>
-void system::parse_ctx::push() {
+void system::parse_context::push() {
   using basic_T = final_stack_el_t<T>;
   constexpr auto stn = scope_type_name<basic_T>();
   push(stn);
@@ -1025,7 +1054,7 @@ void system::parse_ctx::push() {
 // not needed anymore?
 template <typename F, typename RT, bool is_iterator_func>
 constexpr system::user_function_type system::get_user_function_type() {
-  using ret_type = final_stack_el_t<std::conditional_t<is_iterator_func, RT, utils::function_result_type<F>>>;
+  using ret_type = script_stack_el_t<std::conditional_t<is_iterator_func, RT, utils::function_result_type<F>>>;
   user_function_type t = user_function_type::effect;
   if constexpr (is_iterator_func) {
     if constexpr (utils::is_void_v<ret_type>) t = user_function_type::iterator_effect;

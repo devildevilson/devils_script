@@ -46,40 +46,10 @@ void container::process(context* ctx) const {
 }
 
 void container::make_table(context* ctx, std::vector<std::tuple<any_stack, any_stack>>& table) const {
-  table.clear();
-  table.resize(block_descs.size());
-
-  size_t counter = 0;
-  for (size_t i = 0; i < cmds.size(); ++i) {
-    const auto& cmd = cmds[ctx->current_index];
-    const auto& desc = descs[i];
-
-    const size_t curplace = i;
-
-    const bool no_jump = i >= ctx->current_index;
-    if (no_jump && !desc.effect) {
-      std::invoke(cmd.fp, cmd.arg, ctx, this); // doesnt need to be invoked if desc.effect
-    }
-    ctx->current_index += size_t(no_jump);
-
-    while (counter < block_descs.size() && curplace == block_descs[counter].cmd_index) {
-      const auto si = block_descs[counter].scope_index;
-      if (no_jump) {
-        table[counter] = std::make_tuple(
-          ctx->stack.safe_get<any_stack>(),
-          si >= 0 ? ctx->stack.safe_get<any_stack>(si) : any_stack() 
-        );
-      }
-      counter += 1;
-    }
-  }
-
-  // the first script block
-  if (!ctx->return_type().empty() && !table.empty()) {
-    any_stack s;
-    if (get_arg_name(0) == "root") s = ctx->get_arg<any_stack>(0);
-    table.back() = std::make_tuple(ctx->get_return<any_stack>(), s);
-  }
+  table.assign(block_descs.size(), {});
+  describe(ctx, [&](const description_entry& entry) {
+    table[entry.node] = std::make_tuple(entry.value, entry.scope);
+  });
 }
 
 void container::make_table(context* ctx, node_view& viewer) const {
@@ -206,6 +176,7 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
     };
 
     std::invoke(fn, entry);
+    if (!entry.custom_description.empty()) return true;
 
     const size_t stack_start = offset >= desc.size ? offset - desc.size + 1 : 0;
     std::vector<size_t> children;

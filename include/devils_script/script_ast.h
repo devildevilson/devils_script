@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string_view>
+#include <tuple>
 
 #include "tavl/tavl.h"
 #include "tavl/ext.h"
@@ -22,8 +23,20 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 // an EMPTY operator token; a `=`/`?=`/math pair carries its operator token. Scope paths `a.b:c`
 // arrive as one `unrecognized` token and are kept as a leaf (split later, at the semantic stage).
 //
-// `p` must have its operators registered already (see system::configure_parser). The whole `src`
-// is flushed at once and finished; no streaming. Error handling / recovery is NOT done here yet.
+struct script_ast_context {
+  std::vector<tavl::event> events;
+  size_t nest_counter = 0;
+  bool got_start = false;
+
+  void clear();
+};
+
+// `p` must have its operators registered already (see system::configure_parser). Parses one row
+// from the current event stream and returns its terminal event (`row_end`, `eof`, or
+// `not_enought_data`). On `not_enought_data`, `ctx` keeps enough state to resume later.
+std::tuple<tavl::event, tavl::error> make_script_ast(tavl::parser& p, script_ast_context& ctx, std::vector<tavl::node>& ast_nodes);
+
+// Whole-string helper kept for non-streaming callers.
 std::vector<tavl::node> make_script_ast(tavl::parser& p, std::string_view src);
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

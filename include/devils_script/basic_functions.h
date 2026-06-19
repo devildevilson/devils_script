@@ -41,6 +41,7 @@ int64_t condjump_unsafe(int64_t, context*, const container*);
 int64_t condjump_get_unsafe(int64_t, context*, const container*);
 int64_t condjumpt_get_unsafe(int64_t, context*, const container*);
 int64_t jump(int64_t, context*, const container*);
+int64_t jumpinvalid(int64_t, context*, const container*);
 
 int64_t andbin(int64_t, context*, const container*);
 

@@ -81,6 +81,13 @@ using final_stack_el_t = std::conditional_t<
   std::remove_cvref_t<T>
 >>>>;
 
+template <typename T>
+using script_stack_el_t = std::conditional_t<
+  std::is_enum_v<std::remove_cvref_t<T>>,
+  int64_t,
+  final_stack_el_t<T>
+>;
+
 inline size_t compute_count1() { return 0; }
 template <typename T>
 inline size_t compute_count2(T) { return 0; }

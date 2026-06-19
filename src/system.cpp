@@ -217,7 +217,7 @@ void system::raise_error(const std::string& msg) const { error(msg); }
 void system::raise_warning(const std::string& msg) const { warning(msg); }
 uint64_t system::get_seed() const { return seed; }
 void system::reseed(const uint64_t val) { seed = val; }
-uint64_t system::parse_ctx::gen_value() { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
+uint64_t system::parse_context::gen_value() { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
 
 
 void system::scope_exit(parse_ctx* ctx, container* scr, const size_t count) const {
@@ -519,6 +519,34 @@ size_t system::push_string(parse_ctx* ctx, container* scr, const std::string_vie
   return 1;
 }
 
+std::optional<int64_t> system::resolve_enum(const std::string_view& enum_type, const std::string_view& value) const {
+  const auto itr = enums.find(std::string(enum_type));
+  if (itr == enums.end()) return std::nullopt;
+  return std::invoke(itr->second, value);
+}
+
+std::optional<int64_t> system::resolve_enum(const std::string_view& value) const {
+  std::optional<int64_t> result;
+  for (const auto& [_, fn] : enums) {
+    const auto val = std::invoke(fn, value);
+    if (!val.has_value()) continue;
+    if (result.has_value() && *result != *val) raise_error(std::format("Enum literal '{}' is ambiguous", value));
+    result = val;
+  }
+  return result;
+}
+
+size_t system::push_enum_literal(parse_ctx* ctx, container* scr, const std::string_view& enum_type, const std::string_view& value) const {
+  const auto val = enum_type.empty() ? resolve_enum(value) : resolve_enum(enum_type, value);
+  if (!val.has_value()) {
+    if (enum_type.empty()) raise_error(std::format("Could not find enum value '{}'", value));
+    raise_error(std::format("Could not find value '{}' in registered enum type '{}'", value, enum_type));
+  }
+
+  push_basic_function(ctx, scr, basicf::pushint, *val);
+  return 1;
+}
+
 namespace {
 
 struct const_value {
@@ -659,13 +687,6 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
       return 1;
     }
 
-    if (exp_t == utils::type_name<std::string_view>()) {
-      set_function_type sft(ctx, function_type::rvalue);
-      push_string(ctx, scr, block.data[0].token);
-      setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
-      return 1;
-    }
-
     {
       set_function_type sft(ctx, function_type::lvalue);
 
@@ -675,7 +696,22 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
 
       if (count == 0) {
         const auto& itr = mfuncs.find(std::string(block.name()));
-        if (itr == mfuncs.end() && any_type_expected) {
+        if (
+          itr == mfuncs.end() &&
+          !type_is_string(exp_t) &&
+          (type_is_fundamental(exp_t) || any_type_expected) &&
+          resolve_enum(block.name()).has_value()
+        ) {
+          set_function_type sft(ctx, function_type::rvalue);
+          push_enum_literal(ctx, scr, std::string_view(), block.name());
+          setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
+          return 1;
+        } else if (itr == mfuncs.end() && exp_t == utils::type_name<std::string_view>()) {
+          set_function_type sft(ctx, function_type::rvalue);
+          push_string(ctx, scr, block.data[0].token);
+          setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
+          return 1;
+        } else if (itr == mfuncs.end() && any_type_expected) {
           set_function_type sft(ctx, function_type::rvalue);
           push_string(ctx, scr, block.name());
           setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
@@ -848,14 +884,68 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
       ctx->pop();
       has_value = true;
 
+      if (child.nullable()) {
+        scr->cmds.push_back(container::command(&jumpinvalid, INT64_C(0)));
+        scr->descs.emplace_back(container::command_description(
+          { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
+        ));
+        e.mark(skip_child, scr->cmds.size() - 1);
+      }
+
       e.jump_to(basicf::jump, end);
-      if (has_condition) e.bind(skip_child);
+      if (has_condition || child.nullable()) e.bind(skip_child);
     }
 
     e.bind(end);
     if (has_value) ctx->push(result_type.empty() ? exp_t : result_type);
     else ctx->push<ignore_value>();
 
+    return block.size();
+  }
+
+  if (curid == basicf::string_block) {
+    emitter e{this, ctx, scr};
+    auto end = e.make_label();
+    bool has_value = false;
+
+    size_t offset = 1;
+    while (offset < block.size()) {
+      const auto child = command_block(block, offset);
+      offset += child.size();
+      if (text::is_in_ignore_list(child.name())) continue;
+
+      auto skip_child = e.make_label();
+      const auto cond_block = child.find("condition");
+      const bool has_condition = !cond_block.empty();
+      if (has_condition) {
+        dispatch_node(ctx, scr, cond_block, "AND");
+        if (!ctx->is<bool>()) raise_error(std::format("String block condition '{}' must return bool, got '{}'", cond_block.name(), ctx->top()));
+        e.jump_to(basicf::condjump, skip_child);
+      }
+
+      const size_t before = ctx->stack_types.size();
+      dispatch_node(ctx, scr, child);
+      if (before >= ctx->stack_types.size()) raise_error(std::format("String block child '{}' does not push any value", child.name()));
+      if (ctx->is<ignore_value>()) { ctx->pop(); continue; }
+      if (!ctx->is<std::string_view>()) raise_error(std::format("String block expects '{}', but child '{}' returns '{}'", utils::type_name<std::string_view>(), child.name(), ctx->top()));
+      ctx->pop();
+      has_value = true;
+
+      if (child.nullable()) {
+        scr->cmds.push_back(container::command(&jumpinvalid, INT64_C(0)));
+        scr->descs.emplace_back(container::command_description(
+          { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
+        ));
+        e.mark(skip_child, scr->cmds.size() - 1);
+      }
+
+      e.jump_to(basicf::jump, end);
+      if (has_condition || child.nullable()) e.bind(skip_child);
+    }
+
+    e.bind(end);
+    if (has_value) ctx->push<std::string_view>();
+    else ctx->push<ignore_value>();
     return block.size();
   }
 
@@ -932,6 +1022,15 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     if (curid == basicf::effect_block) continue;
     if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value?", child.name()));
     if (ctx->is<ignore_value>()) { ctx->pop(); continue; }
+    if (child.nullable() && (curid == basicf::string_block || curid == basicf::string_subblock || curid == basicf::object_subblock)) {
+      auto skip_invalid = e.make_label();
+      scr->cmds.push_back(container::command(&jumpinvalid, INT64_C(0)));
+      scr->descs.emplace_back(container::command_description(
+        { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
+      ));
+      e.mark(skip_invalid, scr->cmds.size() - 1);
+      e.bind(skip_invalid);
+    }
     if (curid == basicf::string_block) continue;
     if (curid == basicf::object_block) continue;
 
@@ -1016,6 +1115,64 @@ void system::configure_parser(tavl::parser& p) const {
   }
 }
 
+std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_context& ctx, container& c) const {
+  if (!ctx.initialized) raise_error("parse_context is not initialized");
+
+  auto [ev, err] = make_script_ast(p, ctx.script_ast_ctx, ctx.script_ast_nodes);
+  if (ev.type == tavl::event_type::not_enought_data || ctx.script_ast_nodes.empty()) return {ev, err};
+  if (!err.no_error()) return {ev, err};
+
+  if (c.globals.empty()) {
+    const size_t storage_end = p.storage.size();
+    const size_t live_size = p.storage.buffer_size();
+    const size_t released_size = storage_end - live_size;
+    const auto live_src = p.content(tavl::source_span{released_size, live_size, 1, 1});
+    std::string src(released_size, ' ');
+    src.append(live_src);
+    c.globals.emplace_back(std::move(src));
+  }
+
+  try {
+    const size_t cmds = ctx.rpn_ctx.normalize(ctx.script_ast_nodes, std::string_view(c.globals[0]));
+    auto output = ctx.rpn_ctx.output;
+    ctx.rpn_ctx.clear();
+    ctx.script_ast_nodes.clear();
+
+    const std::string_view root_block = !ctx.root_block_name.empty() ? ctx.root_block_name : std::string_view("__effect_block");
+    output.emplace(output.begin(), rpn_conversion_ctx::block{ root_block, cmds, output.size() + 1 });
+
+    command_block script_cmds{std::span<rpn_conversion_ctx::block>(output)};
+    {
+      set_expected_type set(&ctx, ctx.return_type);
+      dispatch_node(&ctx, &c, script_cmds);
+    }
+
+    while (ctx.pop_while_ignore()) {}
+
+    if (!ctx.root_type.empty()) {
+      if (ctx.scope_stack.size() != 1) raise_error(std::format("There is not closed scope of type '{}' on stack", ctx.stack_types[ctx.scope_stack.back()]));
+      scope_exit(&ctx, &c, 1);
+    }
+
+    if (!type_is_void(ctx.return_type)) {
+      if (ctx.stack_types.empty() || ctx.stack_types.back() != ctx.return_type) {
+        const auto actual = ctx.stack_types.empty() ? std::string_view("empty stack") : ctx.stack_types.back();
+        raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", actual, ctx.return_type, ctx.stack_types.size()));
+      }
+      push_basic_function(&ctx, &c, basicf::pushreturn, 0);
+    }
+
+    if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
+  } catch (const std::exception&) {
+    ctx.rpn_ctx.clear();
+    ctx.script_ast_nodes.clear();
+    return {ev, tavl::error{tavl::error_type::err_misplaced_operator, ev.token.span}};
+  }
+
+  c.build_description_index();
+  return {ev, err};
+}
+
 system::command_data::ftype system::get_token_type(const std::string_view& name) const {
   const auto itr = mfuncs.find(std::string(name)); // such a pain
   if (itr == mfuncs.end()) return command_data::ftype::invalid;
@@ -1052,55 +1209,55 @@ size_t system::patch_prev_functions_descriptions(container* scr, const size_t st
   return counter;
 }
 
-system::parse_ctx::parse_ctx() noexcept :
-  ftype(function_type::lvalue), nest_level(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0)
+system::parse_context::parse_context() noexcept :
+  ftype(function_type::lvalue), nest_level(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0), initialized(false)
 {}
 
-bool system::parse_ctx::is_func_subblock() const {
+bool system::parse_context::is_func_subblock() const {
   if (function_names.size() < 2) return false;
   return function_names[function_names.size() - 2] == function_names.back();
 }
 
-void system::parse_ctx::push_func(const std::string_view& name) {
+void system::parse_context::push_func(const std::string_view& name) {
   function_names.push_back(name);
 }
 
-void system::parse_ctx::pop_func() {
+void system::parse_context::pop_func() {
   function_names.pop_back();
 }
 
-size_t system::parse_ctx::current_scope_index() const {
+size_t system::parse_context::current_scope_index() const {
   if (scope_stack.empty()) return SIZE_MAX;
   return scope_stack.back();
 }
 
-std::string_view system::parse_ctx::current_scope_type() const {
+std::string_view system::parse_context::current_scope_type() const {
   if (scope_stack.empty()) return std::string_view();
   return stack_types[scope_stack.back()];
 }
 
-bool system::parse_ctx::is_ignore() const { return type_is_ignore(top()); }
-bool system::parse_ctx::is_bool() const { return type_is_bool(top()); }
-bool system::parse_ctx::is_integral() const { return type_is_integral(top()); }
-bool system::parse_ctx::is_number() const { return type_is_floating_point(top()); }
-bool system::parse_ctx::is_fundamental() const { return type_is_fundamental(top()); }
-bool system::parse_ctx::is_string() const { return type_is_string(top()); }
-bool system::parse_ctx::is_object() const { return type_is_object(top()); }
-bool system::parse_ctx::pop_while_ignore() { if (!stack_types.empty() && is_ignore()) { pop(); return true; } return false; }
-void system::parse_ctx::push(const std::string_view& type) {
+bool system::parse_context::is_ignore() const { return type_is_ignore(top()); }
+bool system::parse_context::is_bool() const { return type_is_bool(top()); }
+bool system::parse_context::is_integral() const { return type_is_integral(top()); }
+bool system::parse_context::is_number() const { return type_is_floating_point(top()); }
+bool system::parse_context::is_fundamental() const { return type_is_fundamental(top()); }
+bool system::parse_context::is_string() const { return type_is_string(top()); }
+bool system::parse_context::is_object() const { return type_is_object(top()); }
+bool system::parse_context::pop_while_ignore() { if (!stack_types.empty() && is_ignore()) { pop(); return true; } return false; }
+void system::parse_context::push(const std::string_view& type) {
   stack_types.push_back(type);
 }
-void system::parse_ctx::pop() {
+void system::parse_context::pop() {
   if (stack_types.empty()) throw std::runtime_error(std::format("Trying to remove value from empty stack, current function '{}'", function_names.back()));
   stack_types.pop_back();
 }
 
-void system::parse_ctx::erase(const size_t index) {
+void system::parse_context::erase(const size_t index) {
   if (index >= stack_types.size()) throw std::runtime_error(std::format("Trying to remove value #{} from stack with {} values, current function '{}'", index, stack_types.size(), function_names.back()));
   stack_types.erase(stack_types.begin() + index);
 }
 
-std::string_view system::parse_ctx::top() const { return stack_types.back(); }
+std::string_view system::parse_context::top() const { return stack_types.back(); }
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 }

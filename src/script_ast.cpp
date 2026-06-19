@@ -124,21 +124,11 @@ subtree parse_expr(ev_cursor& c, int min_prec) {
   return lhs;
 }
 
-}  // namespace
+bool is_script_event(tavl::event_type t) {
+  return t != tavl::event_type::empty_row && t != tavl::event_type::got_comment;
+}
 
-std::vector<tavl::node> make_script_ast(tavl::parser& p, std::string_view src) {
-  p.clear();
-  p.flush(src);
-  p.finish();
-
-  std::vector<tavl::event> evs;
-  for (;;) {
-    auto [ev, err] = p.poll_event();
-    (void)err;
-    if (ev.type == tavl::event_type::eof) break;
-    evs.push_back(ev);
-  }
-
+void build_script_ast(const std::vector<tavl::event>& evs, const tavl::parser& p, std::vector<tavl::node>& ast_nodes) {
   ev_cursor c{ evs, p, 0 };
   std::vector<subtree> rows;
   while (c.type() == tavl::event_type::row_begin) {
@@ -148,7 +138,70 @@ std::vector<tavl::node> make_script_ast(tavl::parser& p, std::string_view src) {
   }
 
   // wrap top-level rows in a synthetic root block; the semantic pass picks the combinator.
-  return wrap(tavl::node_type::object, tavl::token{}, rows);
+  ast_nodes = wrap(tavl::node_type::object, tavl::token{}, rows);
+}
+
+}  // namespace
+
+void script_ast_context::clear() {
+  events.clear();
+  nest_counter = 0;
+  got_start = false;
+}
+
+std::tuple<tavl::event, tavl::error> make_script_ast(tavl::parser& p, script_ast_context& ctx, std::vector<tavl::node>& ast_nodes) {
+  ast_nodes.clear();
+  for (;;) {
+    auto [ev, err] = p.poll_event();
+    if (ev.type == tavl::event_type::not_enought_data) return {ev, err};
+
+    if (ev.type == tavl::event_type::eof) {
+      if (!ctx.events.empty()) build_script_ast(ctx.events, p, ast_nodes);
+      ctx.clear();
+      return {ev, err};
+    }
+
+    if (!is_script_event(ev.type)) continue;
+
+    if (!ctx.got_start && ev.type != tavl::event_type::row_begin) {
+      ctx.events.push_back(tavl::event{tavl::event_type::row_begin, ev.token});
+      ctx.got_start = true;
+    }
+
+    if (ev.type == tavl::event_type::row_begin) {
+      ctx.got_start = true;
+    } else if (is_begin_block(ev.type)) {
+      ctx.nest_counter += 1;
+    } else if (is_end_block(ev.type) && ctx.nest_counter > 0) {
+      ctx.nest_counter -= 1;
+    }
+
+    ctx.events.push_back(ev);
+
+    if (ev.type == tavl::event_type::row_end && ctx.nest_counter == 0) {
+      build_script_ast(ctx.events, p, ast_nodes);
+      ctx.clear();
+      return {ev, err};
+    }
+  }
+}
+
+std::vector<tavl::node> make_script_ast(tavl::parser& p, std::string_view src) {
+  p.clear();
+  p.flush(src);
+  p.finish();
+
+  std::vector<tavl::event> evs;
+  std::vector<tavl::node> nodes;
+  for (;;) {
+    auto [ev, err] = p.poll_event();
+    (void)err;
+    if (ev.type == tavl::event_type::eof) break;
+    if (!is_script_event(ev.type)) continue;
+    evs.push_back(ev);
+  }
+  build_script_ast(evs, p, nodes);
+  return nodes;
 }
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

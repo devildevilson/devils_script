@@ -5,6 +5,7 @@
 #include <type_traits>
 #include "devils_script/common.h"
 #include "devils_script/context.h"
+#include "devils_script/basic_functions.h"
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -159,18 +160,47 @@ auto stack_get_unsafe(context* ctx, const int64_t index) -> final_stack_el_t<T> 
   return T(ctx->stack.get<cur_t>(index));
 }
 
+template <typename T>
+void stack_push_result(context* ctx, const T& value) {
+  using value_t = std::remove_cvref_t<T>;
+  if constexpr (std::is_enum_v<value_t>) {
+    using underlying_t = std::underlying_type_t<value_t>;
+    ctx->stack.push(static_cast<int64_t>(static_cast<underlying_t>(value)));
+  } else {
+    ctx->stack.push(value);
+  }
+}
+
+template <typename T, is_valid_t<T> vt>
+int64_t nullable_scope_guard(int64_t arg, context* ctx, const container*) {
+  const auto [target, mode] = unpack2(arg);
+  const auto value = ctx->stack.safe_get<T>();
+  if (!std::invoke(vt, value)) {
+    ctx->stack.erase();
+    if (mode == 1) ctx->stack.push(false);
+    else if (mode == 2) ctx->stack.push(0.0);
+    else {
+      stack_element el;
+      el.invalidate();
+      ctx->stack.push(std::string_view(), el);
+    }
+    ctx->current_index = target - 1;
+  }
+  return 0;
+}
+
 template <size_t OFF, size_t COUNT, auto f, typename HT, is_valid_t<HT> vt, size_t... I>
 int64_t invoke_mathfunc(int64_t val, context* ctx, const container*, std::index_sequence<I...>) {
   if constexpr (utils::is_void_v<HT>) {
     const auto ret = std::invoke(f, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     ctx->stack.resize(ctx->stack.size() - COUNT);
-    ctx->stack.push(ret);
+    stack_push_result(ctx, ret);
   } else {
     auto c = ctx->stack.safe_get<HT>(val);
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<HT>(), ctx->current_index));
     const auto ret = std::invoke(f, c, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     ctx->stack.resize(ctx->stack.size() - COUNT);
-    ctx->stack.push(ret);
+    stack_push_result(ctx, ret);
   }
 
   return -int64_t(COUNT) + 1;
@@ -195,12 +225,12 @@ int64_t invoke_userfunc(context* ctx, const container* scr, std::index_sequence<
     if constexpr (eff == nullptr) {
       const auto ret = std::invoke(f, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     } else {
       auto t = std::make_tuple(stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
@@ -228,12 +258,12 @@ int64_t invoke_userfunc_scope(context* ctx, const container* scr, HT &scope, std
     if constexpr (eff == nullptr) {
       const auto ret = std::invoke(f, scope, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     } else {
       const auto& t = std::make_tuple(scope, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
@@ -247,13 +277,13 @@ int64_t invoke_mathfunc_unsafe(int64_t val, context* ctx, const container*, std:
   if constexpr (utils::is_void_v<HT>) {
     const auto ret = std::invoke(f, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     ctx->stack.resize(ctx->stack.size() - COUNT);
-    ctx->stack.push(ret);
+    stack_push_result(ctx, ret);
   } else {
     auto c = ctx->stack.get<HT>(val);
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<HT>(), ctx->current_index));
     const auto ret = std::invoke(f, c, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     ctx->stack.resize(ctx->stack.size() - COUNT);
-    ctx->stack.push(ret);
+    stack_push_result(ctx, ret);
   }
 
   return -int64_t(COUNT) + 1;
@@ -277,12 +307,12 @@ int64_t invoke_userfunc_unsafe(context* ctx, const container* scr, std::index_se
     if constexpr (eff == nullptr) {
       const auto ret = std::invoke(f, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     } else {
       auto t = std::make_tuple(stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
@@ -309,12 +339,12 @@ int64_t invoke_userfunc_scope_unsafe(context* ctx, const container* scr, HT &sco
     if constexpr (eff == nullptr) {
       const auto ret = std::invoke(f, scope, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     } else {
       auto t = std::make_tuple(scope, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
@@ -326,11 +356,13 @@ int64_t invoke_userfunc_scope_unsafe(context* ctx, const container* scr, HT &sco
 template <auto f, typename HT, is_valid_t<HT> vt>
 int64_t invoke_mathfunc_noargs(int64_t val, context* ctx, const container*) {
   if constexpr (utils::is_void_v<HT>) {
-    ctx->stack.push(std::invoke(f));
+    const auto ret = std::invoke(f);
+    stack_push_result(ctx, ret);
   } else {
     auto c = ctx->stack.safe_get<HT>(val);
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<HT>(), ctx->current_index));
-    ctx->stack.push(std::invoke(f, c));
+    const auto ret = std::invoke(f, c);
+    stack_push_result(ctx, ret);
   }
   return 1;
 }
@@ -350,10 +382,11 @@ int64_t invoke_userfunc_noargs(context* ctx, const container* scr) {
     return 0;
   } else {
     if constexpr (eff == nullptr) {
-      ctx->stack.push(std::invoke(f));
+      const auto ret = std::invoke(f);
+      detail::stack_push_result(ctx, ret);
     } else {
       const auto ret = std::invoke(f);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, std::tuple<>{});
     }
@@ -377,10 +410,11 @@ int64_t invoke_userfunc_scope_noargs(context* ctx, const container* scr, HT& sco
     return 0;
   } else {
     if constexpr (eff == nullptr) {
-      ctx->stack.push(std::invoke(f, scope));
+      const auto ret = std::invoke(f, scope);
+      detail::stack_push_result(ctx, ret);
     } else {
       const auto ret = std::invoke(f, scope);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, std::make_tuple(scope));
     }
@@ -392,11 +426,13 @@ int64_t invoke_userfunc_scope_noargs(context* ctx, const container* scr, HT& sco
 template <auto f, typename HT, is_valid_t<HT> vt>
 int64_t invoke_mathfunc_unsafe_noargs(int64_t val, context* ctx, const container*) {
   if constexpr (utils::is_void_v<HT>) {
-    ctx->stack.push(std::invoke(f));
+    const auto ret = std::invoke(f);
+    stack_push_result(ctx, ret);
   } else {
     auto c = ctx->stack.get<HT>(val);
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<HT>(), ctx->current_index));
-    ctx->stack.push(std::invoke(f, c));
+    const auto ret = std::invoke(f, c);
+    stack_push_result(ctx, ret);
   }
 
   return 1;
@@ -417,10 +453,11 @@ int64_t invoke_userfunc_unsafe_noargs(context* ctx, const container* scr) {
     return 0;
   } else {
     if constexpr (eff == nullptr) {
-      ctx->stack.push(std::invoke(f));
+      const auto ret = std::invoke(f);
+      detail::stack_push_result(ctx, ret);
     } else {
       const auto ret = std::invoke(f);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, std::tuple<>{});
     }
@@ -444,10 +481,11 @@ int64_t invoke_userfunc_scope_unsafe_noargs(context* ctx, const container* scr, 
     return 0;
   } else {
     if constexpr (eff == nullptr) {
-      ctx->stack.push(std::invoke(f, scope));
+      const auto ret = std::invoke(f, scope);
+      detail::stack_push_result(ctx, ret);
     } else {
       const auto ret = std::invoke(f, scope);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
       const auto& name = scr->get_string(scr->descs[ctx->current_index].name);
       std::invoke(eff, ctx->userptr, name, ret, std::make_tuple(scope));
     }
@@ -555,7 +593,7 @@ int64_t useriter(int64_t val, context* ctx, const container* scr) {
       std::apply(f, args_tuple);
     } else {
       const auto ret = std::apply(f, args_tuple);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     }
   } else if constexpr (is_not_member_func) {
     auto c = ctx->stack.safe_get<scope_type>(val);
@@ -566,7 +604,7 @@ int64_t useriter(int64_t val, context* ctx, const container* scr) {
       std::apply(f, args_tuple);
     } else {
       const auto ret = std::apply(f, args_tuple);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     }
   } else if constexpr (is_member_function<decltype(f)>) {
     auto c = ctx->stack.safe_get<scope_type>(val);
@@ -576,7 +614,7 @@ int64_t useriter(int64_t val, context* ctx, const container* scr) {
       std::apply(f, std::tuple_cat(c, args_tuple));
     } else {
       const auto ret = std::apply(f, std::tuple_cat(c, args_tuple));
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     }
   } else throw std::runtime_error("Bad scope deduction????");
 
@@ -814,7 +852,7 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
   if constexpr (utils::is_void_v<scope_type>) {
     if constexpr (utils::is_void_v<ret_type>) {
       const auto ret = std::apply(f, args_tuple);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     } else {
       std::apply(f, args_tuple);
     }
@@ -825,7 +863,7 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
 
     if constexpr (utils::is_void_v<ret_type>) {
       const auto ret = std::apply(f, args_tuple);
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     } else {
       std::apply(f, args_tuple);
     }
@@ -835,7 +873,7 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
 
     if constexpr (utils::is_void_v<ret_type>) {
       const auto ret = std::apply(f, std::tuple_cat(c, args_tuple));
-      ctx->stack.push(ret);
+      detail::stack_push_result(ctx, ret);
     } else {
       std::apply(f, std::tuple_cat(c, args_tuple));
     }

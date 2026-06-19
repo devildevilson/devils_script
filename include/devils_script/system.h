@@ -6,6 +6,11 @@
 #include <string>
 #include <format>
 #include <iostream>
+#include <functional>
+#include <optional>
+#include <span>
+#include <tuple>
+#include <unordered_map>
 #include "devils_script/common.h"
 #include "devils_script/type_traits.h"
 #include "devils_script/container.h"
@@ -47,7 +52,12 @@ public:
   constexpr static std::string_view get_user_function_type_name(const user_function_type t);
 
   struct rpn_conversion_ctx {
-    struct block { std::string_view token; size_t args_count; size_t size; };
+    struct block {
+      std::string_view token;
+      size_t args_count;
+      size_t size;
+      bool nullable = false;
+    };
 
     std::vector<block> output;
 
@@ -75,6 +85,7 @@ public:
     std::string_view name() const;
     size_t args_count() const;
     size_t size() const;
+    bool nullable() const;
     bool empty() const;
 
     // Forward range over the direct child blocks, auto-skipping `custom_description`
@@ -103,7 +114,7 @@ public:
     children_view children() const { return children_view{this}; }
   };
 
-  struct parse_ctx {
+  struct parse_context {
     // another time?
     //struct lang_constants { std::string_view custom_description, condition, arg, ctx, count, percent, order_by; };
 
@@ -123,9 +134,18 @@ public:
 
     // per-parse mutable scratch — moved off `system` so the registry stays const/shareable
     rpn_conversion_ctx rpn_ctx;
+    script_ast_context script_ast_ctx;
+    std::vector<tavl::node> script_ast_nodes;
     prng::xoshiro256starstar::state prng_s;
+    std::string_view root_block_name;
+    std::string_view return_type;
+    std::string_view root_type;
+    bool initialized;
 
-    parse_ctx() noexcept;
+    parse_context() noexcept;
+
+    template <typename RETURN_T, typename ROOT_T>
+    void init(const system& sys, container& c);
 
     uint64_t gen_value();           // advances this parse's PRNG (seeded from system at parse start)
 
@@ -158,6 +178,8 @@ public:
     void erase(const size_t index);
     std::string_view top() const;
   };
+
+  using parse_ctx = parse_context;
 
   // Codegen sink: wraps (system, parse_ctx, container) and centralizes instruction emission +
   // forward-jump backpatching, so function init-callbacks stop hand-rolling the
@@ -371,8 +393,17 @@ public:
     requires (std::is_enum_v<T>)
   void register_enum(const std::span<std::tuple<std::string_view, T>>& values);
 
+  template <typename T, typename F>
+    requires (std::is_enum_v<T> && std::is_invocable_r_v<std::optional<T>, F, std::string_view>)
+  void register_enum(F fn);
+
   template <typename RETURN_T, typename ROOT_T>
   container parse(std::string text) const;
+
+  std::tuple<tavl::event, tavl::error> parse(tavl::parser& p, parse_context& ctx, container& c) const;
+
+  template <typename RETURN_T, typename ROOT_T>
+  std::tuple<tavl::event, tavl::error> parse(tavl::parser& p, parse_context& ctx, container& c) const;
 
   void setup_block_description(
     parse_ctx* ctx,
@@ -386,6 +417,9 @@ public:
 
   size_t push_basic_function(parse_ctx* ctx, container* scr, const basicf id, const int64_t arg) const;
   size_t push_string(parse_ctx* ctx, container* scr, const std::string_view &str) const;
+  size_t push_enum_literal(parse_ctx* ctx, container* scr, const std::string_view& enum_type, const std::string_view& value) const;
+  std::optional<int64_t> resolve_enum(const std::string_view& enum_type, const std::string_view& value) const;
+  std::optional<int64_t> resolve_enum(const std::string_view& value) const;
   size_t dispatch_node(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view &override_lvalue = std::string_view()) const;
   size_t fold_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const;
   command_data::ftype get_token_type(const std::string_view& name) const;
@@ -406,7 +440,7 @@ private:
   err_fn warning;
   // function name first + scope type second, no scope == void
   std::unordered_map<std::string, std::unordered_map<std::string, command_data>> mfuncs;
-  std::unordered_map<std::string, std::unordered_map<std::string, size_t>> enums;
+  std::unordered_map<std::string, std::function<std::optional<int64_t>(std::string_view)>> enums;
 };
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
