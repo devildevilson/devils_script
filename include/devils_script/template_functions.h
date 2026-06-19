@@ -819,12 +819,12 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
 
   const size_t curins = ctx->current_index;
   const size_t start_jumpins = curins + 1;
-  size_t curstart = curins + args_count; // +1?
+  size_t curstart = start_jumpins + args_count; // +1?
   for (size_t i = 0; i < args_count; ++i) {
     const size_t index = start_jumpins + i;
     cmd_starts[i] = curstart;
     cmd_ends[i] = scr->cmds[index].arg;
-    curstart = cmd_ends[i];
+    curstart = cmd_ends[i] == 0 ? curstart : cmd_ends[i];
   }
 
   auto args_tuple = utils::function_arguments_tuple_t<decltype(f)>{};
@@ -850,37 +850,37 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
   });
 
   if constexpr (utils::is_void_v<scope_type>) {
-    if constexpr (utils::is_void_v<ret_type>) {
+    if constexpr (utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>) {
+      std::apply(f, args_tuple);
+    } else {
       const auto ret = std::apply(f, args_tuple);
       detail::stack_push_result(ctx, ret);
-    } else {
-      std::apply(f, args_tuple);
     }
   } else if constexpr (is_not_member_func) {
     auto c = ctx->stack.get<scope_type>(val);
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<scope_type>(), ctx->current_index));
     std::get<0>(args_tuple) = c;
 
-    if constexpr (utils::is_void_v<ret_type>) {
+    if constexpr (utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>) {
+      std::apply(f, args_tuple);
+    } else {
       const auto ret = std::apply(f, args_tuple);
       detail::stack_push_result(ctx, ret);
-    } else {
-      std::apply(f, args_tuple);
     }
   } else if constexpr (is_member_function<decltype(f)>) {
     auto c = ctx->stack.get<scope_type>(val);
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<scope_type>(), ctx->current_index));
 
-    if constexpr (utils::is_void_v<ret_type>) {
+    if constexpr (utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>) {
+      std::apply(f, std::tuple_cat(c, args_tuple));
+    } else {
       const auto ret = std::apply(f, std::tuple_cat(c, args_tuple));
       detail::stack_push_result(ctx, ret);
-    } else {
-      std::apply(f, std::tuple_cat(c, args_tuple));
     }
   } else throw std::runtime_error("Bad scope deduction????");
 
   // тут нужно еще перепрыгнуть
-  ctx->current_index = (curstart - 1) - 1; // first function start - 1 AND 'ctx->current_index++' in process
+  ctx->current_index = curstart - 1;
 
   return 1;
 }

@@ -202,4 +202,34 @@ TEST_CASE("Real usage 1") {
     REQUIRE(ctx.is_return<double>());
     REQUIRE(ctx.get_return<double>() == double(p2.age));
   }
+
+  // The same scope/iterator scripts compiled with safety OFF — exercises the *_unsafe opcode
+  // variants on object scope navigation + iterators (not covered by the math-only unsafe tests).
+  SUBCASE("unsafe scope navigation and iterators") {
+    sys.toggle_safety();
+    REQUIRE(sys.safety() == false);
+
+    const double expected[] = {
+      double(p3.age),
+      double(c1.population + c2.population + c3.population),
+      double(p1.charisma + p2.charisma + p3.charisma + p4.charisma + p5.charisma),
+      0.0, // script4 checked approximately below
+      double(p2.age),
+    };
+
+    for (size_t i = 0; i < 5; ++i) {
+      CAPTURE(i);
+      const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+      ds::context ctx;
+      ctx.set_arg(0, p1h);
+      ctx.create_lists(&cont);
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      if (i == 3) {
+        REQUIRE((std::abs(ctx.get_return<double>()) - double(city_notable_people_count(&c1) / c1.notable_people[0].ptr->age + c1.notable_people[1].ptr->age)) < 0.0000001);
+      } else {
+        CHECK(ctx.get_return<double>() == expected[i]);
+      }
+    }
+  }
 }
