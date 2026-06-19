@@ -282,7 +282,7 @@ void system::setup_block_description(
 
   if (token == "__empty_lvalue") {
     tok = { SIZE_MAX, SIZE_MAX };
-  } else if (!check_is_str_part_of(scr->globals[0], token)) {
+  } else if (!check_is_str_part_of(scr->source, token)) {
     basicf id = basicf::invalid;
     if (token == "__object_block") id = basicf::object_block;
     else if (token == "__string_block") id = basicf::string_block;
@@ -291,17 +291,17 @@ void system::setup_block_description(
     if (id == basicf::invalid) tok = store_string(scr, token);
     else tok = { static_cast<size_t>(id), SIZE_MAX };
   } else {
-    tok = { size_t(token.data() - scr->globals[0].data()), token.size(), 0 };
+    tok = { size_t(token.data() - scr->source.data()), token.size(), 0 };
   }
 
   if (custom_desc.empty()) {
     cd = { SIZE_MAX, SIZE_MAX };
-  } else if (!check_is_str_part_of(scr->globals[0], custom_desc)) {
+  } else if (!check_is_str_part_of(scr->source, custom_desc)) {
     const basicf id = find_basicf(custom_desc);
     if (id == basicf::invalid) cd = store_string(scr, custom_desc);
     else cd = { static_cast<size_t>(id), SIZE_MAX };
   } else {
-    cd = { size_t(custom_desc.data() - scr->globals[0].data()), custom_desc.size(), 0 };
+    cd = { size_t(custom_desc.data() - scr->source.data()), custom_desc.size(), 0 };
   }
 
   const int64_t scope_index = ctx->scope_stack.empty() ? -1 : ctx->scope_stack.back();
@@ -494,21 +494,21 @@ size_t system::push_string(parse_ctx* ctx, container* scr, const std::string_vie
 
 auto system::store_string(container* scr, const std::string_view& str) const -> container::command_description::global_string_view {
   using sv_t = container::command_description::global_string_view;
-  if (!scr->globals.empty() && check_is_str_part_of(scr->globals[0], str)) {
-    const size_t pos = str.data() - scr->globals[0].data();
+  if (!scr->source.empty() && check_is_str_part_of(scr->source, str)) {
+    const size_t pos = str.data() - scr->source.data();
     if (!check_value(pos, packed_pos_bit_size)) raise_error(std::format("String '{}' position in script string cannot be packed in {} bit ???", str, packed_pos_bit_size));
     if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bit ???", str, packed_size_bit_size));
     return sv_t{ pos, str.size(), 0 };
   }
 
-  for (size_t i = 1; i < scr->globals.size(); ++i) {
-    if (scr->globals[i] == str) return sv_t{ 0, str.size(), static_cast<uint8_t>(i) };
+  for (size_t i = 0; i < scr->globals.size(); ++i) {
+    if (scr->globals[i] == str) return sv_t{ 0, str.size(), static_cast<uint8_t>(i + 1) };
   }
 
-  if (scr->globals.size() >= UINT8_MAX) raise_error(std::format("Script would store global string index in 8bit value, too many global strings"));
+  if (scr->globals.size() >= UINT8_MAX - 1) raise_error(std::format("Script would store global string index in 8bit value, too many global strings"));
   if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bit ???", str, packed_size_bit_size));
   scr->globals.emplace_back(str);
-  return sv_t{ 0, str.size(), static_cast<uint8_t>(scr->globals.size() - 1) };
+  return sv_t{ 0, str.size(), static_cast<uint8_t>(scr->globals.size()) };
 }
 
 std::string_view system::static_string_arg(const command_block& block, const std::string_view& name) const {
@@ -1140,18 +1140,18 @@ std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_contex
   if (ev.type == tavl::event_type::not_enought_data || ctx.script_ast_nodes.empty()) return {ev, err};
   if (!err.no_error()) return {ev, err};
 
-  if (c.globals.empty()) {
+  if (c.source.empty()) {
     const size_t storage_end = p.storage.size();
     const size_t live_size = p.storage.buffer_size();
     const size_t released_size = storage_end - live_size;
     const auto live_src = p.content(tavl::source_span{released_size, live_size, 1, 1});
     std::string src(released_size, ' ');
     src.append(live_src);
-    c.globals.emplace_back(std::move(src));
+    c.source = std::move(src);
   }
 
   try {
-    const size_t cmds = ctx.rpn_ctx.normalize(ctx.script_ast_nodes, std::string_view(c.globals[0]));
+    const size_t cmds = ctx.rpn_ctx.normalize(ctx.script_ast_nodes, std::string_view(c.source));
     auto output = ctx.rpn_ctx.output;
     ctx.script_ast_nodes.clear();
 

@@ -162,7 +162,7 @@ struct container {
   std::vector<size_t> description_cmd_index_offsets;
   std::vector<size_t> description_cmd_index_nodes;
 
-  // first is always script text
+  std::string source;
   std::vector<std::string> globals;
   std::vector<argument_data> args;
   std::vector<argument_data> saved;

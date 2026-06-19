@@ -356,8 +356,7 @@ int64_t pushint(int64_t arg, context* ctx, const container*) {
 
 int64_t pushstring(int64_t arg, context* ctx, const container* scr) {
   const auto [global_index, pos, size] = unpackstrid(arg);
-  const auto tmp = std::string_view(scr->globals[global_index]);
-  const auto str = std::string_view(tmp.data()+pos, size);
+  const auto str = scr->get_string(container::command_description::global_string_view{ pos, size, global_index });
   ctx->stack.push(str);
   return 1;
 }

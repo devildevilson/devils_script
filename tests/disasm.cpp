@@ -69,8 +69,8 @@ TEST_CASE("script AST row-level parsing") {
     auto [ev, err] = sys.parse(p, ctx, cont);
     REQUIRE(err.no_error());
     CHECK(ev.type == tavl::event_type::row_end);
-    REQUIRE(cont.globals.size() == 1);
-    CHECK(cont.globals[0] == "red, 6");
+    CHECK(cont.source == "red, 6");
+    CHECK(cont.globals.empty());
     REQUIRE(!cont.block_descs.empty());
     bool found_red = false;
     for (const auto& desc : cont.block_descs) {

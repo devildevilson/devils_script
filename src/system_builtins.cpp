@@ -187,10 +187,10 @@ static any_stack randomfn(double, const element_view&) { return any_stack{}; }
 static size_t line_for_command(const context* ctx, const container* scr) {
   if (scr == nullptr || ctx->current_index >= scr->descs.size()) return 0;
   const auto name = scr->descs[ctx->current_index].name;
-  if (name.count == SIZE_MAX || scr->globals.empty()) return 0;
+  if (name.count == SIZE_MAX || name.global != 0 || scr->source.empty()) return 0;
   size_t line = 1;
-  const size_t end = std::min(name.start, scr->globals[0].size());
-  for (size_t i = 0; i < end; ++i) line += size_t(scr->globals[0][i] == '\n');
+  const size_t end = std::min(name.start, scr->source.size());
+  for (size_t i = 0; i < end; ++i) line += size_t(scr->source[i] == '\n');
   return line;
 }
 
@@ -761,7 +761,7 @@ void system::init_basic_functions() {
     const auto child = command_block(args, 1);
     if (child.empty() || child.args_count() != 0 || child.size() != 1) sys->raise_error(std::format("'ctx:load' expects a string as the only argument"));
 
-    //if (!check_is_str_part_of(scr->globals[0], child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
+    //if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
 
     const auto nextblock = command_block(args, 1 + child.size());
 
@@ -806,9 +806,9 @@ void system::init_basic_functions() {
 
       size_t index = scr->find_saved(child.name());
       if (index >= scr->saved.size()) {
-        if (!check_is_str_part_of(scr->globals[0], child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
+        if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
 
-        const size_t fname_start = child.name().data() - scr->globals[0].data();
+        const size_t fname_start = child.name().data() - scr->source.data();
         const size_t fname_size = child.name().size();
 
         scr->saved.push_back({ { fname_start, fname_size }, top });
@@ -837,9 +837,9 @@ void system::init_basic_functions() {
     const auto type = ctx->stack_types[scope_index];
     size_t index = scr->find_saved(child.name());
     if (index >= scr->saved.size()) {
-      if (!check_is_str_part_of(scr->globals[0], child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
+      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
 
-      const size_t fname_start = child.name().data() - scr->globals[0].data();
+      const size_t fname_start = child.name().data() - scr->source.data();
       const size_t fname_size = child.name().size();
 
       scr->saved.push_back({ { fname_start, fname_size }, type });
@@ -868,9 +868,9 @@ void system::init_basic_functions() {
 
     size_t index = scr->find_arg(child.name());
     if (index >= scr->args.size()) {
-      if (!check_is_str_part_of(scr->globals[0], child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
+      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
 
-      const size_t fname_start = child.name().data() - scr->globals[0].data();
+      const size_t fname_start = child.name().data() - scr->source.data();
       const size_t fname_size = child.name().size();
 
       scr->args.push_back({ { fname_start, fname_size }, exp_value });
@@ -918,9 +918,9 @@ void system::init_basic_functions() {
 
       size_t index = scr->find_saved(child.name());
       if (index >= scr->args.size()) {
-        if (!check_is_str_part_of(scr->globals[0], child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
+        if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
 
-        const size_t fname_start = child.name().data() - scr->globals[0].data();
+        const size_t fname_start = child.name().data() - scr->source.data();
         const size_t fname_size = child.name().size();
 
         scr->args.push_back({ { fname_start, fname_size }, top });
@@ -949,9 +949,9 @@ void system::init_basic_functions() {
     const auto type = ctx->stack_types[scope_index];
     size_t index = scr->find_saved(child.name());
     if (index >= scr->args.size()) {
-      if (!check_is_str_part_of(scr->globals[0], child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
+      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
 
-      const size_t fname_start = child.name().data() - scr->globals[0].data();
+      const size_t fname_start = child.name().data() - scr->source.data();
       const size_t fname_size = child.name().size();
 
       scr->args.push_back({ { fname_start, fname_size }, type });
@@ -975,9 +975,9 @@ void system::init_basic_functions() {
 
     size_t index = scr->find_list(child.name());
     if (index >= scr->lists.size()) {
-      if (!check_is_str_part_of(scr->globals[0], child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
+      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
 
-      const size_t fname_start = child.name().data() - scr->globals[0].data();
+      const size_t fname_start = child.name().data() - scr->source.data();
       const size_t fname_size = child.name().size();
 
       scr->lists.push_back({ { fname_start, fname_size }, std::string_view() });
@@ -1057,7 +1057,7 @@ void system::init_basic_functions() {
       auto emit_desc = [&](const command_block& op, const bool has_return) {
         using sv_t = container::command_description::global_string_view;
         sv_t name{ static_cast<size_t>(basicf::invalid), SIZE_MAX };
-        if (check_is_str_part_of(scr->globals[0], op.name())) name = { size_t(op.name().data() - scr->globals[0].data()), op.name().size() };
+        if (check_is_str_part_of(scr->source, op.name())) name = { size_t(op.name().data() - scr->source.data()), op.name().size() };
         scr->descs.emplace_back(name, 1, true, true, has_return, false, ctx->nest_level, SIZE_MAX);
       };
 

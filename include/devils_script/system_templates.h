@@ -358,7 +358,7 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
   using ret_type = std::remove_cvref_t<utils::function_result_type<F>>;
   //constexpr auto ret_type_name = utils::type_name<ret_type>();
 
-  if (scr->globals.empty()) raise_error(std::format("scr->globals is empty????"));
+  if (scr->source.empty()) raise_error(std::format("script source is empty????"));
 
   std::string_view name = token;
   if (name == "__empty_lvalue") name = ctx->function_names.back();
@@ -367,7 +367,7 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
   const bool has_return = !utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>;
 
   //const auto curfname = ctx->function_names.back();
-  if (!check_is_str_part_of(scr->globals[0], name)) {
+  if (!check_is_str_part_of(scr->source, name)) {
     const auto id = find_basicf(name);
     if (id == basicf::invalid) raise_error(std::format("Function name '{}' could not easily store at description struct, use another method", name));
 
@@ -377,9 +377,9 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
     );
     scr->descs.emplace_back(desc);
   } else {
-    //if (!fargs.empty()) check_is_str_part_of_and_throw(scr->globals[0], fargs);
+    //if (!fargs.empty()) check_is_str_part_of_and_throw(scr->source, fargs);
 
-    const size_t fname_start = name.data() - scr->globals[0].data();
+    const size_t fname_start = name.data() - scr->source.data();
     const size_t fname_size = name.size();
 
     container::command_description desc(
@@ -964,9 +964,9 @@ container system::parse(std::string text) const {
 
   container scr;
   parse_context ctx;
-  scr.globals.emplace_back(std::move(text));
+  scr.source = std::move(text);
   ctx.init<RETURN_T, ROOT_T>(*this, scr);
-  const auto script_block = std::string_view(scr.globals[0]);
+  const auto script_block = std::string_view(scr.source);
 
   // Path N: tavl lexes/structures/precedences the script (make_script_ast); normalize() turns its
   // AST into the same rpn block stream the semantic pass consumes. Replaces the old text parser +

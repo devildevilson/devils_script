@@ -34,9 +34,7 @@ container::command_description::command_description(
 {}
 
 // magic number
-container::container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {
-  globals.reserve(UINT8_MAX);
-}
+container::container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {}
 void container::process(context* ctx) const {
   const container* prev_script = ctx->current_script;
   ctx->current_script = this;
@@ -201,16 +199,18 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
 std::string_view container::get_string(const size_t start, const size_t count) const {
   if (count == SIZE_MAX) return to_string(static_cast<basicf>(start));
 
-  if (globals.size() == 0) return std::string_view();
-  if (start + count > globals[0].size()) return std::string_view();
-  return std::string_view(globals[0]).substr(start, count);
+  if (start + count > source.size()) return std::string_view();
+  return std::string_view(source).substr(start, count);
 }
 
 std::string_view container::get_string(const command_description::global_string_view& str) const {
   if (str.count == SIZE_MAX) return to_string(static_cast<basicf>(str.start));
-  if (str.global >= globals.size()) return std::string_view();
-  if (str.start + str.count > globals[str.global].size()) return std::string_view();
-  return std::string_view(globals[str.global]).substr(str.start, str.count);
+  if (str.global == 0) return get_string(str.start, str.count);
+
+  const size_t index = size_t(str.global - 1);
+  if (index >= globals.size()) return std::string_view();
+  if (str.start + str.count > globals[index].size()) return std::string_view();
+  return std::string_view(globals[index]).substr(str.start, str.count);
 }
 
 std::string disassemble(const container& scr) {
