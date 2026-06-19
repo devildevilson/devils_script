@@ -48,28 +48,6 @@ uint64_t mix_splitmix(const uint64_t v1, const uint64_t v2, const uint64_t v3, c
   return mix_splitmix(mix_splitmix(v1, v2), mix_splitmix(v3, v4));
 }
 
-uint64_t mix_xoshiro1(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept {
-  xoshiro256starstar::state s{ { mix(v1), mix(v2), mix(v3), mix(v4) } };
-  return xoshiro256starstar::value(xoshiro256starstar::next(s));
-}
-
-constexpr size_t mix_count = 10;
-uint64_t mix_xoshiro2(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept {
-  xoshiro256starstar::state s{ { v1, v2, v3, v4 } };
-  for (size_t i = 0; i < mix_count; ++i) {
-    s = xoshiro256starstar::next(s);
-  }
-  return xoshiro256starstar::value(s);
-}
-
-uint64_t mix_mulxor(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept {
-  uint64_t x = (v1 ^ (v2 << 1)) * 0x9e3779b97f4a7c15ULL;
-  x ^= (v3 ^ (v4 << 3)) * 0xbf58476d1ce4e5b9ULL;
-  x ^= x >> 33;
-  x *= 0xff51afd7ed558ccdULL;
-  return x ^ (x >> 29);
-}
-
 uint64_t mix(const uint64_t v1, const uint64_t v2, const uint64_t v3) noexcept {
   return mix_splitmix(v1, v2, v3, mix(v1));
 }

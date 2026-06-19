@@ -982,25 +982,25 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     }
 
     case basicf::AND: {
-      cmd = container::command(&andjump, INT64_C(0));
+      cmd = container::command(safety() ? &andjump : &andjump_unsafe, INT64_C(0));
       boolean_and_block = true;
       break;
     }
 
     case basicf::OR: {
-      cmd = container::command(&orjump, INT64_C(0));
+      cmd = container::command(safety() ? &orjump : &orjump_unsafe, INT64_C(0));
       boolean_or_block = true;
       break;
     }
 
     case basicf::NAND: {
-      cmd = container::command(&andjump, INT64_C(0));
+      cmd = container::command(safety() ? &andjump : &andjump_unsafe, INT64_C(0));
       boolean_and_block = true;
       break;
     }
 
     case basicf::NOR: {
-      cmd = container::command(&orjump, INT64_C(0));
+      cmd = container::command(safety() ? &orjump : &orjump_unsafe, INT64_C(0));
       boolean_or_block = true;
       break;
     }

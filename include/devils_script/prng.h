@@ -19,9 +19,6 @@ uint64_t mix(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint
 uint64_t mix_splitmix(const uint64_t v1, const uint64_t v2) noexcept;
 uint64_t mix_hash(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept;
 uint64_t mix_splitmix(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept;
-uint64_t mix_xoshiro1(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept;
-uint64_t mix_xoshiro2(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept;
-uint64_t mix_mulxor(const uint64_t v1, const uint64_t v2, const uint64_t v3, const uint64_t v4) noexcept;
 
 
 struct splitmix64 {

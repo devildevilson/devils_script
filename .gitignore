@@ -6,3 +6,4 @@ build_linux/
 .aider*
 docs/
 .gitignore
+build_cov/

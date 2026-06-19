@@ -207,6 +207,24 @@ int main() {
     });
   }
 
+  std::printf("== execution (unsafe) ==\n");
+  sys.toggle_safety(); // emit the unsafe opcode variants (no stack safety checks)
+  for (size_t i = 0; i < script_count; ++i) {
+    const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+    ds::context ctx;
+    ctx.set_arg(0, p1h); // set root
+    ctx.create_lists(&cont);
+
+    char name[32];
+    std::snprintf(name, sizeof(name), "script%zu exec unsafe", i + 1);
+    bench(name, 100000, [&] {
+      ctx.clear();
+      cont.process(&ctx);
+      return ctx.get_return<double>();
+    });
+  }
+  sys.toggle_safety(); // restore safe mode for the description pass
+
   std::printf("== description ==\n");
   for (size_t i = 0; i < script_count; ++i) {
     const auto cont = sys.parse<double, handle<person>>(scripts[i]);

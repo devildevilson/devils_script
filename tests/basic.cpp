@@ -1644,3 +1644,230 @@ TEST_CASE("Using arguments + save to context + lists") {
     CHECK_THROWS(sys.parse<double, void>("{ ctx_set = { first = 7 }, ctx:arg:first = { func7 } }"));
   }
 }
+
+// Exercises the `*_unsafe` opcode variants: with safety toggled off, the emitter
+// selects the unsafe function pointers (sum_unsafe, mul_unsafe, andjump_unsafe,
+// orjump_unsafe, condjump*_unsafe, cmpeq2_unsafe, sumsetstack_unsafe, ...).
+// Results must match the safe-mode expectations.
+TEST_CASE("unsafe-mode execution") {
+  SUBCASE("ADD/NAND/max block (sum_unsafe + andjump_unsafe)") {
+    ds::system sys;
+    sys.toggle_safety();
+    REQUIRE(sys.safety() == false);
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&g>("g");
+    const auto cont = sys.parse<double, void>("{1,2,3,g(4,5,6),NAND={false, false},max={7,8,9}}");
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 31.0);
+  }
+
+  SUBCASE("arithmetic expression") {
+    ds::system sys;
+    sys.toggle_safety();
+    sys.init_basic_functions();
+    sys.init_math();
+    const auto cont = sys.parse<double, void>("35 * 2 + (-3) * (10 + 12) + (3 / 4) * max(5,6)");
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 8.5);
+  }
+
+  SUBCASE("AND/OR short-circuit (andjump_unsafe + orjump_unsafe)") {
+    ds::system sys;
+    sys.toggle_safety();
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&runtime_true>("runtime_true");
+    sys.register_function<&runtime_false>("runtime_false");
+    sys.register_function<&counted_true>("counted_true");
+    sys.register_function<&counted_false>("counted_false");
+
+    {
+      g_short_circuit_calls = 0;
+      const auto cont = sys.parse<bool, void>("{ runtime_false, counted_true }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      CHECK(ctx.get_return<bool>() == false);
+      CHECK(g_short_circuit_calls == 0); // short-circuited: counted_true not called
+    }
+
+    {
+      g_short_circuit_calls = 0;
+      const auto cont = sys.parse<bool, void>("{ OR = { runtime_true, counted_false } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      CHECK(ctx.get_return<bool>() == true);
+      CHECK(g_short_circuit_calls == 0);
+    }
+
+    {
+      g_short_circuit_calls = 0;
+      const auto cont = sys.parse<bool, void>("{ runtime_true, counted_true }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      CHECK(ctx.get_return<bool>() == true);
+      CHECK(g_short_circuit_calls == 1);
+    }
+  }
+
+  SUBCASE("select + sequence (condjump_unsafe)") {
+    ds::system sys;
+    sys.toggle_safety();
+    sys.init_basic_functions();
+    sys.init_math();
+
+    {
+      const auto cont = sys.parse<double, void>("{ select = { { condition = false, 10 }, { condition = true, 20 }, { 100 } } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 20.0);
+    }
+
+    {
+      const auto cont = sys.parse<double, void>("{ sequence = { { condition = true, 5 }, { condition = true, 10 }, { condition = false, 15 } } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 15.0);
+    }
+  }
+
+  SUBCASE("switch (cmpeq2_unsafe)") {
+    ds::system sys;
+    sys.toggle_safety();
+    sys.init_basic_functions();
+    sys.init_math();
+    const auto cont = sys.parse<double, void>("{ switch = { value = 2, { value = 1, 10 }, { value = 2, 20 }, { value = 3, 30 } } }");
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 20.0);
+  }
+
+  SUBCASE("random weights (sumsetstack_unsafe + mulsetstack_unsafe + cmplesseqd2_unsafe)") {
+    ds::system sys;
+    sys.toggle_safety();
+    sys.init_basic_functions();
+    sys.init_math();
+    const auto cont = sys.parse<double, void>("{ random = { { weight = 1, 3 }, { weight = 2, 6 }, { weight = 3, 9 } } }");
+    ds::context ctx;
+    ctx.prng_state = 125;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 6); // identical to the safe-mode "random" subcase
+  }
+
+  SUBCASE("equality (cmpeq2_unsafe via ==)") {
+    ds::system sys;
+    sys.toggle_safety();
+    sys.init_basic_functions();
+    sys.init_math();
+    const auto cont = sys.parse<bool, void>("{ 5.0 == 5.00000000001 }");
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<bool>());
+    CHECK(ctx.get_return<bool>() == true);
+  }
+}
+
+// The math/trig builtins registered by init_math() (sqrt, sin, clamp, ...) are not
+// const-foldable (try_eval_const only knows the core arithmetic/boolean ops), so these
+// scripts actually emit and run the registered functions.
+TEST_CASE("math and trig builtins") {
+  struct mcase { const char* script; double expected; };
+  const mcase cases[] = {
+    { "sqrt(16)",            4.0 },
+    { "inversesqrt(16)",     0.25 },
+    { "inv(4)",              0.25 },
+    { "exp(0)",              1.0 },
+    { "abs(-7)",             7.0 },
+    { "min(3,5)",            3.0 },
+    { "max(3,5)",            5.0 },
+    { "ceil(2.3)",           3.0 },
+    { "floor(2.7)",          2.0 },
+    { "round(2.5)",          3.0 },
+    { "trunc(2.9)",          2.0 },
+    { "sign(-4)",           -1.0 },
+    { "sign(3)",             1.0 },
+    { "fract(2.25)",         0.25 },
+    { "sin(0)",              0.0 },
+    { "cos(0)",              1.0 },
+    { "tan(0)",              0.0 },
+    { "asin(0)",             0.0 },
+    { "acos(1)",             0.0 },
+    { "atan(0)",             0.0 },
+    { "clamp(5,0,3)",        3.0 },  // clamp(t, lo, hi)
+    { "step(5,10)",          1.0 },  // step(edge, x)
+    { "smoothstep(0,10,5)",  0.5 },
+    { "mix(0,10,0.5)",       5.0 },
+    { "fma(2,3,4)",          10.0 },
+    { "10 % 3",              1.0 },  // mod operator
+  };
+
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  for (const auto& c : cases) {
+    CAPTURE(c.script);
+    const auto cont = sys.parse<double, void>(c.script);
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(c.expected));
+  }
+}
+
+// Parses with a default (throwing) error callback so malformed scripts raise.
+static void parse_void_d(const std::string& script) {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+  (void)sys.parse<double, void>(script);
+}
+
+// Locks in the diagnostic (raise_error) branches: malformed scripts must be rejected
+// at parse time rather than miscompiling.
+TEST_CASE("error branches are rejected at parse") {
+  SUBCASE("value_or with mismatched 2nd/3rd argument types") {
+    CHECK_THROWS(parse_void_d("{ value_or = { false, 5, true } }"));
+  }
+
+  SUBCASE("select condition placement rules") {
+    // non-last block missing 'condition'
+    CHECK_THROWS(parse_void_d("{ select = { { 10 }, { condition = true, 20 }, { 30 } } }"));
+    // last block must NOT carry 'condition'
+    CHECK_THROWS(parse_void_d("{ select = { { condition = true, 10 }, { condition = true, 20 } } }"));
+  }
+
+  SUBCASE("sequence requires condition in every block") {
+    CHECK_THROWS(parse_void_d("{ sequence = { { 5 }, { condition = true, 10 } } }"));
+  }
+
+  SUBCASE("switch structural errors") {
+    CHECK_THROWS(parse_void_d("{ switch = { value = 1, { 10 } } }"));          // case without 'value'
+    CHECK_THROWS(parse_void_d("{ switch = { value = 1 } }"));                  // no case blocks
+    CHECK_THROWS(parse_void_d("{ switch = { { value = 1, 10 } } }"));          // no top-level 'value'
+    CHECK_THROWS(parse_void_d("{ switch = { value = { 1, 2 }, { value = 1, 10 } } }")); // top 'value' with >1 expr
+  }
+
+  SUBCASE("random node without weight") {
+    CHECK_THROWS(parse_void_d("{ random = { { 3 }, { weight = 2, 6 } } }"));
+  }
+
+  SUBCASE("loading an unsaved context value") {
+    CHECK_THROWS(parse_void_d("{ ctx:saved:never_saved }"));
+  }
+
+  SUBCASE("'this' without a scope") {
+    CHECK_THROWS(parse_void_d("{ this }"));
+  }
+}
