@@ -416,6 +416,20 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
 
 template <auto f, typename HT, is_valid_t<HT> vf>
   requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
+void system::emit_call_instruction(parse_ctx* ctx, container* scr, function_t safe, function_t unsafe, const int64_t scope_index, const std::string_view& name, const size_t patch_from) const {
+  scr->cmds.push_back(container::command(safety() ? safe : unsafe, scope_index));
+  setup_description<f, HT, vf>(ctx, scr, name);
+  patch_prev_functions_descriptions(scr, patch_from);
+}
+
+template <typename RetT>
+void system::apply_call_stack_effect(parse_ctx* ctx, const size_t pops) const {
+  for (size_t i = 0; i < pops; ++i) ctx->pop();
+  if constexpr (!utils::is_void_v<RetT>) ctx->push<RetT>();
+}
+
+template <auto f, typename HT, is_valid_t<HT> vf>
+  requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
 void system::register_function(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
   using F = decltype(f);
   register_function<f, HT, on_effect_t<F, HT>(nullptr), vf>(std::move(name), std::move(func_args_names), std::move(init_f));
@@ -499,13 +513,8 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
           if (index == 0) return;
 
-          constexpr function_t fs[] = { &userfunc_unsafe<f, HT, vf, eff>, &userfunc<f, HT, vf, eff> };
-          scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
-          sys->setup_description<f, HT, vf>(ctx, scr, args.name());
-          sys->patch_prev_functions_descriptions(scr, curpos);
-          ctx->pop();
-          ctx->pop();
-          ctx->push<ret_type>();
+          sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index, args.name(), curpos);
+          sys->apply_call_stack_effect<ret_type>(ctx, 2);
           curpos = scr->cmds.size();
         });
 
@@ -513,10 +522,8 @@ void system::register_function(std::string name, std::vector<std::string> func_a
       } else {
         size_t offset = 1;
         offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, func_args_names);
-        constexpr function_t fs[] = { &userfunc_unsafe<f, HT, vf, eff>, &userfunc<f, HT, vf, eff> };
-        scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
-        sys->setup_description<f, HT, vf>(ctx, scr, args.name());
-        sys->patch_prev_functions_descriptions(scr, curpos);
+        const size_t stack_size_with_args = ctx->stack_types.size();
+        sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index, args.name(), curpos);
 
         if constexpr (std::is_same_v<scope_type, internal::thisctxlist>) {
           if (ctx->list_index_upvalue == SIZE_MAX) sys->raise_error(std::format("Trying to use list function '{}' without list context on stack", curfname));
@@ -528,10 +535,8 @@ void system::register_function(std::string name, std::vector<std::string> func_a
           }
         }
 
-        for (size_t i = 0; i < args_count; ++i) { ctx->pop(); }
-
-        const size_t stack_size = ctx->stack_types.size();
-        if constexpr (!utils::is_void_v<ret_type>) ctx->push<ret_type>(); // make plain pointer or pass type name as is
+        sys->apply_call_stack_effect<ret_type>(ctx, args_count);
+        const size_t stack_size = stack_size_with_args - args_count; // size after consuming args, before the result push
         if constexpr (uftype == user_function_type::object) {
           // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
           // parse scope block AFTER the scope function 
@@ -701,26 +706,16 @@ void system::register_operator(std::string name, const operator_props& ps, custo
           sys->parse_args<first_argument>(ctx, scr, args, 1, 0, {}, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
             if (index == 0) return;
 
-            constexpr function_t fs[] = { &mathfunc_unsafe<f, HT, vf>, &mathfunc<f, HT, vf> };
-            scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
-            sys->setup_description<f, HT, vf>(ctx, scr, args.name());
-            sys->patch_prev_functions_descriptions(scr, curpos);
-            ctx->pop();
-            ctx->pop();
-            ctx->push<ret_type>();
+            sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index, args.name(), curpos);
+            sys->apply_call_stack_effect<ret_type>(ctx, 2);
             curpos = scr->cmds.size();
           });
         } else {
           size_t curpos = scr->cmds.size();
           size_t offset = 1;
           offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, {});
-          constexpr function_t fs[] = { &mathfunc_unsafe<f, HT, vf>, &mathfunc<f, HT, vf> };
-          scr->cmds.push_back(container::command(fs[size_t(sys->safety())], scope_index));
-          sys->setup_description<f, HT, vf>(ctx, scr, args.name());
-          sys->patch_prev_functions_descriptions(scr, curpos);
-
-          for (size_t i = 0; i < args_count; ++i) { ctx->pop(); }
-          ctx->push<ret_type>();
+          sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index, args.name(), curpos);
+          sys->apply_call_stack_effect<ret_type>(ctx, args_count);
           if constexpr (uftype == user_function_type::object) {
             // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
             // parse scope block AFTER the scope function 

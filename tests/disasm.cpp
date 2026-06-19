@@ -165,6 +165,45 @@ TEST_CASE("disassembly golden") {
     CHECK_EQ(disasm_double("{ sequence = { { condition = true, 5 }, { condition = true, 10 }, { condition = false, 15 } } }"), expected);
   }
 
+  // A double `{a, b, c}` root folds through the registered unlimited "ADD" function (rawadd),
+  // not the fold_block combinator. max() is not const-foldable, so the calls really emit.
+  SUBCASE("ADD via unlimited function") {
+    const std::string expected =
+      "  0: pushvalue 1\n"
+      "  1: pushvalue 2\n"
+      "  2: max 9223372036854775807\n"
+      "  3: pushvalue 3\n"
+      "  4: pushvalue 4\n"
+      "  5: max 9223372036854775807\n"
+      "  6: ADD 9223372036854775807\n"
+      "  7: pushvalue 5\n"
+      "  8: pushvalue 6\n"
+      "  9: max 9223372036854775807\n"
+      " 10: ADD 9223372036854775807\n"
+      " 11: pushreturn\n";
+    CHECK_EQ(disasm_double("{ max(1,2), max(3,4), max(5,6) }"), expected);
+  }
+
+  // A bool `{x, y}` root folds through the fold_block AND combinator, which now emits the real
+  // `andjump` opcode (Level-2: routed through emit()/insn_table) with short-circuit to the end.
+  SUBCASE("AND combinator fold (andjump)") {
+    const std::string expected =
+      "  0: pushvalue 1\n"
+      "  1: pushvalue 2\n"
+      "  2: max 9223372036854775807\n"
+      "  3: pushvalue 0\n"
+      "  4: > 9223372036854775807\n"
+      "  5: condjump_get -> 12\n"
+      "  6: pushvalue 3\n"
+      "  7: pushvalue 4\n"
+      "  8: max 9223372036854775807\n"
+      "  9: pushvalue 0\n"
+      " 10: > 9223372036854775807\n"
+      " 11: andjump -> 12\n"
+      " 12: pushreturn\n";
+    CHECK_EQ(disasm_bool("{ max(1,2) > 0, max(3,4) > 0 }"), expected);
+  }
+
   // value_or = first arg is the condition; pick the second on true, the third on false.
   SUBCASE("value_or") {
     const std::string expected =

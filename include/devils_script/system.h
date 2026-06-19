@@ -350,6 +350,17 @@ public:
   template <typename FROM, typename TO>
   void setup_type_conversion(parse_ctx* ctx, container* scr) const;
 
+  // Emits a call instruction (safety-aware) plus its description, then back-patches pending
+  // scope descriptions. Single source for the cmd/desc pair of a registered function/operator
+  // call — the cmds/descs consistency check lives inside setup_description.
+  template <auto f, typename HT, is_valid_t<HT> vf>
+    requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
+  void emit_call_instruction(parse_ctx* ctx, container* scr, function_t safe, function_t unsafe, const int64_t scope_index, const std::string_view& name, const size_t patch_from) const;
+
+  // Applies a call's declared stack effect: consume `pops` argument slots, push the result type.
+  template <typename RetT>
+  void apply_call_stack_effect(parse_ctx* ctx, const size_t pops) const;
+
   template <auto f>
     requires(valid_function_type<decltype(f)>)
   void register_function(std::string name, std::vector<std::string> func_args_names = {}, custom_init_fn_t init_f = nullptr);

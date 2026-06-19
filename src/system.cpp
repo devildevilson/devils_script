@@ -392,6 +392,7 @@ constexpr std::array<insn_info, basicf_count> make_insn_table() {
   row(basicf::jump,          &jump,            &jump,                  0,    pk::none,        false, 0);
   row(basicf::andbin,        &andbin,          &andbin_unsafe,         2,    pk::b_bool,      true,  2);
   row(basicf::sum,           &sum,             &sum_unsafe,            2,    pk::b_double,    true,  2);
+  row(basicf::mul,           &mul,             &mul_unsafe,            2,    pk::b_double,    true,  2);
   row(basicf::sumsetstack,   &sumsetstack,     &sumsetstack_unsafe,    0,    pk::none,        false, 0);
   row(basicf::mulsetstack,   &mulsetstack,     &mulsetstack_unsafe,    0,    pk::none,        false, 0);
   row(basicf::cmpeq2,        &cmpeq2,          &cmpeq2_unsafe,         0,    pk::b_bool,      true,  0);
@@ -969,43 +970,16 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
   bool boolean_and_block = false;
   bool boolean_or_block = false;
-  container::command cmd;
+  basicf opcode = basicf::invalid; // the actual fold opcode emitted per clause; resolved from the combinator id
   switch (curid) {
-    case basicf::ADD: {
-      cmd = container::command(safety() ? &sum : &sum_unsafe, INT64_C(0));
-      break;
-    }
+    case basicf::ADD:  opcode = basicf::sum;     break;
+    case basicf::MUL:  opcode = basicf::mul;     break;
+    case basicf::AND:  opcode = basicf::andjump; boolean_and_block = true; break;
+    case basicf::OR:   opcode = basicf::orjump;  boolean_or_block  = true; break;
+    case basicf::NAND: opcode = basicf::andjump; boolean_and_block = true; break;
+    case basicf::NOR:  opcode = basicf::orjump;  boolean_or_block  = true; break;
 
-    case basicf::MUL: {
-      cmd = container::command(safety() ? &mul : &mul_unsafe, INT64_C(0));
-      break;
-    }
-
-    case basicf::AND: {
-      cmd = container::command(safety() ? &andjump : &andjump_unsafe, INT64_C(0));
-      boolean_and_block = true;
-      break;
-    }
-
-    case basicf::OR: {
-      cmd = container::command(safety() ? &orjump : &orjump_unsafe, INT64_C(0));
-      boolean_or_block = true;
-      break;
-    }
-
-    case basicf::NAND: {
-      cmd = container::command(safety() ? &andjump : &andjump_unsafe, INT64_C(0));
-      boolean_and_block = true;
-      break;
-    }
-
-    case basicf::NOR: {
-      cmd = container::command(safety() ? &orjump : &orjump_unsafe, INT64_C(0));
-      boolean_or_block = true;
-      break;
-    }
-
-    // объекты? строки? 
+    // объекты? строки?
     case basicf::effect_block: { break; }
     case basicf::string_block: { break; }
     case basicf::object_block: { break; }
@@ -1070,24 +1044,10 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
       setup_type_conversion<bool, double>(ctx, scr);
     }
 
-    scr->cmds.push_back(cmd);
-    container::command_description desc(
-      { static_cast<size_t>(curid), SIZE_MAX }, 2, 
-      false, true, curid != basicf::effect_block, curid != basicf::effect_block, ctx->nest_level, SIZE_MAX
-    );
-    scr->descs.emplace_back(desc);
-
-    ctx->pop();
-    ctx->pop();
-
-    if (boolean_and_block || boolean_or_block) {
-      ctx->push<bool>();
-      e.mark(end, scr->cmds.size()-1); // andjump / orjump is itself a short-circuit site
-    } else {
-      ctx->push<double>();
-    }
-
-    if (scr->cmds.size() != scr->descs.size()) raise_error(std::format("Unconsistent descriptions {} != {}, after block '{}'", scr->cmds.size(), scr->descs.size(), child.name()));
+    // The fold opcode is a regular insn_table instruction: emit() is the single source of its
+    // stack effect (pops 2, pushes bool/double) + description + the cmds/descs consistency check.
+    const size_t op_index = e.emit(opcode, 0);
+    if (boolean_and_block || boolean_or_block) e.mark(end, op_index); // andjump / orjump is itself a short-circuit site
   }
 
   e.bind(end);

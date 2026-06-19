@@ -31,6 +31,7 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
   X(MUL) \
   X(andbin) \
   X(sum) \
+  X(mul) \
   X(sumsetstack) \
   X(mulsetstack) \
   X(cmpeq2) \
