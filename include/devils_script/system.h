@@ -11,6 +11,7 @@
 #include <span>
 #include <tuple>
 #include <unordered_map>
+#include <deque>
 #include "devils_script/common.h"
 #include "devils_script/type_traits.h"
 #include "devils_script/container.h"
@@ -57,9 +58,12 @@ public:
       size_t args_count;
       size_t size;
       bool nullable = false;
+      bool string_literal = false;
+      bool braced_args = false;
     };
 
     std::vector<block> output;
+    std::deque<std::string> literal_storage;
 
     std::tuple<std::string_view, size_t> convert_scope(const std::string_view& expr, block* arr, const size_t max_size) const;
 
@@ -70,6 +74,7 @@ public:
     size_t normalize_block(const tavl::node* block, std::string_view src);
     void normalize_row(const tavl::node* row, std::string_view src);
     size_t normalize_expr(const tavl::node* n, std::string_view src);
+    std::string_view normalize_token_text(const tavl::node* n, std::string_view src);
 
     void clear();
   };
@@ -86,6 +91,8 @@ public:
     size_t args_count() const;
     size_t size() const;
     bool nullable() const;
+    bool string_literal() const;
+    bool braced_args() const;
     bool empty() const;
 
     // Forward range over the direct child blocks, auto-skipping `custom_description`
@@ -417,6 +424,8 @@ public:
 
   size_t push_basic_function(parse_ctx* ctx, container* scr, const basicf id, const int64_t arg) const;
   size_t push_string(parse_ctx* ctx, container* scr, const std::string_view &str) const;
+  container::command_description::global_string_view store_string(container* scr, const std::string_view& str) const;
+  std::string_view static_string_arg(const command_block& block, const std::string_view& name) const;
   size_t push_enum_literal(parse_ctx* ctx, container* scr, const std::string_view& enum_type, const std::string_view& value) const;
   std::optional<int64_t> resolve_enum(const std::string_view& enum_type, const std::string_view& value) const;
   std::optional<int64_t> resolve_enum(const std::string_view& value) const;

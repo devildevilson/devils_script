@@ -257,7 +257,9 @@ void system::init_basic_functions() {
 
     auto message = command_block(args, offset);
     if (message.name() == custom_description_constant) { offset += message.size(); message = command_block(args, offset); }
-    offset += sys->parse_arg<std::string_view>(ctx, scr, message, 1, utils::type_name<std::string_view>(), std::string_view(), {});
+    const auto message_text = sys->static_string_arg(message, args.name());
+    sys->push_string(ctx, scr, message_text);
+    offset += message.size();
     if (offset < args.size()) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
 
     scr->cmds.emplace_back(&internal::debug_assert, INT64_C(0));
@@ -272,7 +274,9 @@ void system::init_basic_functions() {
     size_t offset = 1;
     auto message = command_block(args, offset);
     if (message.name() == custom_description_constant) { offset += message.size(); message = command_block(args, offset); }
-    offset += sys->parse_arg<std::string_view>(ctx, scr, message, 0, utils::type_name<std::string_view>(), std::string_view(), {});
+    const auto message_text = sys->static_string_arg(message, args.name());
+    sys->push_string(ctx, scr, message_text);
+    offset += message.size();
     if (offset < args.size()) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
 
     scr->cmds.emplace_back(&internal::debug_trace, INT64_C(0));
@@ -687,7 +691,7 @@ void system::init_basic_functions() {
         const size_t start = scr->block_descs.size();
         sys->fold_block(ctx, scr, wnode, basicf::ADD);
         const auto cd = wnode.find(custom_description_constant);
-        sys->setup_block_description(ctx, scr, wnode.name(), command_block(cd, 1).name(), start);
+        sys->setup_block_description(ctx, scr, wnode.name(), sys->static_string_arg(cd, custom_description_constant), start);
 
         if (last_index == ctx->stack_types.size() - 1) sys->raise_error(std::format("No new values on stack after 'weight' node computation?"));
         const size_t weight_index = ctx->stack_types.size() - 1;
@@ -718,7 +722,7 @@ void system::init_basic_functions() {
         const size_t start = scr->block_descs.size();
         sys->fold_block(ctx, scr, curblock, basicf::invalid);
         const auto cd = curblock.find(custom_description_constant);
-        sys->setup_block_description(ctx, scr, curblock.name(), command_block(cd, 1).name(), start);
+        sys->setup_block_description(ctx, scr, curblock.name(), sys->static_string_arg(cd, custom_description_constant), start);
         if (!is_void) {
           if (stack_size == ctx->stack_types.size()) sys->raise_error(std::format("'{}' produces no value on stack ???", curblock.name()));
           if (value_type != ctx->top()) sys->raise_error(std::format("'random' node expects all of values to be same type, expected type '{}', but got '{}'", value_type, ctx->top()));
@@ -778,7 +782,7 @@ void system::init_basic_functions() {
     sys->fold_block(ctx, scr, nextblock, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
 
-    const auto desc_name = nextblock.find(custom_description_constant).name();
+    const auto desc_name = sys->static_string_arg(nextblock.find(custom_description_constant), custom_description_constant);
     sys->setup_block_description(ctx, scr, nextblock.name(), desc_name, desc_start);
 
     return args.size();

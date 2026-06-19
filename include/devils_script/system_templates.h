@@ -216,7 +216,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
 
   if (!arg_name.empty()) { // special case - named argument description
     const auto cd = block.find(custom_description_constant);
-    const auto cd_str = command_block(cd, 1).name();
+    const auto cd_str = static_string_arg(cd, custom_description_constant);
     const auto tok = block.name() == "__empty_lvalue" ? override_lvalue : block.name();
     setup_block_description(ctx, scr, tok, cd_str, start, SIZE_MAX, container::description_node_kind::argument);
   }
@@ -316,7 +316,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
 
   if (!arg_name.empty()) { // special case - named argument description
     const auto cd = block.find(custom_description_constant);
-    const auto cd_str = command_block(cd, 1).name();
+    const auto cd_str = static_string_arg(cd, custom_description_constant);
     const auto tok = block.name();
     setup_block_description(ctx, scr, tok, cd_str, start, SIZE_MAX, container::description_node_kind::argument);
   }
@@ -976,7 +976,6 @@ container system::parse(std::string text) const {
   const auto tree = make_script_ast(tp, script_block);
   const size_t cmds = ctx.rpn_ctx.normalize(tree, script_block);
   auto output = ctx.rpn_ctx.output;
-  ctx.rpn_ctx.clear();
   output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.root_block_name, cmds, output.size()+1 });
 
   /*const auto print_block = [](const std::vector<system::rpn_conversion_ctx::block>& arr) {
@@ -997,6 +996,10 @@ container system::parse(std::string text) const {
     set_expected_type set(&ctx, scope_type_name<ret_type>());
     dispatch_node(&ctx, &scr, script_cmds);
   }
+  if (const auto cd = static_string_arg(script_cmds.find(custom_description_constant), custom_description_constant); !cd.empty() && !scr.block_descs.empty()) {
+    scr.block_descs.back().custom_description = store_string(&scr, cd);
+  }
+  ctx.rpn_ctx.clear();
 
   while (ctx.pop_while_ignore()) {}
 

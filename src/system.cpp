@@ -288,21 +288,20 @@ void system::setup_block_description(
     else if (token == "__string_block") id = basicf::string_block;
     else if (token == "__effect_block") id = basicf::effect_block;
     else id = find_basicf(token);
-    // warning
-    if (id == basicf::invalid) raise_warning(std::format("Function name '{}' could not easily store at description struct, use another method", token));
-    tok = { static_cast<size_t>(id), SIZE_MAX };
+    if (id == basicf::invalid) tok = store_string(scr, token);
+    else tok = { static_cast<size_t>(id), SIZE_MAX };
   } else {
-    tok = { size_t(token.data() - scr->globals[0].data()), token.size() };
+    tok = { size_t(token.data() - scr->globals[0].data()), token.size(), 0 };
   }
 
   if (custom_desc.empty()) {
     cd = { SIZE_MAX, SIZE_MAX };
   } else if (!check_is_str_part_of(scr->globals[0], custom_desc)) {
     const basicf id = find_basicf(custom_desc);
-    if (id == basicf::invalid) raise_warning(std::format("Function name '{}' could not easily store at description struct, use another method", custom_desc));
-    cd = { static_cast<size_t>(id), SIZE_MAX };
+    if (id == basicf::invalid) cd = store_string(scr, custom_desc);
+    else cd = { static_cast<size_t>(id), SIZE_MAX };
   } else {
-    cd = { size_t(custom_desc.data() - scr->globals[0].data()), custom_desc.size() };
+    cd = { size_t(custom_desc.data() - scr->globals[0].data()), custom_desc.size(), 0 };
   }
 
   const int64_t scope_index = ctx->scope_stack.empty() ? -1 : ctx->scope_stack.back();
@@ -488,35 +487,46 @@ bool check_is_str_part_of(const std::string_view& big_str, const std::string_vie
 }
 
 size_t system::push_string(parse_ctx* ctx, container* scr, const std::string_view& str) const {
-  if (check_is_str_part_of(scr->globals[0], str)) {
-    const int64_t pos = str.data() - scr->globals[0].data();
+  const auto stored = store_string(scr, str);
+  push_basic_function(ctx, scr, basicf::pushstring, packstrid(stored.global, stored.start, stored.count));
+  return 1;
+}
+
+auto system::store_string(container* scr, const std::string_view& str) const -> container::command_description::global_string_view {
+  using sv_t = container::command_description::global_string_view;
+  if (!scr->globals.empty() && check_is_str_part_of(scr->globals[0], str)) {
+    const size_t pos = str.data() - scr->globals[0].data();
     if (!check_value(pos, packed_pos_bit_size)) raise_error(std::format("String '{}' position in script string cannot be packed in {} bit ???", str, packed_pos_bit_size));
     if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bit ???", str, packed_size_bit_size));
-    push_basic_function(ctx, scr, basicf::pushstring, packstrid(0, pos, str.size()));
-    return 1;
+    return sv_t{ pos, str.size(), 0 };
   }
 
-  // variant 2
-  size_t index = SIZE_MAX;
-  for (size_t i = 0; i < scr->globals.size(); ++i) {
-    const size_t pos = scr->globals[i].find(str);
-    if (pos == std::string::npos) continue;
-    index = i;
-    break;
+  for (size_t i = 1; i < scr->globals.size(); ++i) {
+    if (scr->globals[i] == str) return sv_t{ 0, str.size(), static_cast<uint8_t>(i) };
   }
 
-  if (index == SIZE_MAX) {
-    if (scr->globals.size() >= UINT8_MAX) raise_error(std::format("Script would store global string index in 8bit value, too many global strings"));
-    scr->globals.emplace_back(std::string(str));
-    index = scr->globals.size() - 1;
-  }
-
-  const size_t start = scr->globals[index].find(str);
-  if (!check_value(index, sizeof(uint8_t) * CHAR_BIT)) raise_error(std::format("Global string index {} cannot be packed in {} bit ???", index, sizeof(uint8_t) * CHAR_BIT));
-  if (!check_value(start, packed_pos_bit_size)) raise_error(std::format("String '{}' position in script string cannot be packed in {} bit ???", str, packed_pos_bit_size));
+  if (scr->globals.size() >= UINT8_MAX) raise_error(std::format("Script would store global string index in 8bit value, too many global strings"));
   if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bit ???", str, packed_size_bit_size));
-  push_basic_function(ctx, scr, basicf::pushstring, packstrid(index, start, str.size()));
-  return 1;
+  scr->globals.emplace_back(str);
+  return sv_t{ 0, str.size(), static_cast<uint8_t>(scr->globals.size() - 1) };
+}
+
+std::string_view system::static_string_arg(const command_block& block, const std::string_view& name) const {
+  if (block.empty()) return std::string_view();
+  if (block.braced_args()) {
+    raise_error(std::format("'{}' expects a static string token, not a script block", name));
+  }
+  if (block.args_count() == 0 && block.size() == 1 && !block.nullable()) return block.name();
+  if (block.args_count() != 1 || block.size() != 2) {
+    raise_error(std::format("'{}' expects exactly one static string token", name));
+  }
+
+  const auto arg = command_block(block, 1);
+  if (arg.empty() || arg.args_count() != 0 || arg.size() != 1 || arg.nullable()) {
+    raise_error(std::format("'{}' expects a static string token, not a script block", name));
+  }
+
+  return arg.name();
 }
 
 std::optional<int64_t> system::resolve_enum(const std::string_view& enum_type, const std::string_view& value) const {
@@ -572,6 +582,7 @@ std::optional<const_value> try_eval_const(const system::command_block& block) {
 
   const auto name = block.name();
   if (block.args_count() == 0 && block.size() == 1) {
+    if (block.string_literal()) return std::nullopt;
     if (text::is_bool(name)) return const_value::boolean(text::as_bool(name));
     if (double v = 0.0; text::is_number(name, v)) return const_value::number(v);
     return std::nullopt;
@@ -670,6 +681,13 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   auto funcname = block.name();
   if (block.args_count() == 0 && block.size() == 1) { // rvalue
     if (funcname == "condition") raise_error(std::format("'condition' is not allowed here"));
+
+    if (block.string_literal()) {
+      set_function_type sft(ctx, function_type::rvalue);
+      push_string(ctx, scr, block.name());
+      setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
+      return 1;
+    }
 
     if (text::is_bool(funcname)) {
       set_function_type sft(ctx, function_type::rvalue);
@@ -782,7 +800,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
     const size_t cmd_start = scr->cmds.size();
     const size_t count = fold_block(ctx, scr, block, curid);
     const auto cd = block.find(custom_description_constant);
-    setup_block_description(ctx, scr, to_string(curid), command_block(cd, 1).name(), desc_start, cmd_start);
+    setup_block_description(ctx, scr, to_string(curid), static_string_arg(cd, custom_description_constant), desc_start, cmd_start);
     return count;
   }
 
@@ -799,7 +817,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
     const size_t cmd_start = scr->cmds.size();
     const size_t count = fold_block(ctx, scr, block, curid);
     const auto cd = block.find(custom_description_constant);
-    setup_block_description(ctx, scr, funcname, command_block(cd, 1).name(), desc_start, cmd_start);
+    setup_block_description(ctx, scr, funcname, static_string_arg(cd, custom_description_constant), desc_start, cmd_start);
     return count;
   }
 
@@ -818,7 +836,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
 
   if (is_subblock || is_condition || is_not_overriden) {
     const auto cd = block.find(custom_description_constant);
-    setup_block_description(ctx, scr, prevname, command_block(cd, 1).name(), desc_start, cmd_start);
+    setup_block_description(ctx, scr, prevname, static_string_arg(cd, custom_description_constant), desc_start, cmd_start);
   }
 
   return block.size(); // ?
@@ -1135,7 +1153,6 @@ std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_contex
   try {
     const size_t cmds = ctx.rpn_ctx.normalize(ctx.script_ast_nodes, std::string_view(c.globals[0]));
     auto output = ctx.rpn_ctx.output;
-    ctx.rpn_ctx.clear();
     ctx.script_ast_nodes.clear();
 
     const std::string_view root_block = !ctx.root_block_name.empty() ? ctx.root_block_name : std::string_view("__effect_block");
@@ -1146,6 +1163,10 @@ std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_contex
       set_expected_type set(&ctx, ctx.return_type);
       dispatch_node(&ctx, &c, script_cmds);
     }
+    if (const auto cd = static_string_arg(script_cmds.find(custom_description_constant), custom_description_constant); !cd.empty() && !c.block_descs.empty()) {
+      c.block_descs.back().custom_description = store_string(&c, cd);
+    }
+    ctx.rpn_ctx.clear();
 
     while (ctx.pop_while_ignore()) {}
 

@@ -45,7 +45,7 @@ struct container {
   
   // every command description
   struct command_description {
-    struct global_string_view { size_t start, count; };
+    struct global_string_view { size_t start, count; uint8_t global = 0; };
 
     // unfortunately needs to be rewritten =(
     global_string_view name;

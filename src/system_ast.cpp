@@ -4,6 +4,7 @@
 #include <format>
 #include <stdexcept>
 #include "devils_script/string-utils.hpp"
+#include "tavl/detail.h"
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -54,6 +55,9 @@ std::string_view node_text(const tavl::node* n, std::string_view src) {
   const auto& sp = n->token.span;
   return sp.offset == SIZE_MAX ? std::string_view() : src.substr(sp.offset, sp.size);
 }
+bool is_string_literal(const tavl::node* n) {
+  return n->token.type == tavl::token_type::singlequote_string || n->token.type == tavl::token_type::doublequote_string;
+}
 // direct children of a flat-prefix node (step by child_count+1 over its footprint)
 std::vector<const tavl::node*> node_children(const tavl::node* n) {
   std::vector<const tavl::node*> r;
@@ -76,6 +80,25 @@ size_t system::rpn_conversion_ctx::normalize_block(const tavl::node* block, std:
   size_t count = 0;
   for (const auto* row : node_children(block)) { normalize_row(row, src); count += 1; }
   return count;
+}
+
+std::string_view system::rpn_conversion_ctx::normalize_token_text(const tavl::node* n, std::string_view src) {
+  const auto raw = node_text(n, src);
+  if (!is_string_literal(n)) return raw;
+
+  std::string out;
+  out.reserve(raw.size());
+  auto inner = raw;
+  if (!inner.empty()) inner.remove_prefix(1);
+  if (!inner.empty()) inner.remove_suffix(1);
+
+  if (n->token.type == tavl::token_type::singlequote_string)
+    tavl::detail::unescape_singlequote_string(inner, out);
+  else
+    tavl::detail::unescape_doublequote_string(inner, out);
+
+  literal_storage.emplace_back(std::move(out));
+  return literal_storage.back();
 }
 
 // Port of convert_block's per-token body, sourcing (lvalue, rhs) from a tavl row node.
@@ -131,6 +154,7 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
     output[lfn_index].args_count = arguments_count;
     output[lfn_index].size += size;
     output[lfn_index].nullable = nullable_call;
+    output[lfn_index].braced_args = rhs_is_block;
   }
 }
 
@@ -138,7 +162,7 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
 // precedence-correct tree. Returns the footprint (1 + descendants).
 size_t system::rpn_conversion_ctx::normalize_expr(const tavl::node* n, std::string_view src) {
   if (n->type == tavl::node_type::token) {
-    output.push_back({ node_text(n, src), 0, 1 });   // leaf (incl. whole rvalue scope paths)
+    output.push_back({ normalize_token_text(n, src), 0, 1, false, is_string_literal(n) });   // leaf (incl. whole rvalue scope paths)
     return 1;
   }
 
@@ -191,6 +215,7 @@ size_t system::rpn_conversion_ctx::normalize_expr(const tavl::node* n, std::stri
 
 void system::rpn_conversion_ctx::clear() {
   output.clear();
+  literal_storage.clear();
 }
 
 system::command_block::command_block() noexcept {}
@@ -225,6 +250,8 @@ std::string_view system::command_block::name() const { return !data.empty() ? da
 size_t system::command_block::args_count() const { return !data.empty() ? data[0].args_count : 0; }
 size_t system::command_block::size() const { return data.size(); }
 bool system::command_block::nullable() const { return !data.empty() && data[0].nullable; }
+bool system::command_block::string_literal() const { return !data.empty() && data[0].string_literal; }
+bool system::command_block::braced_args() const { return !data.empty() && data[0].braced_args; }
 bool system::command_block::empty() const { return data.empty(); }
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

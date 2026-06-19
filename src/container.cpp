@@ -34,7 +34,9 @@ container::command_description::command_description(
 {}
 
 // magic number
-container::container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {}
+container::container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {
+  globals.reserve(UINT8_MAX);
+}
 void container::process(context* ctx) const {
   const container* prev_script = ctx->current_script;
   ctx->current_script = this;
@@ -205,7 +207,10 @@ std::string_view container::get_string(const size_t start, const size_t count) c
 }
 
 std::string_view container::get_string(const command_description::global_string_view& str) const {
-  return get_string(str.start, str.count);
+  if (str.count == SIZE_MAX) return to_string(static_cast<basicf>(str.start));
+  if (str.global >= globals.size()) return std::string_view();
+  if (str.start + str.count > globals[str.global].size()) return std::string_view();
+  return std::string_view(globals[str.global]).substr(str.start, str.count);
 }
 
 std::string disassemble(const container& scr) {

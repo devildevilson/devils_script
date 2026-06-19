@@ -1197,6 +1197,39 @@ TEST_CASE("Script description evaluation") {
     CHECK_FALSE(saw_runtime_num);
     CHECK(nodes == 1);
   }
+
+  SUBCASE("custom_description accepts only static string tokens") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    {
+      sys.register_function<&runtime_num>("runtime_num");
+      const auto cont = sys.parse<double, void>("{ custom_description = 'abc abc', runtime_num }");
+      ds::context ctx;
+      bool saw_desc = false;
+      cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
+        saw_desc = saw_desc || entry.custom_description == "abc abc";
+      });
+      CHECK(saw_desc);
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 3.0);
+    }
+
+    {
+      const auto cont = sys.parse<double, void>("{ custom_description = abc.def.123, 5 }");
+      ds::context ctx;
+      bool saw_desc = false;
+      cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
+        saw_desc = saw_desc || entry.custom_description == "abc.def.123";
+      });
+      CHECK(saw_desc);
+    }
+
+    CHECK_THROWS(sys.parse<double, void>("{ custom_description = { 5 }, 5 }"));
+    CHECK_THROWS(sys.parse<double, void>("{ custom_description = {}, 5 }"));
+  }
 }
 
 TEST_CASE("Debug assert and trace") {
@@ -1221,13 +1254,28 @@ TEST_CASE("Debug assert and trace") {
     sys.init_basic_functions();
     sys.init_math();
 
-    const auto cont = sys.parse<void, void>("trace = { reached_here }");
+    const auto cont = sys.parse<void, void>("trace = \"123 123\"");
     ds::context ctx;
     std::string out;
     ctx.trace = [&](const std::string& msg) { out = msg; };
     cont.process(&ctx);
-    CHECK(out.find("reached_here") != std::string::npos);
+    CHECK(out.find("123 123") != std::string::npos);
     CHECK(out.find("line 1") != std::string::npos);
+  }
+
+  SUBCASE("trace accepts dotted static tokens and rejects script blocks") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    const auto cont = sys.parse<void, void>("trace = abc.def.123");
+    ds::context ctx;
+    std::string out;
+    ctx.trace = [&](const std::string& msg) { out = msg; };
+    cont.process(&ctx);
+    CHECK(out.find("abc.def.123") != std::string::npos);
+
+    CHECK_THROWS(sys.parse<void, void>("trace = { 5 + 5 }"));
   }
 }
 
