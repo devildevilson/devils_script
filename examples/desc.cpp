@@ -90,7 +90,6 @@ const std::string scripts[] = {
   "country = { each_city = { value = { each_notable_person = { value = charisma } } } }",
   "this:living_in = { ctx_save = { val1 = { each_notable_person = { value = age } } }, notable_people_count / ctx:saved:val1 }",
   "{ ctx_save = { cur_player = this }, this:living_in = { each_notable_person = { filter = this != ctx:saved:cur_player, value = age } } }",
-  // ???
 };
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

@@ -61,10 +61,8 @@ static bool operator_or(const bool val1, const bool val2) noexcept { return val1
 static bool operator_and(const bool val1, const bool val2) noexcept { return val1 && val2; }
 
 static double rawsign(const double v1) noexcept { return v1 > 0.0 ? 1.0 : (v1 < 0.0 ? -1.0 : 0.0); }
-// probably needs to use intrinsics 
 static double rawfma(const double v1, const double v2, const double v3) noexcept { return v1 * v2 + v3; }
 static double rawfract(const double v1) noexcept { return v1 - rawfloor(v1); }
-//static double rawtrunc(const double v1) noexcept { return v1 < 0.0 ? rawceil(v1) : rawfloor(v1); }
 static double rawmix(const double v1, const double v2, const double v3) noexcept { return v1 * (1.0 - v3) + v2 * v3; }
 static double rawsclamp(const double t, const double v1, const double v2) noexcept { return std::clamp(t, v1, v2);  }
 static double rawsmoothstep(const double v1, const double v2, const double x) noexcept {
@@ -95,8 +93,6 @@ void system::init_math() {
   ROI(internal::rawlesseq)("<=", { 8, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmore)(">", { 8, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawless)("<", { 8, command_data::math_ftype::binary, command_data::associativity::left });
-  //ROI(raweq)("==", { 7, command_data::math_ftype::binary, command_data::associativity::left }); // why isnt here?
-  //ROI(rawneq)("!=", { 7, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::operator_and)("and", { 3, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::operator_or)("or", { 2, command_data::math_ftype::binary, command_data::associativity::left });
   
@@ -142,20 +138,13 @@ static thisctx ctx() { return thisctx{}; }
 static ignore_value ctx_save(const element_view&) { return ignore_value{}; }
 static ignore_value ctx_save_as(ctx_value) { return ignore_value{}; }
 static any_stack loadctx(thisctx, ctx_value) { return any_stack{}; }
-//static ignore_value inc(thisctx, ctx_value) { return ignore_value{}; } // changed how we deal with variables
-//static ignore_value dec(thisctx, ctx_value) { return ignore_value{}; }
 
 enum class arg_value {};
 static thisarg arg() { return thisarg{}; }
-// this way? or custom function?
-//static any_stack loadarg(thisctx ctx, arg_value val) {
-  //return ctx.ctx->get_arg<any_stack>(static_cast<size_t>(val));
-//}
 
 static ignore_value ctx_set(arg_value) { return ignore_value{}; }
 static ignore_value ctx_set_as(arg_value) { return ignore_value{}; }
 
-// needs to be slightly rewritten
 static thisctxlist list(const thisctx&, const std::string_view&) { return thisctxlist{}; }
 static ignore_value add_to(const thisctxlist& l, const any_stack &val) {
   stack_element el;
@@ -179,8 +168,6 @@ static ignore_value remove_from(const thisctxlist& l, const any_stack& val) {
   return ignore_value{};
 }
 
-//static ignore_value custom_description(const element_view&) { return ignore_value{}; }
-//static any_stack pushcurrent() { return any_stack{}; }
 static double chance() { return 1; }
 static any_stack randomfn(double, const element_view&) { return any_stack{}; }
 
@@ -221,7 +208,6 @@ static int64_t debug_trace(int64_t, context* ctx, const container* scr) {
 
 template <auto f>
 static void add_cmd(const system* sys, container* scr) {
-  using F = decltype(f);
   constexpr function_t fs[] = { &mathfunc_unsafe<f>, &mathfunc<f> };
   scr->cmds.emplace_back(fs[size_t(sys->safety())], INT64_C(0));
 }
@@ -285,7 +271,6 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  // is 'while (ctx->pop_while_ignore())' an overkill for this situations?
   RFI(internal::value_or)("value_or", {}, [](emitter& e, const command_block& args, const std::vector<std::string> &) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     if (ctx->ftype != function_type::lvalue) sys->raise_error(std::format("'value_or' expected to be lvalue"));
@@ -350,7 +335,6 @@ void system::init_basic_functions() {
 
     if (args.size() == 1) return args.size();
 
-    // sys->fold_block(ctx, scr, args, basicf::invalid); - doesnt produce description
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
     sys->fold_block(ctx, scr, args, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
@@ -362,7 +346,7 @@ void system::init_basic_functions() {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     if (ctx->scope_stack.size() <= 1 + ctx->prev_chaining) sys->raise_error(std::format("Function 'prev' requires at least 2 elements in scope_stack"));
 
-    // mess =(
+    // `prev_chaining` lets repeated `prev.prev` walk outward through scope_stack.
     const size_t scope_index = ctx->scope_stack[((ctx->scope_stack.size()-1)-ctx->prev_chaining)-1];
     sys->push_basic_function(ctx, scr, basicf::pushprev, scope_index);
     ctx->push(ctx->stack_types[scope_index]);
@@ -377,7 +361,7 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  // jump out of the script internal ctxs
+  // Skip internal ctx/list scopes and return the nearest user-visible outer scope.
   RFI(internal::prevfn)("outer", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     size_t counter = 0;
@@ -404,7 +388,7 @@ void system::init_basic_functions() {
     if (args.size() == 1) return args.size();
 
     const size_t prev_value = ctx->prev_chaining;
-    ctx->prev_chaining += counter; // ???
+    ctx->prev_chaining += counter;
     
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
     sys->fold_block(ctx, scr, args, basicf::invalid);
@@ -415,7 +399,7 @@ void system::init_basic_functions() {
     return args.size();
   });
 
-  // making equality for every possible combinations...
+  // Equality is type-directed because script values can be bool, number, string, or object handles.
   const auto eqfn = [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto expected = utils::type_name<element_view>();
@@ -424,7 +408,7 @@ void system::init_basic_functions() {
       auto cb = command_block(args, offset);
       if (cb.name() == custom_description_constant) { offset += cb.size(); cb = command_block(args, offset); }
       offset += sys->parse_arg<element_view>(ctx, scr, cb, 0, expected, std::string_view(), {});
-    } while (ctx->pop_while_ignore()); // pop_while_ignore is overkill?
+    } while (ctx->pop_while_ignore());
     const auto first_type = ctx->top();
 
     do {
@@ -475,7 +459,6 @@ void system::init_basic_functions() {
 
   RFI(internal::raweq)("NEQ", {}, [eqfn](emitter& e, const command_block& args, const std::vector<std::string>& func_args_names) {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
-    // override function to "EQ" ???
     const size_t count = std::invoke(eqfn, e, args, func_args_names);
     e.emit(basicf::notfn, 0);
     return count;
@@ -488,8 +471,7 @@ void system::init_basic_functions() {
     return count;
   });
 
-  // find first 'condition' that true and compute a block
-  // simple "if then else"
+  // Find the first true condition and evaluate that block; the final block is the else branch.
   RFI(internal::selectfn)("select", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto exp = ctx->expected_type;
@@ -512,7 +494,7 @@ void system::init_basic_functions() {
       if (has_cond) sys->dispatch_node(ctx, scr, cond, "AND");
       e.guarded_clause(end, has_cond, [&]{
         sys->dispatch_node(ctx, scr, block);
-        if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'select' function returns 'ignore_value'???"));
+        if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'select' function returns 'ignore_value'"));
       });
 
       if (!type_is_void(exp)) ctx->pop();
@@ -525,13 +507,9 @@ void system::init_basic_functions() {
     return args.size();
   });
   
-  // while 'condition' block is true, do command in a block
-  // when false, jump out
+  // Evaluate blocks while each condition is true; the first false condition exits.
   RFI(internal::selectfn)("sequence", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
-    // what to do when no value? now i try to push default one
-    // but maybe better to push ignore_value?
-
     const auto exp = ctx->expected_type;
     if (type_is_string(exp) || type_is_object(exp)) sys->raise_error(std::format("Current language design makes 'sequence' meaningless in string and object blocks"));
 
@@ -554,12 +532,11 @@ void system::init_basic_functions() {
       e.jump_to(basicf::condjump, end);
 
       sys->dispatch_node(ctx, scr, block);
-      if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'sequence' function returns 'ignore_value'???"));
+      if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'sequence' function returns 'ignore_value'"));
 
       if (exp_is_bool) {
         if (ctx->is<int64_t>()) sys->setup_type_conversion<int64_t, bool>(ctx, scr);
         if (ctx->is<double>()) sys->setup_type_conversion<double, bool>(ctx, scr);
-        // boolean optimization?
         sys->push_basic_function(ctx, scr, basicf::andbin, 0);
       }
 
@@ -663,7 +640,7 @@ void system::init_basic_functions() {
   RFI(internal::chance)("chance", {}, [](emitter& e, const command_block&, const std::vector<std::string>&) {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     const auto val = ctx->gen_value();
-    sys->push_basic_function(ctx, scr, basicf::chance, std::bit_cast<int64_t>(val)); // push
+    sys->push_basic_function(ctx, scr, basicf::chance, std::bit_cast<int64_t>(val));
     return 0;
   });
 
@@ -716,7 +693,7 @@ void system::init_basic_functions() {
 
       const size_t curid = values_indicies[arg_index];
 
-      sys->push_basic_function(ctx, scr, basicf::cmplesseqd2, pack2(int32_t(stack_index), int32_t(curid))); // push
+      sys->push_basic_function(ctx, scr, basicf::cmplesseqd2, pack2(int32_t(stack_index), int32_t(curid)));
       e.guarded_clause(end, true, [&]{
         const size_t stack_size = ctx->stack_types.size();
         const size_t start = scr->block_descs.size();
@@ -724,7 +701,7 @@ void system::init_basic_functions() {
         const auto cd = curblock.find(custom_description_constant);
         sys->setup_block_description(ctx, scr, curblock.name(), sys->static_string_arg(cd, custom_description_constant), start);
         if (!is_void) {
-          if (stack_size == ctx->stack_types.size()) sys->raise_error(std::format("'{}' produces no value on stack ???", curblock.name()));
+          if (stack_size == ctx->stack_types.size()) sys->raise_error(std::format("'{}' produces no value on stack", curblock.name()));
           if (value_type != ctx->top()) sys->raise_error(std::format("'random' node expects all of values to be same type, expected type '{}', but got '{}'", value_type, ctx->top()));
           ctx->pop();
         }
@@ -733,7 +710,7 @@ void system::init_basic_functions() {
 
     e.bind(end);
 
-    // erase needs to be in OPPOSITE order
+    // Erase temporary weights from the highest stack index down to keep lower indexes valid.
     std::reverse(values_indicies.begin(), values_indicies.end());
     for (const auto id : values_indicies) { sys->push_basic_function(ctx, scr, basicf::erase, id); ctx->erase(id); }
     sys->push_basic_function(ctx, scr, basicf::erase, stack_index);
@@ -761,8 +738,6 @@ void system::init_basic_functions() {
     const auto child = command_block(args, 1);
     if (child.empty() || child.args_count() != 0 || child.size() != 1) sys->raise_error(std::format("'ctx:load' expects a string as the only argument"));
 
-    //if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
-
     const auto nextblock = command_block(args, 1 + child.size());
 
     size_t index = scr->find_saved(child.name());
@@ -773,7 +748,7 @@ void system::init_basic_functions() {
         sys->raise_error(std::format("Saved value type '{}' is not equals to expected '{}'", scr->saved[index].type, ctx->expected_type));
     }
 
-    sys->push_basic_function(ctx, scr, basicf::pushctxvalue, index); // push
+    sys->push_basic_function(ctx, scr, basicf::pushctxvalue, index);
     if (nextblock.empty()) return args.size();
 
     const size_t desc_start = scr->block_descs.size();
@@ -795,7 +770,6 @@ void system::init_basic_functions() {
       const auto child = command_block(args, offset);
       offset += child.size();
 
-      // ???
       if (child.args_count() != 1) sys->raise_error("'ctx:save' requires block with [key] = [value] pairs");
 
       set_expected_type set(ctx, utils::type_name<element_view>());
@@ -814,12 +788,10 @@ void system::init_basic_functions() {
         scr->saved.push_back({ { fname_start, fname_size }, top });
         index = scr->saved.size()-1;
       } else {
-        // can be oversaved? i think yes
-        //if (scr->args[index].type != ctx->current_scope_type()) sys->raise_error(std::format("Argument type '{}' is not equals to expected '{}'", scr->args[index].type, ctx->expected_type));
         scr->saved[index].type = top;
       }
 
-      sys->push_basic_function(ctx, scr, basicf::savectxrvalue, index); // pop
+      sys->push_basic_function(ctx, scr, basicf::savectxrvalue, index);
     }
 
     ctx->push<ignore_value>();
@@ -845,12 +817,10 @@ void system::init_basic_functions() {
       scr->saved.push_back({ { fname_start, fname_size }, type });
       index = scr->saved.size()-1;
     } else {
-      // can be oversaved? i think yes
-      //if (scr->args[index].type != ctx->current_scope_type()) sys->raise_error(std::format("Argument type '{}' is not equals to expected '{}'", scr->args[index].type, ctx->expected_type));
-      scr->saved[index].type = type;
+        scr->saved[index].type = type;
     }
 
-    sys->push_basic_function(ctx, scr, basicf::savectxlvalue, pack2(scope_index, index)); // no pop
+    sys->push_basic_function(ctx, scr, basicf::savectxlvalue, pack2(scope_index, index));
     ctx->push<ignore_value>();
 
     return args.size();
@@ -876,7 +846,6 @@ void system::init_basic_functions() {
       scr->args.push_back({ { fname_start, fname_size }, exp_value });
       index = scr->args.size()-1;
     } else {
-      //if (scr->args[index].type != exp_value) sys->raise_error(std::format("Argument type '{}' is not equals to expected '{}'", scr->args[index].type, ctx->expected_type));
       if (type_is_bool(scr->args[index].type) || type_is_fundamental(scr->args[index].type) || type_is_string(scr->args[index].type)) {
         if (!nextblock.empty()) sys->raise_error(std::format("Could not use argument '{}' as lvalue, type is '{}'", child.name(), scr->args[index].type));
       }
@@ -907,7 +876,6 @@ void system::init_basic_functions() {
       const auto child = command_block(args, offset);
       offset += child.size();
 
-      // ???
       if (child.args_count() != 1) sys->raise_error("'arg:set' requires block with [key] = [value] pairs");
 
       set_expected_type set(ctx, utils::type_name<element_view>());
@@ -926,12 +894,10 @@ void system::init_basic_functions() {
         scr->args.push_back({ { fname_start, fname_size }, top });
         index = scr->args.size()-1;
       } else {
-        // can be oversaved? i think yes
-        //if (scr->args[index].type != ctx->current_scope_type()) sys->raise_error(std::format("Argument type '{}' is not equals to expected '{}'", scr->args[index].type, ctx->expected_type));
         scr->args[index].type = top;
       }
 
-      sys->push_basic_function(ctx, scr, basicf::setargrvalue, index); // pop
+      sys->push_basic_function(ctx, scr, basicf::setargrvalue, index);
     }
 
     ctx->push<ignore_value>();
@@ -957,12 +923,10 @@ void system::init_basic_functions() {
       scr->args.push_back({ { fname_start, fname_size }, type });
       index = scr->args.size() - 1;
     } else {
-      // can be oversaved? i think yes
-      //if (scr->args[index].type != ctx->current_scope_type()) sys->raise_error(std::format("Argument type '{}' is not equals to expected '{}'", scr->args[index].type, ctx->expected_type));
       scr->args[index].type = type;
     }
 
-    sys->push_basic_function(ctx, scr, basicf::setarglvalue, pack2(scope_index, index)); // no pop
+    sys->push_basic_function(ctx, scr, basicf::setarglvalue, pack2(scope_index, index));
     ctx->push<ignore_value>();
 
     return args.size();
@@ -1195,17 +1159,10 @@ void system::init_basic_functions() {
       return args.size();
     }
 
-    // if this block has 1 arg with str, then next child would be __empty_lvalue
-    // description?
-    //const size_t desc_start = scr->block_descs.size();
-
     push_list_index_upvalue pliu(ctx, index);
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
     sys->dispatch_node(ctx, scr, nextblock);
     sys->scope_exit(ctx, scr, 1);
-
-    //const auto desc_name = nextblock.find(custom_description_constant).name();
-    //sys->setup_block_description(ctx, scr, nextblock.name(), desc_name, desc_start);
 
     size_t counter = start;
     while (counter < ctx->stack_types.size()) {

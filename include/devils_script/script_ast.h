@@ -7,6 +7,17 @@
 #include "tavl/tavl.h"
 #include "tavl/ext.h"
 
+// AST adapter between tavl and the devils_script semantic compiler.
+//
+// tavl owns tokenization, comments, string literal escaping, brackets, and operator
+// precedence. This layer turns tavl's event stream into the flat prefix `tavl::node`
+// layout consumed by `system::rpn_conversion_ctx::normalize`. The semantic compiler still
+// performs scope-path splitting, function lookup, type checking, and bytecode emission.
+//
+// The important language distinction is that `=` and `?=` are call operators, not storage
+// assignment. Storage is expressed explicitly through builtins such as `ctx_save` and
+// `ctx_set`.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {

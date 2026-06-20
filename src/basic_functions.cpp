@@ -46,7 +46,6 @@ std::tuple<uint8_t, uint32_t, uint32_t> unpackstrid(const int64_t value) noexcep
   return std::make_tuple(uint8_t((value >> (packed_pos_bit_size + packed_size_bit_size)) & index_mask), uint32_t((value >> packed_size_bit_size) & pos_mask), uint32_t((value) & size_mask));
 }
 
-// влияет ли endian на это дело?
 int64_t pack2(const int32_t val1, const int32_t val2) noexcept {
   union p2 { struct { int32_t a, b; }; int64_t c; } p2;
   p2.a = val1; p2.b = val2;
@@ -73,7 +72,7 @@ int64_t andjump(int64_t arg, context* ctx, const container*) {
   const bool b2 = ctx->stack.safe_pop<bool>();
   const bool b1 = ctx->stack.safe_pop<bool>();
   const bool res = b1 && b2;
-  ctx->stack.push(res); // должно остаться последнее значение
+  ctx->stack.push(res);
   if (!res) ctx->current_index = arg - 1;
   return -1;
 }
@@ -109,7 +108,7 @@ int64_t andjump_unsafe(int64_t arg, context* ctx, const container*) {
   const bool b2 = ctx->stack.pop<bool>();
   const bool b1 = ctx->stack.pop<bool>();
   const bool res = b1 && b2;
-  ctx->stack.push(res); // должно остаться последнее значение
+  ctx->stack.push(res);
   if (!res) ctx->current_index = arg - 1;
   return -1;
 }
@@ -230,7 +229,6 @@ int64_t cmplesseqd2(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-// sumset 1, 2
 int64_t sumsetstack(int64_t arg, context* ctx, const container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.safe_get<double>(id1);
@@ -322,7 +320,6 @@ int64_t cmplesseqd2_unsafe(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-// sumset 1, 2
 int64_t sumsetstack_unsafe(int64_t arg, context* ctx, const container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.get<double>(id1);
@@ -390,7 +387,6 @@ int64_t pushreturn(int64_t, context* ctx, const container*) {
 }
 
 int64_t pusharg(int64_t, context*, const container*) {
-  //ctx->stack.push(scr->args_type[arg], ctx->_args[arg]);
   return 1;
 }
 
@@ -447,7 +443,6 @@ int64_t setarglvalue(int64_t arg, context* ctx, const container*) {
 }
 
 int64_t pushctxvalue(int64_t arg, context* ctx, const container*) {
-  //ctx->stack.push(ctx->get_arg<any_stack>(arg));
   ctx->stack.push(ctx->get_saved<any_stack>(arg));
   return 1;
 }

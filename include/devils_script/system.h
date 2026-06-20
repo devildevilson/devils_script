@@ -21,16 +21,28 @@
 #include "devils_script/script_ast.h"
 #include "tavl/parser.h"
 
+// Main compiler/registry facade.
+//
+// A `system` stores the registered functions, operators, enum parsers, diagnostics, and
+// parser defaults used to compile scripts into `container` objects. The registry is intended
+// to be built once and reused; per-parse mutable state lives in `parse_ctx` so parsing can be
+// performed through const member functions.
+//
+// Compilation is split into three stages:
+// 1. tavl parses source text into a structural AST with operator precedence applied.
+// 2. `rpn_conversion_ctx` normalizes that AST into compact prefix `command_block` ranges.
+// 3. Semantic dispatch resolves functions/scopes/types and emits VM commands plus
+//    description metadata.
+//
+// Non-obvious implementation detail: a scope-changing function can be followed by a script
+// block (`scope_fn = { ... }` or `scope_fn:child = { ... }`). The compiler temporarily pushes
+// the produced scope type into `parse_ctx::scope_stack`, compiles the nested block, and emits
+// nullable guards for `?=` calls when the return type supports validity checks.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 #endif
-
-// later I need:
-// 1. different functions depending on scope
-// 2. assert (?)
-// 3. better callable for iterators (subblock in common.h ?)
-// 4. ????
 
 bool check_is_str_part_of(const std::string_view& big_str, const std::string_view& small_str) noexcept;
 
@@ -122,9 +134,6 @@ public:
   };
 
   struct parse_context {
-    // another time?
-    //struct lang_constants { std::string_view custom_description, condition, arg, ctx, count, percent, order_by; };
-
     function_type ftype;
     std::string_view expected_type;
     std::string_view string_upvalue;
@@ -212,7 +221,7 @@ public:
     // on the boolean test the caller just emitted skips the body (to a fresh per-clause
     // label) if it is false; then `emit_body()` runs; then an unconditional jump to the
     // shared `end`; finally the skip label is bound past the body. Centralizes the
-    // condjump/jump/bind ordering shared by select & random (and switch once repaired).
+    // condjump/jump/bind ordering shared by select and random.
     template <typename Body>
     void guarded_clause(label& end, const bool guarded, Body&& emit_body) const {
       label skip = make_label();
@@ -448,7 +457,7 @@ public:
 
   // Register this system's operators into a tavl parser (name + precedence + fixity + assoc), so
   // make_script_ast lexes/folds them correctly. Data-driven from mfuncs; `=`/`?=` (structural call
-  // operators, not in mfuncs) are added at the lowest precedence. See step 4.2.
+  // operators, not in mfuncs) are added at the lowest precedence.
   void configure_parser(tavl::parser& p) const;
   void scope_exit(parse_ctx* ctx, container* scr, const size_t count) const;
 private:

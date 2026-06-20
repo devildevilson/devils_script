@@ -165,8 +165,7 @@ struct scope3 { operator bool() const { return true; } };
 static scope2 func1(scope1, std::string_view) { return scope2{}; }
 static double func2(scope3, double, double) { return 1; }
 static double func3(double a, double b, double c) { return a + b + c; }
-static double func4(const std::string_view& str) { return 1; }
-static std::string_view func5() { return "rvalue"; }
+static double func4([[maybe_unused]] const std::string_view& str) { return 1; }
 static double func7(scope2) { return 5; }
 static scope3 to_scope3(scope2) { return scope3{}; }
 static scope2 to_scope2(scope1) { return scope2{}; }
@@ -203,8 +202,6 @@ static bool runtime_true() { return true; }
 static bool runtime_false() { return false; }
 static bool counted_true() { g_short_circuit_calls += 1; return true; }
 static bool counted_false() { g_short_circuit_calls += 1; return false; }
-static double runtime_five() { return 5.0; }
-
 enum class title_rank : int64_t {
   barony = 1,
   duchy = 2,
@@ -545,7 +542,6 @@ TEST_CASE("Enum literals") {
   }
 }
 
-// uses register_function_iter but probably can be added to register_function
 static double func6(scope2, const std::function<double(scope3)>& fn) { return fn(scope3{}); }
 static double func10(scope2, const std::function<double(scope2)>& fn1, const std::function<double(scope2)>& fn2) { return fn1(scope2{}) + fn2(scope2{}); }
 static double child_id(object_ref child) { return double(child.id); }
@@ -727,8 +723,6 @@ TEST_CASE("Main lang statements") {
     REQUIRE(ctx.is_return<double>());
     REQUIRE(ctx.get_return<double>() == 15.0);
   }
-
-  // switch???
 
   SUBCASE("chance") {
     { // context seed 1

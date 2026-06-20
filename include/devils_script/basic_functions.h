@@ -5,6 +5,18 @@
 #include <tuple>
 #include <climits>
 
+// Runtime opcode declarations and compact argument packing helpers.
+//
+// `devils_script` compiles source text into a flat array of `container::command` entries.
+// Each command calls one of these functions with a single 64-bit immediate argument, the
+// current execution context, and the owning container. Safety-aware opcodes have paired
+// safe/unsafe implementations; the unsafe variants skip stack type checks but keep the same
+// stack contract.
+//
+// Several instructions need two indexes or a string span in that single immediate argument.
+// The pack/unpack helpers below define that ABI and are shared by code generation,
+// execution, and disassembly.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
@@ -19,7 +31,7 @@ struct thisctx { context* ctx; bool valid() const noexcept { return ctx != nullp
 struct thisctxlist { context* ctx; size_t idx; bool valid() const noexcept { return ctx != nullptr; } };
 }
 
-// 64 - 8 = 56, 56 / 2 = 28, 28bit for pos and size?
+// The high byte stores the string table id; the remaining bits are split between offset and size.
 constexpr size_t packed_pos_bit_size = 28;
 constexpr size_t packed_size_bit_size = 28;
 static_assert(packed_pos_bit_size + packed_size_bit_size + CHAR_BIT <= sizeof(int64_t) * CHAR_BIT);
@@ -98,9 +110,6 @@ int64_t savectxlvalue(int64_t, context*, const container*);
 
 int64_t pushlist(int64_t, context*, const container*);
 int64_t list_pipeline(int64_t, context*, const container*);
-//int64_t savelistvalue(int64_t, context*, const container*);
-//int64_t removelistvalue(int64_t, context*, const container*);
-//int64_t isinlist(int64_t, context*, const container*);
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 }

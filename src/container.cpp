@@ -17,10 +17,9 @@ container::command::command(function_t fp, bool arg) noexcept : fp(fp), arg(arg)
 container::command::command(function_t fp, double arg) noexcept : fp(fp), arg(std::bit_cast<int64_t>(arg)) {}
 container::command::command(function_t fp, int64_t arg) noexcept : fp(fp), arg(arg) {}
 
-container::command_description::command_description() noexcept : name({ 0,0 }), /*rvalue({0,0}),*/ argument_count(0), requires_scope(false), is_not_member_function(false), has_return(false), effect(false), nest_level(0), parent(SIZE_MAX) {}
+container::command_description::command_description() noexcept : name({ 0,0 }), argument_count(0), requires_scope(false), is_not_member_function(false), has_return(false), effect(false), nest_level(0), parent(SIZE_MAX) {}
 container::command_description::command_description(
   const global_string_view& name,
-  //const global_string_view& rvalue,
   uint32_t argument_count,
   bool requires_scope,
   bool is_not_member_function,
@@ -29,11 +28,10 @@ container::command_description::command_description(
   size_t nest_level,
   size_t parent
 ) noexcept :
-  name(name), /*rvalue(rvalue),*/ argument_count(argument_count), requires_scope(requires_scope),
+  name(name), argument_count(argument_count), requires_scope(requires_scope),
   is_not_member_function(is_not_member_function), has_return(has_return), effect(effect), nest_level(nest_level), parent(parent)
 {}
 
-// magic number
 container::container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {}
 void container::process(context* ctx) const {
   const container* prev_script = ctx->current_script;
@@ -314,7 +312,6 @@ bool node_view::traverse(const container* scr, const size_t offset, const size_t
   std::reverse(stack.begin()+cur_stack_size, stack.end());
 
   bool ret = true;
-  //for (auto itr = stack.rbegin()+cur_stack_size; itr != stack.rend() && ret; ++itr) {
   const size_t size_part = stack.size();
   for (size_t i = cur_stack_size; i < size_part; ++i) {
     const auto& newoffset = stack[i];

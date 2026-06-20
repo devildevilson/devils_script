@@ -8,9 +8,36 @@
 #include <format>
 #include "devils_script/type_traits.h"
 
+// Shared low-level types used by the compiler and runtime.
+//
+// The VM stores script values in fixed-size stack slots so compiled containers can pass
+// small trivially-destructible C++ values without allocations or RTTI. Type names are kept
+// next to values in the owning stacks/views rather than inside the raw slot itself. That
+// split is intentional: it keeps the command ABI compact while still allowing safe-mode
+// runtime type checks and description/introspection output.
+//
+// This header also defines the built-in opcode ids, validity detection for scope values,
+// and the small type-erased value wrappers used for `ctx:saved`, `ctx:arg`, iterators, and
+// description callbacks.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
+#endif
+
+constexpr int devils_script_version_major = 1;
+constexpr int devils_script_version_minor = 0;
+constexpr int devils_script_version_patch = 0;
+constexpr std::string_view devils_script_version = "1.0.0";
+
+#ifndef DEVILS_SCRIPT_VERSION_MAJOR
+#define DEVILS_SCRIPT_VERSION_MAJOR 1
+#endif
+#ifndef DEVILS_SCRIPT_VERSION_MINOR
+#define DEVILS_SCRIPT_VERSION_MINOR 0
+#endif
+#ifndef DEVILS_SCRIPT_VERSION_PATCH
+#define DEVILS_SCRIPT_VERSION_PATCH 0
 #endif
 
 #define DEVILS_SCRIPT_BASIC_FUNCTIONS_LIST \
@@ -181,7 +208,6 @@ constexpr std::string_view scope_type_name() {
   } else return utils::type_name<T2>();
 }
 
-// тут бы тип добавить рядом с памятью
 struct alignas(MAXIMUM_STACK_VAL_SIZE) stack_element {
   struct view {
     const char* _mem;
@@ -203,7 +229,6 @@ struct alignas(MAXIMUM_STACK_VAL_SIZE) stack_element {
     friend bool operator!=(const view& v1, const view& v2);
   };
 
-  // соединить тип и данные в одной структуре?
   char mem[MAXIMUM_STACK_VAL_SIZE];
 
   template <typename T> requires(valid_stack_el_type_v<T>)
@@ -272,7 +297,6 @@ template <typename T>
 constexpr bool is_valid_return_type_v = valid_stack_type_v<T> || std::is_same_v<any_stack, std::remove_cvref_t<T>> || std::is_same_v<any_object, std::remove_cvref_t<T>> || utils::is_void_v<T>;
 
 template <typename T>
-//constexpr bool is_not_fundamental = ((!std::is_pointer_v<T> && !std::is_fundamental_v<T>) || (std::is_pointer_v<T> && !std::is_fundamental_v<std::remove_pointer_t<T>>)) && !utils::is_void_v<T>;
 constexpr bool is_not_fundamental = !std::is_fundamental_v<T> && !std::is_same_v<std::string_view, T>;
 
 template <typename F>
@@ -299,7 +323,6 @@ constexpr bool is_numeric_function_v = utils::is_function_v<F> && std::is_fundam
 template <typename F>
 constexpr bool is_effect_function_v = utils::is_function_v<F> && utils::is_void_v<std::remove_cvref_t<utils::function_result_type<F>>> && utils::function_arguments_count<F> == 1;
 
-// std::optional
 template <typename F>
 constexpr bool is_valid_argument_function_v = is_predicate_function_v<F> || is_numeric_function_v<F> || is_effect_function_v<F>;
 
@@ -378,7 +401,6 @@ bool operator==(const T1& s1, const T2& s2) noexcept;
 template <typename T1, typename T2> requires(is_typeless_v<T1> && is_typeless_v<T2>)
 bool operator!=(const T1& s1, const T2& s2) noexcept;
 
-// instead of std function
 template <typename RT, typename IN>
 class subblock {
 public:

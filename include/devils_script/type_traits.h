@@ -17,6 +17,16 @@
 #include <tuple>
 #include <optional>
 
+// Compile-time type utilities used by function registration and stack validation.
+//
+// The library relies on function signatures to infer script command kind, scope type,
+// argument list, return type, and human-readable type names. These helpers avoid RTTI and
+// keep all registration checks in templates, so invalid functions fail at compile time when
+// possible and produce stable string names for parse-time diagnostics otherwise.
+//
+// Pointer constness is normalized for script type matching: script scope/value identity is
+// based on the pointed-to type category rather than the exact cv-qualified pointer spelling.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
@@ -481,7 +491,7 @@ namespace utils {
     constexpr size_t sig_size = sig.size()+1;
     constexpr size_t str_seq_name_start = sig.find(start_char_seq) + start_char_seq.size();
     constexpr size_t end_of_char_str = sig.rfind(start_char_seq);
-    constexpr size_t count = sig_size - str_seq_name_start - end_char_seq.size() - 1; // отстается символ '>' в конце
+    constexpr size_t count = sig_size - str_seq_name_start - end_char_seq.size() - 1; // trailing '>'
     constexpr std::string_view substr = sig.substr(str_seq_name_start, count);
     if constexpr (substr.find(function_type_pattern) == std::string_view::npos) {
       constexpr std::string_view class_char_seq = "class ";

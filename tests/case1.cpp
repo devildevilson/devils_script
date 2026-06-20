@@ -91,7 +91,6 @@ const std::string scripts[] = {
   "country = { each_city = { value = { each_notable_person = { value = charisma } } } }",
   "this:living_in = { ctx_save = { val1 = { each_notable_person = { value = age } } }, notable_people_count / ctx:saved:val1 }",
   "{ ctx_save = { cur_player = this }, this:living_in = { each_notable_person = { filter = this != ctx:saved:cur_player, value = age } } }",
-  // ???
 };
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -137,7 +136,6 @@ TEST_CASE("Real usage 1") {
   sys.init_basic_functions();
   sys.init_math();
 
-  // unfortunately no unique fns in unique scope type yet (fixed. see examples/desc.cpp)
   sys.register_function<&country::get_population>("country_population");
   sys.register_function<&country::get_gdp>("country_gdp");
   sys.register_function<&country::add_population>("country_add_population");

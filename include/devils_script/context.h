@@ -12,6 +12,18 @@
 #include "devils_script/common.h"
 #include "devils_script/container.h"
 
+// Mutable runtime state for executing a compiled container.
+//
+// `context` owns three typed stacks: the transient VM stack, saved script values, and script
+// arguments. Compiled containers describe which saved/argument slots they use, while the
+// context stores the actual values. That separation allows one compiled container to be
+// reused with many contexts.
+//
+// Safe stack operations validate the stored type name before reading a slot. Unsafe-mode
+// commands use the raw operations for lower overhead after a script has already been parsed
+// and trusted. List storage is created from `container::lists` before execution through
+// `create_lists()`.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
@@ -95,13 +107,12 @@ struct context {
 
   std::vector<std::vector<stack_element>> lists;
 
-  // prng_state - any non 0
+  // Any non-zero seed is valid; containers can override it with their own parse seed.
   inline context() noexcept
     : stack(stack_size), saved_stack(local_vars_size), args_stack(script_arguments_size),
       prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr), current_script(nullptr) {
-    // resize saved_stack because indices are controlled by script, no push/pop (?)
+    // Saved values and args are indexed directly by compiled code, not pushed sequentially.
     saved_stack._size = saved_stack._data.size();
-    // resize args_stack because indices are controlled by script, no push/pop (?)
     args_stack._size = args_stack._data.size();
   }
 
@@ -145,7 +156,7 @@ struct context {
   inline std::string_view arg_type(const int64_t index) const { return args_stack.type(index); }
   inline std::string_view saved_type(const int64_t index) const { return saved_stack.type(index); }
   inline std::string_view return_type() const { return _return_value.type(); }
-  inline void clear() { current_index = 0; stack.resize(0); /*saved_stack.resize(0);*/ }
+  inline void clear() { current_index = 0; stack.resize(0); }
   void create_lists(const container* scr);
 };
 
@@ -191,13 +202,11 @@ auto context::stack_t::safe_get() const -> final_stack_el_t<T> {
   } else return get<basic_T>();
 }
 
-// пушить без типа? врядли имеет большой смысл
 template <typename T> requires(valid_stack_type<T>)
 void context::stack_t::push(const T& val) {
   using basic_T = final_stack_el_t<T>;
   if (_size >= _data.size()) throw std::runtime_error("Stack overflow");
   if constexpr (is_typeless_v<basic_T>) {
-    //_data[_size].set(std::forward<basic_T>(val));
     memcpy(_data[_size].mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
     _types[_size] = val.type();
   } else {
@@ -226,14 +235,12 @@ auto context::stack_t::safe_get(const int64_t index) const -> final_stack_el_t<T
   } else return _data[final_index].template get<basic_T>();
 }
 
-// set без типа тоже имеет немного смысла
 template <typename T> requires(valid_stack_type<T>)
 void context::stack_t::set(const int64_t index, const T& val) {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
   if (final_index >= int64_t(_size)) throw std::runtime_error("Stack overflow");
   if constexpr (is_typeless_v<basic_T>) {
-    //_data[final_index].set(std::forward<basic_T>(val));
     memcpy(_data[final_index].mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
     _types[final_index] = val.type();
   } else {

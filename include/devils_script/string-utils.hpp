@@ -9,6 +9,13 @@
 #include <algorithm>
 #include <locale>
 
+// Small string helpers used by the parser and diagnostics.
+//
+// These functions are constexpr-friendly where practical and work mostly on `string_view`
+// slices so parser code can reference the original script source without allocating. Case
+// conversion helpers are ASCII-oriented unless they explicitly use the wide-character
+// locale functions below.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
@@ -17,8 +24,8 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 namespace utils {
 namespace string {
 
-// returns sub strings count or SIZE_MAX is not enougth memory in arr
-// if SIZE_MAX last str in arr is remaining part of the input
+// Returns the substring count, or SIZE_MAX when the output span is too small.
+// On SIZE_MAX, the last output item contains the remaining input.
 constexpr size_t split(const std::string_view &input, const std::string_view &token, std::span<std::string_view> &arr) {
   if (input.empty()) return 0;
 
@@ -31,7 +38,6 @@ constexpr size_t split(const std::string_view &input, const std::string_view &to
     const size_t pos = cur.find(token);
     const auto str = cur.substr(0, pos);
     prev = cur;
-    //cur = (pos != std::string_view::npos) && (pos+token.size() <= cur.size()) ? cur.substr(pos+token.size()) : std::string_view();
     cur = pos != std::string_view::npos ? cur.substr(pos + token.size()) : std::string_view();
     if (!arr.empty()) arr[count] = str;
     count += 1;
@@ -183,12 +189,12 @@ private:
   const std::locale& loc_;
 };
 
-// find substring (case insensitive)
+// Find substring, case-insensitive.
 template<typename T>
 constexpr size_t find_ci(const T& str1, const T& str2, const std::locale& loc = std::locale()) {
   typename T::const_iterator it = std::search(str1.begin(), str1.end(), str2.begin(), str2.end(), locale_based_case_insensitive_equal<typename T::value_type>(loc));
   if (it != str1.end()) return it - str1.begin();
-  return SIZE_MAX; // not found
+  return SIZE_MAX;
 }
 
 constexpr size_t find_ci(const std::string_view& str1, const char* str2, const std::locale& loc = std::locale()) {

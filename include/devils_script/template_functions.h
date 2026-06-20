@@ -7,6 +7,17 @@
 #include "devils_script/context.h"
 #include "devils_script/basic_functions.h"
 
+// Template runtime thunks for registered C++ callbacks.
+//
+// Registration stores erased command function pointers in the compiled container. The
+// templates in this file recover the original C++ function signature, pull arguments and
+// scope values from the VM stack, validate scopes, invoke the user callback, and push the
+// normalized script result back to the stack.
+//
+// Iterator callbacks are implemented by wrapping compiled sub-command ranges in lambdas or
+// `script_function` views. Those wrappers share the caller's `context`, so iterator bodies
+// must restore the stack to the expected shape before returning.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
@@ -65,7 +76,6 @@ int64_t mathfunc(int64_t val, context* ctx, const container* scr);
 template <auto f, typename HT = void, is_valid_t<HT> vt = nullptr, on_effect_t<decltype(f), HT> eff = nullptr>
 int64_t userfunc(int64_t val, context* ctx, const container* scr);
 
-// on_effect_t ?
 template <auto f, typename HT, is_valid_t<HT> vt = nullptr>
 int64_t useriter(int64_t val, context* ctx, const container* scr);
 
@@ -87,7 +97,6 @@ int64_t mathfunc_unsafe(int64_t val, context* ctx, const container* scr);
 template <auto f, typename HT = void, is_valid_t<HT> vt = nullptr, on_effect_t<decltype(f), HT> eff = nullptr>
 int64_t userfunc_unsafe(int64_t val, context* ctx, const container* scr);
 
-// on_effect_t ?
 template <auto f, typename HT, is_valid_t<HT> vt = nullptr>
 int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr);
 
@@ -541,22 +550,17 @@ int64_t useriter(int64_t val, context* ctx, const container* scr) {
   constexpr bool is_not_member_func = is_not_member_function<decltype(f)>;
   using scope_type = HT;
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
-  //constexpr auto scope_type_name = utils::type_name<scope_type>();
   constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
-  //using first_argument = utils::function_argument_type<decltype(f), first_argument_index>;
   constexpr size_t sig_args_count = utils::function_arguments_count<decltype(f)>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
   using ret_type = final_stack_el_t<utils::function_result_type<decltype(f)>>;
-
-  // тут теперь как? мы вызываем одну функцию и передаем в нее лямбды
-  // лямбды снабжаются началом и концом инструкций + есть понимание что они должны вернуть
 
   std::array<size_t, args_count> cmd_starts;
   std::array<size_t, args_count> cmd_ends;
   
   const size_t curins = ctx->current_index;
   const size_t start_jumpins = curins + 1;
-  size_t curstart = start_jumpins + args_count; // +1?
+  size_t curstart = start_jumpins + args_count;
   for (size_t i = 0; i < args_count; ++i) {
     const size_t index = start_jumpins + i;
     cmd_starts[i] = curstart;
@@ -577,7 +581,7 @@ int64_t useriter(int64_t val, context* ctx, const container* scr) {
     else if constexpr (detail::is_script_function_v<fn_t>) {
       std::get<cur_index>(args_tuple) = fn_t(ctx, scr, cmd_starts[index], cmd_ends[index]);
     } else {
-      container_view v(scr, cmd_starts[index], cmd_ends[index]); // copy? 
+      container_view v(scr, cmd_starts[index], cmd_ends[index]);
       std::get<cur_index>(args_tuple) = [v, ctx](input_type in) -> value_type {
         ctx->stack.push(in);
         v.process(ctx);
@@ -616,9 +620,9 @@ int64_t useriter(int64_t val, context* ctx, const container* scr) {
       const auto ret = std::apply(f, std::tuple_cat(c, args_tuple));
       detail::stack_push_result(ctx, ret);
     }
-  } else throw std::runtime_error("Bad scope deduction????");
+  } else throw std::runtime_error("Bad scope deduction");
 
-  // тут нужно еще перепрыгнуть
+  // Skip the iterator body command ranges after the callback consumes them.
   ctx->current_index = curstart - 1;
   
   return 1;
@@ -688,7 +692,7 @@ int64_t useriter_condition(int64_t val, context* ctx, const container* scr) {
     ctx->stack.erase();
     counter += size_t(val);
 
-    // каунт немного не так работает и скорее нужен только в функциях any
+    // Count-limited condition iterators stop once enough matching items were found.
     if (counter >= size) return false;
     return true;
   };
@@ -712,8 +716,6 @@ int64_t useriter_numeric(int64_t val, context* ctx, const container* scr) {
   using first_el_t = std::remove_cvref_t<utils::function_argument_type<decltype(f), 0>>;
   using function_t = std::conditional_t<utils::is_function_v<first_el_t>, first_el_t, std::remove_cvref_t<utils::function_argument_type<decltype(f), 1>>>;
   using input_scope = utils::function_argument_type<function_t, 0>;
-
-  // поди что то и для нумериков будет
 
   const size_t curins = ctx->current_index;
   const size_t jumpins = curins + 1;
@@ -804,22 +806,17 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
   constexpr bool is_not_member_func = is_not_member_function<decltype(f)>;
   using scope_type = HT;
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
-  //constexpr auto scope_type_name = utils::type_name<scope_type>();
   constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
-  //using first_argument = utils::function_argument_type<decltype(f), first_argument_index>;
   constexpr size_t sig_args_count = utils::function_arguments_count<decltype(f)>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
   using ret_type = final_stack_el_t<utils::function_result_type<decltype(f)>>;
-
-  // тут теперь как? мы вызываем одну функцию и передаем в нее лямбды
-  // лямбды снабжаются началом и концом инструкций + есть понимание что они должны вернуть
 
   std::array<size_t, args_count> cmd_starts;
   std::array<size_t, args_count> cmd_ends;
 
   const size_t curins = ctx->current_index;
   const size_t start_jumpins = curins + 1;
-  size_t curstart = start_jumpins + args_count; // +1?
+  size_t curstart = start_jumpins + args_count;
   for (size_t i = 0; i < args_count; ++i) {
     const size_t index = start_jumpins + i;
     cmd_starts[i] = curstart;
@@ -838,7 +835,7 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
     else if constexpr (detail::is_script_function_v<fn_t>) {
       std::get<cur_index>(args_tuple) = fn_t(ctx, scr, cmd_starts[index], cmd_ends[index]);
     } else {
-      container_view v(scr, cmd_starts[index], cmd_ends[index]); // copy? 
+      container_view v(scr, cmd_starts[index], cmd_ends[index]);
       std::get<cur_index>(args_tuple) = [v, ctx](input_type in) -> value_type {
         ctx->stack.push(in);
         v.process(ctx);
@@ -877,9 +874,9 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const container* scr) {
       const auto ret = std::apply(f, std::tuple_cat(c, args_tuple));
       detail::stack_push_result(ctx, ret);
     }
-  } else throw std::runtime_error("Bad scope deduction????");
+  } else throw std::runtime_error("Bad scope deduction");
 
-  // тут нужно еще перепрыгнуть
+  // Skip the iterator body command ranges after the callback consumes them.
   ctx->current_index = curstart - 1;
 
   return 1;
@@ -950,7 +947,7 @@ int64_t useriter_condition_unsafe(int64_t val, context* ctx, const container* sc
     ctx->stack.erase();
     counter += size_t(val);
 
-    // каунт немного не так работает и скорее нужен только в функциях any
+    // Count-limited condition iterators stop once enough matching items were found.
     if (counter >= size) return false;
     return true;
   };
@@ -975,8 +972,6 @@ int64_t useriter_numeric_unsafe(int64_t val, context* ctx, const container* scr)
   using function_t = std::conditional_t<utils::is_function_v<first_el_t>, first_el_t, std::remove_cvref_t<utils::function_argument_type<decltype(f), 1>>>;
   using input_scope = utils::function_argument_type<function_t, 0>;
 
-  // поди что то и для нумериков будет
-
   const size_t curins = ctx->current_index;
   const size_t jumpins = curins + 1;
   const size_t start = curins + 2;
@@ -1000,7 +995,6 @@ int64_t useriter_numeric_unsafe(int64_t val, context* ctx, const container* scr)
 
   if constexpr (!std::is_fundamental_v<first_el_t> && !utils::is_function_v<first_el_t>) {
     auto c = ctx->stack.get<first_el_t>(val);
-    // не проверять?
     if (!std::invoke(vt, c)) throw std::runtime_error(std::format("Scope handle '{}' is invalid, instruction {}", utils::type_name<first_el_t>(), ctx->current_index));
     std::invoke(f, c, in_f);
   } else {

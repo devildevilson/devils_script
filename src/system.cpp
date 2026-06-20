@@ -5,8 +5,6 @@
 #include <cmath>
 #include <cassert>
 #include <optional>
-//#include <iostream>
-//#include <iomanip>
 #include <cstring>
 #include "devils_script/string-utils.hpp"
 
@@ -482,7 +480,8 @@ void system::emitter::bind(label& l) const {
   for (const size_t site : l.sites) scr->cmds[site].arg = target;
 }
 
-// we wanna save the position of the string in the global
+// Strings that point into `container::source` are stored as source spans; generated strings
+// are interned in `container::globals`.
 bool check_is_str_part_of(const std::string_view& big_str, const std::string_view& small_str) noexcept {
   return (big_str.data() <= small_str.data()) && (big_str.data() + big_str.size() >= small_str.data() + small_str.size());
 }
@@ -497,8 +496,8 @@ auto system::store_string(container* scr, const std::string_view& str) const -> 
   using sv_t = container::command_description::global_string_view;
   if (!scr->source.empty() && check_is_str_part_of(scr->source, str)) {
     const size_t pos = str.data() - scr->source.data();
-    if (!check_value(pos, packed_pos_bit_size)) raise_error(std::format("String '{}' position in script string cannot be packed in {} bit ???", str, packed_pos_bit_size));
-    if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bit ???", str, packed_size_bit_size));
+    if (!check_value(pos, packed_pos_bit_size)) raise_error(std::format("String '{}' position in script string cannot be packed in {} bits", str, packed_pos_bit_size));
+    if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bits", str, packed_size_bit_size));
     return sv_t{ pos, str.size(), 0 };
   }
 
@@ -507,7 +506,7 @@ auto system::store_string(container* scr, const std::string_view& str) const -> 
   }
 
   if (scr->globals.size() >= UINT8_MAX - 1) raise_error(std::format("Script would store global string index in 8bit value, too many global strings"));
-  if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bit ???", str, packed_size_bit_size));
+  if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bits", str, packed_size_bit_size));
   scr->globals.emplace_back(str);
   return sv_t{ 0, str.size(), static_cast<uint8_t>(scr->globals.size()) };
 }
@@ -697,8 +696,6 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
       return 1;
     }
 
-    // int???
-
     if (double val; text::is_number(funcname, val)) {
       set_function_type sft(ctx, function_type::rvalue);
       push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(val));
@@ -786,7 +783,6 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   auto prevname = funcname;
   if (!override_lvalue.empty()) funcname = override_lvalue;
 
-  // how to check named arg?
   const bool is_not_overriden = override_lvalue.empty();
   const bool is_condition = block.name() == "condition";
   const bool is_subblock = funcname == "__empty_lvalue";
@@ -826,7 +822,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   const size_t cmd_start = scr->cmds.size();
 
   function_name_changer fnc(ctx, prevname);
-  set_function_type sft(ctx, function_type::lvalue); // probably function_type is meaningless
+  set_function_type sft(ctx, function_type::lvalue);
   const auto& itr = mfuncs.find(std::string(funcname));
   if (itr == mfuncs.end()) raise_error(std::format("Could not find function '{}'", funcname));
   auto scope_itr = itr->second.find(std::string(ctx->current_scope_type()));
@@ -840,7 +836,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
     setup_block_description(ctx, scr, prevname, static_string_arg(cd, custom_description_constant), desc_start, cmd_start);
   }
 
-  return block.size(); // ?
+  return block.size();
 }
 
 size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const {
@@ -979,7 +975,6 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     case basicf::NAND: opcode = basicf::andjump; boolean_and_block = true; break;
     case basicf::NOR:  opcode = basicf::orjump;  boolean_or_block  = true; break;
 
-    // объекты? строки?
     case basicf::effect_block: { break; }
     case basicf::string_block: { break; }
     case basicf::object_block: { break; }
@@ -1003,7 +998,7 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     if (curid == basicf::effect_block || curid == basicf::string_subblock || curid == basicf::object_subblock) {
       if (const auto cond_block = child.find("condition"); !cond_block.empty()) {
         dispatch_node(ctx, scr, cond_block, "AND");
-        if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value?", cond_block.name()));
+        if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value", cond_block.name()));
         e.jump_to(basicf::condjump, end);
       }
     }
@@ -1012,7 +1007,7 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
     dispatch_node(ctx, scr, child);
     if (curid == basicf::effect_block) continue;
-    if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value?", child.name()));
+    if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value", child.name()));
     if (ctx->is<ignore_value>()) { ctx->pop(); continue; }
     if (child.nullable() && (curid == basicf::string_block || curid == basicf::string_subblock || curid == basicf::object_subblock)) {
       auto skip_invalid = e.make_label();
@@ -1155,14 +1150,14 @@ std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_contex
 }
 
 system::command_data::ftype system::get_token_type(const std::string_view& name) const {
-  const auto itr = mfuncs.find(std::string(name)); // such a pain
+  const auto itr = mfuncs.find(std::string(name));
   if (itr == mfuncs.end()) return command_data::ftype::invalid;
   if (itr->second.empty()) return command_data::ftype::invalid;
   return itr->second.begin()->second.type;
 }
 
 std::tuple<int32_t, int32_t, system::command_data::associativity, system::command_data::ftype> system::get_token_caps(const std::string_view& name) const {
-  const auto itr = mfuncs.find(std::string(name)); // such a pain
+  const auto itr = mfuncs.find(std::string(name));
   if (itr == mfuncs.end()) return std::make_tuple(0, 0, system::command_data::associativity::left, command_data::ftype::invalid);
   if (itr->second.empty()) return std::make_tuple(0, 0, system::command_data::associativity::left, command_data::ftype::invalid);
 
@@ -1244,6 +1239,3 @@ std::string_view system::parse_context::top() const { return stack_types.back();
 }
 #endif
 }
-
-
-// better to reduce this file, i can place rpn_context to another file

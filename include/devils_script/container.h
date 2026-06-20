@@ -11,6 +11,18 @@
 #include <stdexcept>
 #include "devils_script/common.h"
 
+// Compiled script representation and inspection helpers.
+//
+// A `container` owns bytecode-like commands, source-backed strings, argument/saved/list
+// metadata, and a parallel description tree. `process()` executes the commands against a
+// mutable `context`; `describe()` walks the description tree and partially evaluates nodes
+// where the current context makes that possible.
+//
+// The command and description arrays are intentionally kept in lockstep for executable
+// instructions. Higher-level block descriptions reference command ranges instead of owning
+// commands themselves, which lets tooling reconstruct the script structure without changing
+// the compact execution layout.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
@@ -18,7 +30,7 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 
 struct container;
 
-// simple script viewer, you probably need something better
+// Legacy tree view used by older description callers. Prefer `container::describe`.
 struct node_view {
   using fn_t = std::function<bool(const std::string_view &, const std::string_view &, const size_t, const any_stack &, const any_stack&)>;
   
@@ -43,18 +55,17 @@ struct container {
     explicit command(function_t fp, int64_t arg) noexcept;
   };
   
-  // every command description
+  // Description metadata for one emitted command.
   struct command_description {
     struct global_string_view { size_t start, count; uint8_t global = 0; };
 
-    // unfortunately needs to be rewritten =(
     global_string_view name;
     uint32_t argument_count;
     bool requires_scope;
     bool is_not_member_function;
     bool has_return;
     bool effect;
-    size_t nest_level; // is it needed? dont think so
+    size_t nest_level;
     size_t parent;
 
     command_description() noexcept;
@@ -85,7 +96,8 @@ struct container {
     instruction
   };
 
-  // script description data, structure similar to rpn_conversion_ctx::block but upside down
+  // Structural description node. The tree is stored in prefix order like command_block,
+  // but each node references the command range that evaluates it.
   struct block_description {
     command_description::global_string_view name;
     command_description::global_string_view custom_description;
@@ -94,7 +106,7 @@ struct container {
     size_t cmd_index;
     size_t cmd_start;
     size_t cmd_end;
-    int64_t scope_index; // why int64_t?
+    int64_t scope_index;
     bool placeholder;
     description_node_kind kind;
   };
@@ -170,7 +182,7 @@ struct container {
   std::vector<list_pipeline_op> list_pipeline_ops;
 
   container() noexcept;
-  void process(context* ctx) const; // dont forget 'ctx->clear()' and 'ctx->create_lists(this)'
+  void process(context* ctx) const;
   void make_table(context* ctx, std::vector<std::tuple<any_stack, any_stack>> &table) const;
   void make_table(context* ctx, node_view& viewer) const;
   void build_description_index();
@@ -185,7 +197,7 @@ struct container {
   std::string_view get_list_name(const size_t index) const;
 };
 
-// for subscripts in iterators
+// Executable view over a command range; used to pass script subblocks into iterator callbacks.
 struct container_view {
   const container* scr; 
   size_t start; 

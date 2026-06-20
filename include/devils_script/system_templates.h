@@ -1,5 +1,15 @@
 #pragma once
 
+// Template implementation of `system` registration and parse helpers.
+//
+// This file is included from `system.h` because most registration code depends on the exact
+// user callback type. It performs parse-time argument checking, emits call instructions,
+// registers function/operator metadata, and provides typed `system::parse` entry points.
+//
+// The code intentionally keeps semantic type information in `parse_ctx::stack_types` while
+// emitting commands. That lets the compiler validate script blocks before execution and lets
+// safe/unsafe runtime opcodes share the same generated command stream.
+
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
@@ -348,17 +358,11 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
   constexpr bool is_not_member_func = is_not_member_function<F>;
   using scope_type = HT;
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
-  //constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
-  //using first_argument = utils::function_argument_type<F, first_argument_index>;
-  //constexpr auto uftype = get_user_function_type<F>();
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
-  //constexpr bool is_special_case = args_count == 1 && (std::is_same_v<std::string_view, first_argument> || std::is_same_v<std::string, first_argument>);
-  //constexpr bool change_scope_function = uftype == user_function_type::object && args_count == 0;
   using ret_type = std::remove_cvref_t<utils::function_result_type<F>>;
-  //constexpr auto ret_type_name = utils::type_name<ret_type>();
 
-  if (scr->source.empty()) raise_error(std::format("script source is empty????"));
+  if (scr->source.empty()) raise_error(std::format("script source is empty"));
 
   std::string_view name = token;
   if (name == "__empty_lvalue") name = ctx->function_names.back();
@@ -366,7 +370,6 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
   const bool is_effect = utils::is_void_v<ret_type>;
   const bool has_return = !utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>;
 
-  //const auto curfname = ctx->function_names.back();
   if (!check_is_str_part_of(scr->source, name)) {
     const auto id = find_basicf(name);
     if (id == basicf::invalid) raise_error(std::format("Function name '{}' could not easily store at description struct, use another method", name));
@@ -377,8 +380,6 @@ void system::setup_description(parse_ctx* ctx, container* scr, const std::string
     );
     scr->descs.emplace_back(desc);
   } else {
-    //if (!fargs.empty()) check_is_str_part_of_and_throw(scr->source, fargs);
-
     const size_t fname_start = name.data() - scr->source.data();
     const size_t fname_size = name.size();
 
@@ -464,11 +465,9 @@ void system::register_function(std::string name, std::vector<std::string> func_a
     constexpr auto uftype = get_user_function_type<F>();
     constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
     using first_argument = final_stack_el_t<utils::function_argument_type<F, first_argument_index>>;
-    //constexpr size_t function_args_count = args_count;
     constexpr bool unlimited_args = args_count == 2 &&
       std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_argument_type<F, first_argument_index + 1>>>&&
       std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_result_type<F>>>;
-      //&& std::is_fundamental_v<utils::function_argument_type<F, first_argument_index>>; // more types?
     constexpr auto stn = scope_type_name<scope_type>();
     const auto curfname = ctx->function_names.back();
 
@@ -477,17 +476,8 @@ void system::register_function(std::string name, std::vector<std::string> func_a
     if (!utils::is_void_v<scope_type> && !ctx->is_scope<scope_type>())
       sys->raise_error(std::format("Trying to call function '{}' in wrong scope context: {} != {}", curfname, ctx->current_scope_type(), stn));
 
-    // standart function when '!init_f' ?
     if (!init_f) {
       size_t curpos = scr->descs.size();
-
-      // useless checking
-      /*if (type_is_object(ctx->expected_type) && !type_is_any_type_object(ctx->expected_type) && !type_is_any_type(ctx->expected_type)) {
-        if (ctx->expected_type != utils::type_name<ret_type>()) sys->raise_error(std::format("Expected type '{}' is not same as return type '{}'", ctx->expected_type, utils::type_name<ret_type>()));
-      }*/
-
-      //if (type_is_string(ctx->expected_type) && !type_is_string(utils::type_name<ret_type>()))
-      //  sys->raise_error(std::format("Expected type '{}' is not same as return type '{}'", ctx->expected_type, utils::type_name<ret_type>()));
 
       if constexpr (!unlimited_args) {
         if (args_count != 0 && args.args_count() > args_count) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
@@ -538,11 +528,9 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         sys->apply_call_stack_effect<ret_type>(ctx, args_count);
         const size_t stack_size = stack_size_with_args - args_count; // size after consuming args, before the result push
         if constexpr (uftype == user_function_type::object) {
-          // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
-          // parse scope block AFTER the scope function 
-          // after parsing there are 2 types of scope functions - with argument and without
-          // when no argument provided we can use dispatch_node
-          // bad design?
+          // Scope-returning functions may be followed by a nested block. If the function
+          // consumed no explicit args, the whole block belongs to the new scope; otherwise
+          // only the remaining child range is compiled in that scope.
           if (offset < args.size() && offset == 1) { // no args
             ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
             constexpr bool supports_nullable = !utils::is_void_v<ret_type> && !std::is_same_v<ret_type, ignore_value> && !is_typeless_v<ret_type>;
@@ -583,15 +571,12 @@ void system::register_function(std::string name, std::vector<std::string> func_a
           }
         }
 
-        // no value?
         if (stack_size == ctx->stack_types.size()) ctx->push<ignore_value>();
       }
 
       for (const auto i : jumps) { scr->cmds[i].arg = scr->cmds.size(); }
     } else std::invoke(init_f, e, args, func_args_names);
 
-      
-    // additional checks?
     return args.size();
   };
 
@@ -601,13 +586,11 @@ void system::register_function(std::string name, std::vector<std::string> func_a
   constexpr bool requires_scope = !utils::is_void_v<scope_type>;
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
-  //constexpr auto uftype = get_user_function_type<F>();
   constexpr auto parse_ftype = command_data::ftype::function_t;
   constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
   constexpr bool unlimited_args = args_count == 2 &&
     std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_argument_type<F, first_argument_index + 1>>>&&
     std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_result_type<F>>>;
-  //&& std::is_fundamental_v<utils::function_argument_type<F, first_argument_index>>;
 
   constexpr auto stn = scope_type_name<scope_type>();
 
@@ -665,19 +648,15 @@ void system::register_operator(std::string name, const operator_props& ps, custo
   using first_argument = final_stack_el_t<utils::function_argument_type<F, first_argument_index>>;
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
   constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
-  //constexpr size_t function_args_count = args_count;
   constexpr auto parse_ftype = command_data::ftype::operator_t;
   constexpr bool unlimited_args = args_count == 2 &&
     std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_argument_type<F, first_argument_index + 1>>>&&
     std::is_same_v<std::remove_cvref_t<utils::function_argument_type<F, first_argument_index>>, std::remove_cvref_t<utils::function_result_type<F>>>;
-    //std::is_fundamental_v<utils::function_argument_type<F, first_argument_index>>;
 
   constexpr auto stn = scope_type_name<scope_type>();
 
   static_assert(args_count == 1 || args_count == 2, "Operators must have only 1 or 2 arguments");
   static_assert(!utils::is_void_v<ret_type> && !std::is_same_v<ret_type, ignore_value>, "Operators must have a proper return value");
-  // is args must be fundamental? i think not
-  // is args must be same type? probably not
 
   command_data mcd{
     name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
@@ -717,11 +696,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
           sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index, args.name(), curpos);
           sys->apply_call_stack_effect<ret_type>(ctx, args_count);
           if constexpr (uftype == user_function_type::object) {
-            // 'offset < args.size()' has more sense than 'ctx->ftype == function_type::lvalue'
-            // parse scope block AFTER the scope function 
-            // after parsing there are 2 types of scope functions - with argument and without
-            // when no argument provided we can use dispatch_node
-            // bad design?
+            // Scope-returning operators follow the same nested-block rules as functions.
             if (offset < args.size() && offset == 1) { // no args
               ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
               sys->fold_block(ctx, scr, args, basicf::invalid);
@@ -742,8 +717,6 @@ void system::register_operator(std::string name, const operator_props& ps, custo
         for (const auto i : jumps) { scr->cmds[i].arg = scr->cmds.size(); }
       } else std::invoke(init_f, e, args, std::vector<std::string>{});
 
-      
-      // additional checks?
       return args.size();
     },
     container::description_node_kind::operator_t
@@ -766,7 +739,6 @@ template<auto f, typename HT, is_valid_t<HT> vf>
 void system::register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
   using F = decltype(f);
   using scope_type = std::remove_cvref_t<HT>;
-  //constexpr auto uftype = get_user_function_type<F, utils::function_result_type<F>, true>();
   constexpr auto parse_ftype = command_data::ftype::function_t;
   using ret_type = final_stack_el_t<utils::function_result_type<F>>;
 
@@ -815,8 +787,6 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
           const size_t jump_index = sys->push_basic_function(ctx, scr, basicf::jump, 0);
           jumps.push_back(jump_index);
         });
-
-        //const size_t jump_end = sys->push_basic_function(ctx, scr, basicf::jump, 0); // is needed?
 
         size_t section_start = scr->cmds.size();
         utils::static_for<args_count>([&](auto index) {
@@ -973,16 +943,6 @@ container system::parse(std::string text) const {
   auto output = ctx.rpn_ctx.output;
   output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.root_block_name, cmds, output.size()+1 });
 
-  /*const auto print_block = [](const std::vector<system::rpn_conversion_ctx::block>& arr) {
-    for (const auto& b : arr) {
-      std::cout << std::format("({},{},{}) ", b.token, b.args_count, b.size);
-    }
-    std::cout << "\n";
-    std::cout << "size: " << arr.size() << "\n";
-  };
-
-  print_block(output);*/
-
   set_function_type sft(&ctx, function_type::lvalue);
 
   auto script_cmds = command_block(std::span<rpn_conversion_ctx::block>(output));
@@ -1018,26 +978,12 @@ container system::parse(std::string text) const {
 template <typename T>
 bool system::parse_context::is_scope() const {
   using basic_T = final_stack_el_t<T>;
-  /*if constexpr (std::is_pointer_v<basic_T>) {
-    using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
-    return current_scope_type() == utils::type_name<no_ptr_t*>() || current_scope_type() == utils::type_name<const no_ptr_t*>();
-  } else {
-    return current_scope_type() == utils::type_name<basic_T>();
-  }*/
-
   return current_scope_type() == scope_type_name<basic_T>();
 }
 
 template <typename T>
 bool system::parse_context::is() const {
   using basic_T = final_stack_el_t<T>;
-  //if constexpr (std::is_pointer_v<basic_T>) {
-  //  using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
-  //  return top() == utils::type_name<no_ptr_t*>() || top() == utils::type_name<const no_ptr_t*>();
-  //} else {
-  //  return top() == utils::type_name<basic_T>();
-  //}
-
   return top() == scope_type_name<basic_T>();
 }
 
@@ -1046,10 +992,8 @@ void system::parse_context::push() {
   using basic_T = final_stack_el_t<T>;
   constexpr auto stn = scope_type_name<basic_T>();
   push(stn);
-  //push(utils::type_name<basic_T>());
 }
 
-// not needed anymore?
 template <typename F, typename RT, bool is_iterator_func>
 constexpr system::user_function_type system::get_user_function_type() {
   using ret_type = script_stack_el_t<std::conditional_t<is_iterator_func, RT, utils::function_result_type<F>>>;

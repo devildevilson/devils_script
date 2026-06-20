@@ -3,7 +3,14 @@
 #include <cstdint>
 #include <cstddef>
 
-// http://prng.di.unimi.it/
+// Small deterministic PRNG helpers for script randomness.
+//
+// xoshiro256** is used for per-context random streams. The mix helpers derive stable
+// one-shot values from script seeds and numeric inputs; multi-value mixing intentionally
+// uses SplitMix/Murmur-style hashing instead of consuming several xoshiro outputs from
+// a freshly initialized state.
+//
+// Algorithms are based on the public-domain generators from http://prng.di.unimi.it/.
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

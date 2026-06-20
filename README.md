@@ -1,75 +1,118 @@
 # devils_script
-Script system similar to Paradox games scripts (CK3, EU4). While working on this I have completely forgot how Paradox lang is looks like. Thus the comma separator was born
 
-The only dependency is STL + doctest for tests, and **tavl** for container management.
+`devils_script` is a C++20 embeddable script system inspired by Paradox-style game scripts.
+It is designed for low-overhead calls into registered C++ functions, typed scope navigation,
+iterator blocks, and description/introspection of compiled script containers.
 
-Look example folder and tests for examples
+Dependencies:
+- C++20 standard library
+- [tavl](https://github.com/devildevilson/tavl) for parsing
+- [doctest](https://github.com/doctest/doctest) for tests only
 
-The language design specialy for:
-- sequence of c++ functions call
-- minimal call overhead
-- multithreading support
-- script description with names and values 
+See `examples/` and `tests/` for complete usage examples.
 
-## Usage
-Register any function with **devils_script**'s system's `register_function` call, you need provide function type and function pointer. The **devils_script** would try to find the function scope by its signature, but sometimes you need to help system and provide valid scope type. 
-Scope type T can be anything that 
-1) sizeof(T) <= 16
-2) T is trivially destructable
+## Building
 
-See tests/case1.cpp for handle type example
-
-For example:
+```sh
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DDS_BUILD_TESTS=ON -DDS_BUILD_EXAMPLES=ON
+cmake --build build-release --target devils_script_tests devils_script_benchs
+./build-release/devils_script_tests
+./build-release/devils_script_benchs
 ```
-int func1(int a, int b) { return a + b; }
-handle<character> liege(handle<character> cur) { return cur->liege; }
-int character::strength() { return this->strength; }
-double each_soldier(army* a, std::function<bool(soldier*)> filter, std::function<double(soldier*)> fn) {
-  double val = 0.0;
-  for (auto sold : army->soldiers) {
-	if (filter && !filter(sold)) continue;
-	val += fn(sold);
-  }
-  return val;
-}
 
-// ...
+For a debug build, use `-DCMAKE_BUILD_TYPE=Debug` and a separate build directory.
+
+## Basic Usage
+
+Register C++ functions in a `devils_script::system`, parse a script into a `container`,
+then execute that container with a `context`.
+
+```cpp
+int func1(int a, int b) { return a + b; }
+
+struct character {
+  int strength;
+  character* liege;
+};
+
+template <typename T>
+struct handle {
+  T* ptr;
+  size_t type;
+
+  T& operator*() const { return *ptr; }
+  bool valid() const { return ptr != nullptr; }
+};
+
+handle<character> liege(handle<character> cur) { return handle<character>{cur.ptr->liege, cur.type}; }
+int character_strength(handle<character> cur) { return cur.ptr->strength; }
 
 devils_script::system sys;
-sys.register_function<&func1>("func1"); // any scope
-sys.register_function<&liege>("liege"); // scope is handle<character>
-sys.register_function<&character::strength, handle<character>>("strength"); // tell script to use handle<character> as scope for this function
-sys.register_function_iter<&each_soldier>("each_soldier", { "filter", "value" }); // argument names is mandatory for iterators
+sys.init_basic_functions();
+sys.init_math();
+
+sys.register_function<&func1>("func1");
+sys.register_function<&liege>("liege");
+sys.register_function<&character_strength>("strength");
+
+auto script = sys.parse<double, handle<character>>("liege:strength + func1(1, 2)");
+
+devils_script::context ctx;
+ctx.set_arg(0, handle<character>{root, 0});
+script.process(&ctx);
+double result = ctx.get_return<double>();
 ```
 
-**!!!Important** **devils_script** ignores constness of pointers 
+Scope types are expected to be small, trivially destructible values. The built-in validity
+checks use common forms such as `valid()`, `is_valid()`, and `operator bool`; registration
+can also provide a custom validity predicate.
 
-## Main features
-1. Standart math functions and operators
-2. Standart language blocks: value_or, select, sequence, switch (not tested yet), random
-3. Make your own operators thru `register_operator`
-4. Toggle stack safety checks to better performance (actually does not provide outstanding boost, 10-15% faster I believe)
-5. Script containers have descriptions for every commands in it + reverse AST tree to generating descriptions (see example/desc.cpp)
-6. Script container fully copyable and movable
-7. Script context consists of stack, stack has types for each values on it
-8. Save and load any value in context
-9. Script arguments can be used in script and be overwritten with new value
-10. I made everything I can to register any arbitrary functions you can imagine, but for some logic you may need to provide custom init function
+`devils_script` intentionally ignores pointer constness when matching function signatures.
 
-## TODO:
-1. different functions depending on scope (+) (tests?)
-2. 'this' and 'prev' blocks fixes (+)
-3. assert (?)
-4. repair 'switch'
-5. better callable for iterators (subblock in common.h ?)
-6. another file for benchmark (+)
-7. container::make_table does not work (+-) (how to get a value after iterator function call?)
-8. better list design
-9. More examples and tests (wanna return here after I try to use it somewhere)
-10. benchmarks?
-11. instruments for debugging
-12. proper error descriptions - line numbers and context
-13. ???
+## Script Features
+
+- Typed function registration with automatic scope inference.
+- Scoped calls with `:` and dotted scope paths, for example `country.leader:age`.
+- Nullable scoped calls with `?=`, which skip invalid branches and return a typed default.
+- Prefix, postfix, binary, and literal custom operators through `register_operator`.
+- Arithmetic, comparison, boolean, trigonometric, and numeric builtins via `init_math()`.
+- Block forms such as `value_or`, `select`, `sequence`, `switch`, and weighted `random`.
+- Iterator registration with named subblocks through `register_function_iter`.
+- Context values through `ctx_save`, `ctx_save_as`, and `ctx:saved:name`.
+- Script arguments through `ctx:arg:name`, `ctx_set`, and `ctx_set_as`.
+- Context lists with add/filter/map/first/count/min/max style pipelines.
+- Static string tokens, quoted strings, enum literal parsing, and typed literal checks.
+- Debug helpers `assert` and `trace`.
+- Safe and unsafe opcode variants; `system::toggle_safety()` disables stack safety checks
+  for lower overhead after scripts are trusted.
+- Copyable and movable compiled `container` objects.
+
+## Description and Introspection
+
+Compiled containers can be traversed without normal execution through `container::describe`.
+Description entries expose node name, kind, nesting level, scope, value state, and partially
+evaluated values where available. This supports tooling such as UI descriptions, previews,
+debug views, and editor introspection.
+
+`container::make_table` remains available for the older node-view style traversal; tests keep
+it aligned with `describe`.
+
+## Benchmarks
+
+The standalone benchmark target is `devils_script_benchs`. It measures parse, execution,
+unsafe execution, and description traversal on the same scripted scenario used by the tests.
+
+```sh
+cmake --build build-release --target devils_script_benchs
+./build-release/devils_script_benchs
+```
+
+## Current Gaps
+
+- More real-world examples would help document intended patterns.
+- Error messages could still include richer source context.
+- Debugging/editor tooling is mostly exposed through primitives, not a finished tool.
 
 ## License
+
 MIT

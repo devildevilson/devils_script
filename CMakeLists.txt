@@ -6,7 +6,7 @@ if (POLICY CMP0141)
   set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
-project(devils_script)
+project(devils_script VERSION 1.0.0)
 
 enable_language(CXX)
 
@@ -36,7 +36,7 @@ target_compile_definitions(devils_script_options INTERFACE
 FetchContent_Declare(
   tavl
   GIT_REPOSITORY https://github.com/devildevilson/tavl.git
-  GIT_TAG        497e661dcdb4b9259138ab0b7355706725fde9d3
+  GIT_TAG        v1.0.0
 )
 
 FetchContent_MakeAvailable(tavl)

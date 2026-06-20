@@ -1,9 +1,11 @@
 .claude/
 .codex/
-build/
+build*
 build_linux/
 .vs/
 .aider*
+.kdev4/
 docs/
 .gitignore
 build_cov/
+devils_script.kdev4
