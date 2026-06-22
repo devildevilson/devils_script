@@ -364,6 +364,17 @@ void system::register_function(command_data data) {
   itr->second[std::string(data.expected_scope)] = std::move(data);
 }
 
+void system::reserve_from_hint(container* scr, const size_t block_count, const size_t token_bytes) const {
+  // ~one description node per block; cmds/locs run a bit higher (combinator folds, scope-chain
+  // erases, type conversions emit extra opcodes), so reserve ~1.5x. string_pool grows by at most
+  // the token-text bytes (the pool is deduplicated, so this is an upper bound).
+  scr->block_descs.reserve(scr->block_descs.size() + block_count);
+  const size_t cmd_hint = scr->cmds.size() + block_count + block_count / 2;
+  scr->cmds.reserve(cmd_hint);
+  scr->locs.reserve(cmd_hint);
+  scr->string_pool.reserve(scr->string_pool.size() + token_bytes);
+}
+
 void system::setup_block_description(
   parse_ctx* ctx,
   container* scr,
@@ -1217,6 +1228,8 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
 
     const std::string_view root_block = !ctx.root_block_name.empty() ? ctx.root_block_name : std::string_view("__effect_block");
     output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.rpn_ctx.store_token(root_block), output.size() + 1 });
+
+    reserve_from_hint(&c, output.size(), ctx.rpn_ctx.token_storage.size());
 
     command_block script_cmds{std::span<rpn_conversion_ctx::block>(output), &ctx.rpn_ctx.token_storage};
     {

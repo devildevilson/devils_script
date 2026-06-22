@@ -880,7 +880,7 @@ container system::parse(std::string_view name, std::string_view text) const {
   auto output = ctx.rpn_ctx.output;
   output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.rpn_ctx.store_token(ctx.root_block_name), output.size()+1 });
 
-  scr.string_pool.reserve(script_block.size());
+  reserve_from_hint(&scr, output.size(), ctx.rpn_ctx.token_storage.size());
 
   set_function_type sft(&ctx, function_type::lvalue);
 

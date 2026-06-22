@@ -459,6 +459,13 @@ public:
   template <typename RETURN_T, typename ROOT_T>
   std::tuple<tavl::event, tavl::error> parse(std::string_view name, tavl::parser& p, parse_context& ctx, container& c) const;
 
+  // Pre-reserves the container's growable storage from the normalized block stream (before
+  // codegen) to cut reallocations during compilation. Additive, so it also works correctly for
+  // streaming multi-batch parses. `block_count` is the number of rpn blocks, `token_bytes` the
+  // size of the token-text pool produced for this batch. Estimates are heuristic upper-ish
+  // bounds; shrink_to_fit trims any slack afterwards.
+  void reserve_from_hint(container* scr, const size_t block_count, const size_t token_bytes) const;
+
   void setup_block_description(
     parse_ctx* ctx,
     container* scr,
