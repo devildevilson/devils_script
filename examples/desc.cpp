@@ -98,7 +98,7 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
 namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 #endif
 
-bool print(const std::string_view& name, const std::string_view& desc, const size_t nest, const ds::any_stack& value, const ds::any_stack& scope) {
+bool print(const std::string_view& name, const std::string_view& /*desc*/, const size_t nest, const ds::any_stack& value, const ds::any_stack& scope) {
   for (size_t i = 0; i < nest; ++i) {
     std::cout << "  ";
   }

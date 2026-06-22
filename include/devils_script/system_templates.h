@@ -365,7 +365,7 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
 
 template <auto f, typename HT, is_valid_t<HT> vf>
   requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
-void system::emit_call_instruction(parse_ctx* ctx, container* scr, function_t safe, function_t unsafe, const int64_t scope_index) const {
+void system::emit_call_instruction(parse_ctx*, container* scr, function_t safe, function_t unsafe, const int64_t scope_index) const {
   scr->cmds.push_back(container::command(safety() ? safe : unsafe, scope_index));
 }
 
