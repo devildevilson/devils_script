@@ -15,7 +15,7 @@
 // Mutable runtime state for executing a compiled container.
 //
 // `context` owns three typed stacks: the transient VM stack, saved script values, and script
-// arguments. Compiled containers describe which saved/argument slots they use, while the
+// arguments. Compiled script containers describe which saved/argument slots they use, while the
 // context stores the actual values. That separation allows one compiled container to be
 // reused with many contexts.
 //
@@ -100,7 +100,7 @@ struct context {
   uint64_t prng_state;
   size_t current_index;
   void* userptr;
-  const container* current_script;
+  const script_container* current_script;
   std::function<void(const std::string&)> trace;
 
   any_stack _return_value;
@@ -157,7 +157,7 @@ struct context {
   inline std::string_view saved_type(const int64_t index) const { return saved_stack.type(index); }
   inline std::string_view return_type() const { return _return_value.type(); }
   inline void clear() { current_index = 0; stack.resize(0); }
-  void create_lists(const container* scr);
+  void create_lists(const script_container* scr);
 };
 
 inline context::stack_t::stack_t(const size_t max) noexcept : _size(0) { _data.resize(max); _types.resize(max); }

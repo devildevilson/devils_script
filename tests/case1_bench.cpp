@@ -185,14 +185,14 @@ int main() {
     char name[32];
     std::snprintf(name, sizeof(name), "script%zu parse", i + 1);
     bench(name, 10000, [&] {
-      const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+      const auto cont = sys.parse<double, handle<person>>("script", scripts[i]);
       return double(cont.cmds.size());
     });
   }
 
   std::printf("== execution ==\n");
   for (size_t i = 0; i < script_count; ++i) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[i]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
     ctx.create_lists(&cont);
@@ -209,7 +209,7 @@ int main() {
   std::printf("== execution (unsafe) ==\n");
   sys.toggle_safety(); // emit the unsafe opcode variants (no stack safety checks)
   for (size_t i = 0; i < script_count; ++i) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[i]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
     ctx.create_lists(&cont);
@@ -226,7 +226,7 @@ int main() {
 
   std::printf("== description ==\n");
   for (size_t i = 0; i < script_count; ++i) {
-    const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[i]);
     ds::context ctx;
     ctx.set_arg(0, p1h);
     ctx.create_lists(&cont);

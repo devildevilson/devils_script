@@ -168,11 +168,12 @@ template <typename T>
 using is_valid_t = decltype(&is_valid<T>);
 
 struct context;
+struct script_container;
 struct container;
-inline int64_t default_command_f(int64_t, context*, const container*) { return 0; }
+inline int64_t default_command_f(int64_t, context*, const script_container*) { return 0; }
 using function_t = decltype(&default_command_f);
 
-inline void assert_msg_fn(context*, const container*, const std::string_view&, const size_t) {}
+inline void assert_msg_fn(context*, const script_container*, const std::string_view&, const size_t) {}
 using assert_fn_t = decltype(&assert_msg_fn);
 
 constexpr std::string_view custom_description_constant = "custom_description";
@@ -395,6 +396,10 @@ enum class basicf {
 
 std::string_view to_string(const basicf val) noexcept;
 basicf find_basicf(const std::string_view &str) noexcept;
+// Reverse lookup of a basic instruction by its execution function pointer (safe or unsafe
+// variant). Used by disassembly/description to recover an opcode name without storing it.
+// Returns basicf::invalid for user-function / conversion thunks that are not basic ops.
+basicf find_basicf_by_fp(function_t fp) noexcept;
 
 template <typename T1, typename T2> requires(is_typeless_v<T1> && is_typeless_v<T2>)
 bool operator==(const T1& s1, const T2& s2) noexcept;
@@ -404,12 +409,12 @@ bool operator!=(const T1& s1, const T2& s2) noexcept;
 template <typename RT, typename IN>
 class subblock {
 public:
-  subblock(context* ctx, const container* scr, const size_t start, const size_t end) noexcept;
+  subblock(context* ctx, const script_container* scr, const size_t start, const size_t end) noexcept;
   RT operator() (const IN& in) const;
   bool valid() const noexcept;
 private:
   context* ctx;
-  const container* scr;
+  const script_container* scr;
   size_t start;
   size_t end;
 };

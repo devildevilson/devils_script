@@ -13,7 +13,7 @@ namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 
 namespace {
 
-void check_script_arg_type(const int64_t arg, const context* ctx, const container* scr) {
+void check_script_arg_type(const int64_t arg, const context* ctx, const script_container* scr) {
   if (scr == nullptr || arg < 0 || static_cast<size_t>(arg) >= scr->args.size()) return;
 
   const auto expected = scr->args[static_cast<size_t>(arg)].type;
@@ -35,15 +35,14 @@ static constexpr int64_t make_mask(const size_t count) {
   return val;
 }
 
-int64_t packstrid(const uint8_t global_index, const uint32_t pos, const uint32_t size) noexcept {
-  return (int64_t(global_index) << (packed_pos_bit_size + packed_size_bit_size)) | (int64_t(pos) << packed_size_bit_size) | (int64_t(size));
+int64_t packstrid(const uint32_t pos, const uint32_t size) noexcept {
+  return (int64_t(pos) << packed_size_bit_size) | (int64_t(size));
 }
 
-std::tuple<uint8_t, uint32_t, uint32_t> unpackstrid(const int64_t value) noexcept {
-  constexpr int64_t index_mask = make_mask(sizeof(uint8_t) * CHAR_BIT);
+std::tuple<uint32_t, uint32_t> unpackstrid(const int64_t value) noexcept {
   constexpr int64_t pos_mask = make_mask(packed_pos_bit_size);
   constexpr int64_t size_mask = make_mask(packed_size_bit_size);
-  return std::make_tuple(uint8_t((value >> (packed_pos_bit_size + packed_size_bit_size)) & index_mask), uint32_t((value >> packed_size_bit_size) & pos_mask), uint32_t((value) & size_mask));
+  return std::make_tuple(uint32_t((value >> packed_size_bit_size) & pos_mask), uint32_t((value) & size_mask));
 }
 
 int64_t pack2(const int32_t val1, const int32_t val2) noexcept {
@@ -68,7 +67,7 @@ bool check_value(const int64_t val, const size_t bits) noexcept {
   return (val & index_mask) == 0;
 }
 
-int64_t andjump(int64_t arg, context* ctx, const container*) {
+int64_t andjump(int64_t arg, context* ctx, const script_container*) {
   const bool b2 = ctx->stack.safe_pop<bool>();
   const bool b1 = ctx->stack.safe_pop<bool>();
   const bool res = b1 && b2;
@@ -77,7 +76,7 @@ int64_t andjump(int64_t arg, context* ctx, const container*) {
   return -1;
 }
 
-int64_t orjump(int64_t arg, context* ctx, const container*) {
+int64_t orjump(int64_t arg, context* ctx, const script_container*) {
   const bool b2 = ctx->stack.safe_pop<bool>();
   const bool b1 = ctx->stack.safe_pop<bool>();
   const bool res = b1 || b2;
@@ -86,25 +85,25 @@ int64_t orjump(int64_t arg, context* ctx, const container*) {
   return -1;
 }
 
-int64_t condjump(int64_t arg, context* ctx, const container*) {
+int64_t condjump(int64_t arg, context* ctx, const script_container*) {
   const bool b = ctx->stack.safe_pop<bool>();
   if (!b) ctx->current_index = arg - 1;
   return -1;
 }
 
-int64_t condjump_get(int64_t arg, context* ctx, const container*) {
+int64_t condjump_get(int64_t arg, context* ctx, const script_container*) {
   const bool b = ctx->stack.safe_get<bool>();
   if (!b) ctx->current_index = arg - 1;
   return 0;
 }
 
-int64_t condjumpt_get(int64_t arg, context* ctx, const container*) {
+int64_t condjumpt_get(int64_t arg, context* ctx, const script_container*) {
   const bool b = ctx->stack.safe_get<bool>();
   if (b) ctx->current_index = arg - 1;
   return 0;
 }
 
-int64_t andjump_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t andjump_unsafe(int64_t arg, context* ctx, const script_container*) {
   const bool b2 = ctx->stack.pop<bool>();
   const bool b1 = ctx->stack.pop<bool>();
   const bool res = b1 && b2;
@@ -113,7 +112,7 @@ int64_t andjump_unsafe(int64_t arg, context* ctx, const container*) {
   return -1;
 }
 
-int64_t orjump_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t orjump_unsafe(int64_t arg, context* ctx, const script_container*) {
   const bool b2 = ctx->stack.pop<bool>();
   const bool b1 = ctx->stack.pop<bool>();
   const bool res = b1 || b2;
@@ -122,30 +121,30 @@ int64_t orjump_unsafe(int64_t arg, context* ctx, const container*) {
   return -1;
 }
 
-int64_t condjump_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t condjump_unsafe(int64_t arg, context* ctx, const script_container*) {
   const bool b = ctx->stack.pop<bool>();
   if (!b) ctx->current_index = arg - 1;
   return -1;
 }
 
-int64_t condjump_get_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t condjump_get_unsafe(int64_t arg, context* ctx, const script_container*) {
   const bool b = ctx->stack.get<bool>();
   if (!b) ctx->current_index = arg - 1;
   return 0;
 }
 
-int64_t condjumpt_get_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t condjumpt_get_unsafe(int64_t arg, context* ctx, const script_container*) {
   const bool b = ctx->stack.get<bool>();
   if (b) ctx->current_index = arg - 1;
   return 0;
 }
 
-int64_t jump(int64_t arg, context* ctx, const container*) {
+int64_t jump(int64_t arg, context* ctx, const script_container*) {
   ctx->current_index = arg - 1;
   return 0;
 }
 
-int64_t jumpinvalid(int64_t arg, context* ctx, const container*) {
+int64_t jumpinvalid(int64_t arg, context* ctx, const script_container*) {
   if (ctx->stack.invalid(-1)) {
     ctx->stack.erase();
     ctx->current_index = arg - 1;
@@ -154,52 +153,52 @@ int64_t jumpinvalid(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t andbin(int64_t, context* ctx, const container*) {
+int64_t andbin(int64_t, context* ctx, const script_container*) {
   const bool n2 = ctx->stack.safe_pop<bool>();
   const bool n1 = ctx->stack.safe_pop<bool>();
   ctx->stack.push(n1 && n2);
   return -1;
 }
 
-int64_t invb(int64_t, context* ctx, const container*) {
+int64_t invb(int64_t, context* ctx, const script_container*) {
   const bool b = ctx->stack.safe_pop<bool>();
   ctx->stack.push(!b);
   return 0;
 }
 
-int64_t sum(int64_t, context* ctx, const container*) {
+int64_t sum(int64_t, context* ctx, const script_container*) {
   const double n2 = ctx->stack.safe_pop<double>();
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(n1 + n2);
   return -1;
 }
 
-int64_t mul(int64_t, context* ctx, const container*) {
+int64_t mul(int64_t, context* ctx, const script_container*) {
   const double n2 = ctx->stack.safe_pop<double>();
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(n1 * n2);
   return -1;
 }
 
-int64_t neg(int64_t, context* ctx, const container*) {
+int64_t neg(int64_t, context* ctx, const script_container*) {
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(-n1);
   return 0;
 }
 
-int64_t pos(int64_t, context* ctx, const container*) {
+int64_t pos(int64_t, context* ctx, const script_container*) {
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(+n1);
   return 0;
 }
 
-int64_t invd(int64_t, context* ctx, const container*) {
+int64_t invd(int64_t, context* ctx, const script_container*) {
   const double n1 = ctx->stack.safe_pop<double>();
   ctx->stack.push(1.0 / n1);
   return 0;
 }
 
-int64_t cmpeq2(int64_t arg, context* ctx, const container*) {
+int64_t cmpeq2(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto &v1 = ctx->stack.get_view(id1);
   const auto &v2 = ctx->stack.get_view(id2);
@@ -213,7 +212,7 @@ int64_t cmpeq2(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-int64_t cmplessd2(int64_t arg, context* ctx, const container*) {
+int64_t cmplessd2(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
@@ -221,7 +220,7 @@ int64_t cmplessd2(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-int64_t cmplesseqd2(int64_t arg, context* ctx, const container*) {
+int64_t cmplesseqd2(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
@@ -229,7 +228,7 @@ int64_t cmplesseqd2(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-int64_t sumsetstack(int64_t arg, context* ctx, const container*) {
+int64_t sumsetstack(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
@@ -237,7 +236,7 @@ int64_t sumsetstack(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t mulsetstack(int64_t arg, context* ctx, const container*) {
+int64_t mulsetstack(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
@@ -245,52 +244,52 @@ int64_t mulsetstack(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t andbin_unsafe(int64_t, context* ctx, const container*) {
+int64_t andbin_unsafe(int64_t, context* ctx, const script_container*) {
   const bool n2 = ctx->stack.pop<bool>();
   const bool n1 = ctx->stack.pop<bool>();
   ctx->stack.push(n1 && n2);
   return -1;
 }
 
-int64_t invb_unsafe(int64_t, context* ctx, const container*) {
+int64_t invb_unsafe(int64_t, context* ctx, const script_container*) {
   const bool b = ctx->stack.pop<bool>();
   ctx->stack.push(!b);
   return 0;
 }
 
-int64_t sum_unsafe(int64_t, context* ctx, const container*) {
+int64_t sum_unsafe(int64_t, context* ctx, const script_container*) {
   const double n2 = ctx->stack.pop<double>();
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(n1 + n2);
   return -1;
 }
 
-int64_t mul_unsafe(int64_t, context* ctx, const container*) {
+int64_t mul_unsafe(int64_t, context* ctx, const script_container*) {
   const double n2 = ctx->stack.pop<double>();
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(n1 * n2);
   return -1;
 }
 
-int64_t neg_unsafe(int64_t, context* ctx, const container*) {
+int64_t neg_unsafe(int64_t, context* ctx, const script_container*) {
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(-n1);
   return 0;
 }
 
-int64_t pos_unsafe(int64_t, context* ctx, const container*) {
+int64_t pos_unsafe(int64_t, context* ctx, const script_container*) {
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(+n1);
   return 0;
 }
 
-int64_t invd_unsafe(int64_t, context* ctx, const container*) {
+int64_t invd_unsafe(int64_t, context* ctx, const script_container*) {
   const double n1 = ctx->stack.pop<double>();
   ctx->stack.push(1.0 / n1);
   return 0;
 }
 
-int64_t cmpeq2_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t cmpeq2_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.get_view(id1);
   const auto& v2 = ctx->stack.get_view(id2);
@@ -304,7 +303,7 @@ int64_t cmpeq2_unsafe(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-int64_t cmplessd2_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t cmplessd2_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
@@ -312,7 +311,7 @@ int64_t cmplessd2_unsafe(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-int64_t cmplesseqd2_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t cmplesseqd2_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
@@ -320,7 +319,7 @@ int64_t cmplesseqd2_unsafe(int64_t arg, context* ctx, const container*) {
   return 1;
 }
 
-int64_t sumsetstack_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t sumsetstack_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
@@ -328,7 +327,7 @@ int64_t sumsetstack_unsafe(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t mulsetstack_unsafe(int64_t arg, context* ctx, const container*) {
+int64_t mulsetstack_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
@@ -336,49 +335,49 @@ int64_t mulsetstack_unsafe(int64_t arg, context* ctx, const container*) {
   return 0;
 }
 
-int64_t pushbool(int64_t arg, context* ctx, const container*) {
+int64_t pushbool(int64_t arg, context* ctx, const script_container*) {
   ctx->stack.push(bool(arg));
   return 1;
 }
 
-int64_t pushvalue(int64_t arg, context* ctx, const container*) {
+int64_t pushvalue(int64_t arg, context* ctx, const script_container*) {
   ctx->stack.push(std::bit_cast<double>(arg));
   return 1;
 }
 
-int64_t pushint(int64_t arg, context* ctx, const container*) {
+int64_t pushint(int64_t arg, context* ctx, const script_container*) {
   ctx->stack.push(arg);
   return 1;
 }
 
-int64_t pushstring(int64_t arg, context* ctx, const container* scr) {
-  const auto [global_index, pos, size] = unpackstrid(arg);
-  const auto str = scr->get_string(container::command_description::global_string_view{ pos, size, global_index });
+int64_t pushstring(int64_t arg, context* ctx, const script_container* scr) {
+  const auto [pos, size] = unpackstrid(arg);
+  const auto str = scr->get_string(script_container::string_ref{ pos, size });
   ctx->stack.push(str);
   return 1;
 }
 
-int64_t pushroot(int64_t, context* ctx, const container*) {
+int64_t pushroot(int64_t, context* ctx, const script_container*) {
   check_script_arg_type(0, ctx, ctx->current_script);
   ctx->stack.push(ctx->safe_get_arg<any_stack>(0));
   return 1;
 }
 
-int64_t pushthis(int64_t arg, context* ctx, const container*) {
+int64_t pushthis(int64_t arg, context* ctx, const script_container*) {
   const auto& el = ctx->stack.element(arg);
   const auto type = ctx->stack.type(arg);
   ctx->stack.push(type, el);
   return 1;
 }
 
-int64_t pushprev(int64_t arg, context* ctx, const container*) {
+int64_t pushprev(int64_t arg, context* ctx, const script_container*) {
   const auto& el = ctx->stack.element(arg);
   const auto type = ctx->stack.type(arg);
   ctx->stack.push(type, el);
   return 1;
 }
 
-int64_t pushreturn(int64_t, context* ctx, const container*) {
+int64_t pushreturn(int64_t, context* ctx, const script_container*) {
   const auto &el = ctx->stack.element();
   const auto type = ctx->stack.type();
   ctx->stack.erase();
@@ -386,28 +385,28 @@ int64_t pushreturn(int64_t, context* ctx, const container*) {
   return 0;
 }
 
-int64_t pusharg(int64_t, context*, const container*) {
+int64_t pusharg(int64_t, context*, const script_container*) {
   return 1;
 }
 
-int64_t pushinvalid(int64_t, context* ctx, const container*) {
+int64_t pushinvalid(int64_t, context* ctx, const script_container*) {
   stack_element el;
   el.invalidate();
   ctx->stack.push(std::string_view(), el);
   return 1;
 }
 
-int64_t erase(int64_t arg, context* ctx, const container*) {
+int64_t erase(int64_t arg, context* ctx, const script_container*) {
   ctx->stack.erase(arg);
   return -1;
 }
 
-int64_t pushcurrent(int64_t, context* ctx, const container*) {
+int64_t pushcurrent(int64_t, context* ctx, const script_container*) {
   ctx->stack.push(ctx->stack.get_view());
   return 1;
 }
 
-int64_t pushchance(int64_t arg, context* ctx, const container* scr) {
+int64_t pushchance(int64_t arg, context* ctx, const script_container* scr) {
   const auto state = std::bit_cast<uint64_t>(arg);
   const auto val = prng::mix(ctx->prng_state, state, scr->prng_state);
   const double norm = prng::prng_normalize(val);
@@ -415,64 +414,64 @@ int64_t pushchance(int64_t arg, context* ctx, const container* scr) {
   return 1;
 }
 
-int64_t pushargcontext(int64_t, context* ctx, const container* scr) {
+int64_t pushargcontext(int64_t, context* ctx, const script_container* scr) {
   ctx->stack.push(internal::thisarg{ ctx, scr });
   return 1;
 }
 
-int64_t pushcontext(int64_t, context* ctx, const container*) {
+int64_t pushcontext(int64_t, context* ctx, const script_container*) {
   ctx->stack.push(internal::thisctx{ ctx });
   return 1;
 }
 
-int64_t pushargvalue(int64_t arg, context* ctx, const container* scr) {
+int64_t pushargvalue(int64_t arg, context* ctx, const script_container* scr) {
   check_script_arg_type(arg, ctx, scr);
   ctx->stack.push(ctx->get_arg<any_stack>(arg));
   return 1;
 }
 
-int64_t setargrvalue(int64_t arg, context* ctx, const container*) {
+int64_t setargrvalue(int64_t arg, context* ctx, const script_container*) {
   ctx->set_arg(arg, ctx->stack.pop<any_stack>());
   return -1;
 }
 
-int64_t setarglvalue(int64_t arg, context* ctx, const container*) {
+int64_t setarglvalue(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   ctx->set_arg(id2, ctx->stack.get<any_stack>(id1));
   return 0;
 }
 
-int64_t pushctxvalue(int64_t arg, context* ctx, const container*) {
+int64_t pushctxvalue(int64_t arg, context* ctx, const script_container*) {
   ctx->stack.push(ctx->get_saved<any_stack>(arg));
   return 1;
 }
 
-int64_t savectxrvalue(int64_t arg, context* ctx, const container*) {
+int64_t savectxrvalue(int64_t arg, context* ctx, const script_container*) {
   ctx->set_saved(arg, ctx->stack.pop<any_stack>());
   return -1;
 }
 
-int64_t savectxlvalue(int64_t arg, context* ctx, const container*) {
+int64_t savectxlvalue(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
   ctx->set_saved(id2, ctx->stack.get<any_stack>(id1));
   return 0;
 }
 
-int64_t pushlist(int64_t arg, context* ctx, const container*) {
+int64_t pushlist(int64_t arg, context* ctx, const script_container*) {
   ctx->stack.push(internal::thisctxlist{ ctx, size_t(arg) });
   return 1;
 }
 
 namespace {
 template <typename T>
-T run_list_callback(context* ctx, const container* scr, const size_t start, const size_t end, const std::string_view& type, const stack_element& input) {
+T run_list_callback(context* ctx, const script_container* scr, const size_t start, const size_t end, const std::string_view& type, const stack_element& input) {
   ctx->stack.push(type, input);
   container_view v(scr, start, end);
   v.process(ctx);
   return ctx->stack.safe_pop<T>();
 }
 
-any_stack run_default_callback(context* ctx, const container* scr, const size_t start, const size_t end) {
+any_stack run_default_callback(context* ctx, const script_container* scr, const size_t start, const size_t end) {
   container_view v(scr, start, end);
   v.process(ctx);
   return ctx->stack.safe_pop<any_stack>();
@@ -485,7 +484,7 @@ void push_any_to_list(std::vector<stack_element>& list, const any_stack& val) {
 }
 }
 
-int64_t list_pipeline(int64_t arg, context* ctx, const container* scr) {
+int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
   const auto& op = scr->list_pipeline_ops[size_t(arg)];
   auto& list = ctx->lists[op.list_index];
   const auto type = scr->lists[op.list_index].type;

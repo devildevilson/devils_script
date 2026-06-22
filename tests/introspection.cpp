@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 #include "devils_script/system.h"
 
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -105,6 +106,10 @@ static bool collect(std::string& out, const std::string_view& name, const size_t
   return true;
 }
 
+static bool has_text(const std::string& str, const std::string_view text) {
+  return str.find(text) != std::string::npos;
+}
+
 TEST_CASE("Description golden (partial evaluation)") {
   person p1{ "Mary", 20, 5, nullptr, nullptr };
   person p2{ "Alaska", 13, 2, nullptr, nullptr };
@@ -163,7 +168,7 @@ TEST_CASE("Description golden (partial evaluation)") {
   sys.register_function_iter<&each_notable_person>("each_notable_person", { "filter", "value" });
 
   const auto run = [&](const std::string& script) {
-    const auto cont = sys.parse<double, handle<person>>(script);
+    const auto cont = sys.parse<double, handle<person>>("script", script);
     ds::context ctx;
     ctx.set_arg(0, p1h);
     ctx.clear();
@@ -175,7 +180,7 @@ TEST_CASE("Description golden (partial evaluation)") {
   };
 
   const auto run_legacy = [&](const std::string& script) {
-    const auto cont = sys.parse<double, handle<person>>(script);
+    const auto cont = sys.parse<double, handle<person>>("script", script);
     ds::context ctx;
     ctx.set_arg(0, p1h);
     ctx.clear();
@@ -191,6 +196,53 @@ TEST_CASE("Description golden (partial evaluation)") {
   SUBCASE("legacy make_table matches describe") {
     const std::string script = "country = { each_city = { value = population } }";
     CHECK(run_legacy(script) == run(script));
+  }
+
+  SUBCASE("every description string resolves from the compact pool") {
+    // After dropping the raw source and the globals table, all description text must round-trip
+    // through the single `string_pool`. Walk every block_description / command name and assert
+    // each non-sentinel reference resolves to a non-empty range inside the pool.
+    const std::string script = "country = { each_city = { value = population } }";
+    const auto cont = sys.parse<double, handle<person>>("script", script);
+
+    using ref_t = ds::script_container::string_ref;
+    const auto is_empty_ref = [](const ref_t& r) { return r.start == SIZE_MAX && r.count == SIZE_MAX; };
+    const auto check_ref = [&](const ref_t& r) {
+      if (is_empty_ref(r)) return;                 // {SIZE_MAX, SIZE_MAX} == "no name" sentinel
+      const auto text = cont.get_string(r);
+      CHECK_FALSE(text.empty());
+      if (r.count != SIZE_MAX) {                   // offset ref (not a basicf opcode id): must lie in the pool
+        CHECK(r.start + r.count <= cont.string_pool.size());
+        CHECK(std::string_view(cont.string_pool).substr(r.start, r.count) == text);
+      }
+    };
+
+    REQUIRE(!cont.block_descs.empty());
+    for (const auto& d : cont.block_descs) { check_ref(d.name); check_ref(d.custom_description); }
+    for (const auto& n : cont.command_names) check_ref(n);
+
+    // ...and describe surfaces every expected named node, each resolved from the pool.
+    ds::context ctx;
+    ctx.set_arg(0, p1h);
+    ctx.clear();
+    std::set<std::string> names;
+    cont.describe(&ctx, [&](const ds::container::description_entry& entry) { names.insert(std::string(entry.name)); });
+    for (const std::string_view expected : { "country", "each_city", "value", "population" })
+      CHECK(names.count(std::string(expected)) == 1);
+  }
+
+  SUBCASE("registered functions dump includes signatures and iterator metadata") {
+    const std::string dump = sys.dump_registered_functions();
+
+    CHECK(has_text(dump, "registered functions: "));
+    CHECK(has_text(dump, "function 'population' scope='"));
+    CHECK(has_text(dump, "function 'each_city' scope='"));
+    CHECK(has_text(dump, "returns='double'"));
+    CHECK(has_text(dump, "kind=iterator"));
+    CHECK(has_text(dump, "signature='"));
+    CHECK(has_text(dump, "signature='double ("));
+    CHECK(has_text(dump, "signature='int ("));
+    CHECK(has_text(dump, "operator '+'"));
   }
 
   SUBCASE("scope path") {

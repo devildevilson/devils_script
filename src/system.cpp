@@ -6,6 +6,7 @@
 #include <cassert>
 #include <optional>
 #include <cstring>
+#include <vector>
 #include "devils_script/string-utils.hpp"
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
@@ -49,9 +50,29 @@ bool any_stack::invalid() const { return memcmp(_mem, invalid_memory, MAXIMUM_ST
 std::string_view any_stack::type() const { return _type; }
 stack_element::view any_stack::view() const { return stack_element::view(_mem, type()); }
 
-void context::create_lists(const container* scr) {
+void context::create_lists(const script_container* scr) {
   lists.clear();
   lists.resize(scr->lists.size());
+}
+
+static size_t rpn_block_direct_child_count(const system::rpn_conversion_ctx::block* data, const size_t size) {
+  if (data == nullptr || size == 0) return 0;
+
+  using kind = system::rpn_conversion_ctx::block_kind;
+  switch (data[0].kind) {
+    case kind::scope_path: return 0;
+    case kind::scope_path_call: return size > 1 ? 1 : 0;
+    case kind::node:
+    case kind::string_literal:
+    case kind::nullable_call:
+    case kind::braced_call:
+    case kind::nullable_braced_call:
+      break;
+  }
+
+  size_t count = 0;
+  for (size_t i = 1; i < size; i += data[i].size) count += 1;
+  return count;
 }
 
 const std::string_view basicf_names[] = {
@@ -182,6 +203,10 @@ bool is_in_ignore_list(const std::string_view& str) noexcept {
 system::nest_level_changer::nest_level_changer(parse_ctx* ctx) noexcept : ctx(ctx) { ctx->nest_level += 1; }
 system::nest_level_changer::~nest_level_changer() noexcept { ctx->nest_level -= 1; }
 
+system::source_position_changer::source_position_changer(parse_ctx* ctx, const size_t line, const size_t column) noexcept :
+  ctx(ctx), prev_line(ctx->source_line), prev_column(ctx->source_column) { ctx->source_line = line; ctx->source_column = column; }
+system::source_position_changer::~source_position_changer() noexcept { ctx->source_line = prev_line; ctx->source_column = prev_column; }
+
 system::function_name_changer::function_name_changer(parse_ctx* ctx, const std::string_view& str) noexcept : ctx(ctx) { ctx->push_func(str);  }
 system::function_name_changer::~function_name_changer() noexcept { ctx->pop_func(); }
 
@@ -216,6 +241,81 @@ void system::raise_warning(const std::string& msg) const { warning(msg); }
 uint64_t system::get_seed() const { return seed; }
 void system::reseed(const uint64_t val) { seed = val; }
 uint64_t system::parse_context::gen_value() { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
+
+static std::string_view command_data_ftype_name(const system::command_data::ftype t) noexcept {
+  using ftype = system::command_data::ftype;
+  switch (t) {
+    case ftype::operator_t: return "operator";
+    case ftype::function_t: return "function";
+    case ftype::invalid: return "invalid";
+  }
+  return "invalid";
+}
+
+static std::string_view command_data_assoc_name(const system::command_data::associativity a) noexcept {
+  using associativity = system::command_data::associativity;
+  switch (a) {
+    case associativity::left: return "left";
+    case associativity::right: return "right";
+  }
+  return "right";
+}
+
+static std::string_view description_kind_name(const container::description_node_kind k) noexcept {
+  using kind = container::description_node_kind;
+  switch (k) {
+    case kind::unknown: return "unknown";
+    case kind::literal: return "literal";
+    case kind::function: return "function";
+    case kind::effect: return "effect";
+    case kind::operator_t: return "operator";
+    case kind::iterator: return "iterator";
+    case kind::block: return "block";
+    case kind::argument: return "argument";
+    case kind::scope: return "scope";
+    case kind::control_flow: return "control_flow";
+    case kind::conversion: return "conversion";
+    case kind::instruction: return "instruction";
+  }
+  return "unknown";
+}
+
+std::string system::dump_registered_functions() const {
+  std::vector<const command_data*> entries;
+  for (const auto& [name, overloads] : mfuncs) {
+    (void)name;
+    for (const auto& [scope, data] : overloads) {
+      (void)scope;
+      entries.push_back(&data);
+    }
+  }
+
+  std::sort(entries.begin(), entries.end(), [](const command_data* lhs, const command_data* rhs) {
+    if (lhs->name != rhs->name) return lhs->name < rhs->name;
+    if (lhs->expected_scope != rhs->expected_scope) return lhs->expected_scope < rhs->expected_scope;
+    if (lhs->type != rhs->type) return lhs->type < rhs->type;
+    return lhs->return_type < rhs->return_type;
+  });
+
+  std::string out;
+  out += std::format("registered functions: {}\n", entries.size());
+  for (const command_data* data : entries) {
+    out += std::format(
+      "{} '{}' scope='{}' returns='{}' args={} priority={} assoc={} kind={} signature='{}'\n",
+      command_data_ftype_name(data->type),
+      data->name,
+      data->expected_scope,
+      data->return_type,
+      data->arg_count,
+      data->priority,
+      command_data_assoc_name(data->assoc),
+      description_kind_name(data->description_kind),
+      data->function_signature
+    );
+  }
+
+  return out;
+}
 
 
 void system::scope_exit(parse_ctx* ctx, container* scr, const size_t count) const {
@@ -273,14 +373,15 @@ void system::setup_block_description(
   const size_t initial_cmd_start,
   const container::description_node_kind explicit_kind
 ) const {
-  using sv_t = container::command_description::global_string_view;
+  using sv_t = script_container::string_ref;
   sv_t tok{};
   sv_t cd{};
   auto kind = explicit_kind;
+  bool effect = false;   // set for void functions/iterators via the registry lookup below
 
   if (token == "__empty_lvalue") {
     tok = { SIZE_MAX, SIZE_MAX };
-  } else if (!check_is_str_part_of(scr->source, token)) {
+  } else {
     basicf id = basicf::invalid;
     if (token == "__object_block") id = basicf::object_block;
     else if (token == "__string_block") id = basicf::string_block;
@@ -288,18 +389,14 @@ void system::setup_block_description(
     else id = find_basicf(token);
     if (id == basicf::invalid) tok = store_string(scr, token);
     else tok = { static_cast<size_t>(id), SIZE_MAX };
-  } else {
-    tok = { size_t(token.data() - scr->source.data()), token.size(), 0 };
   }
 
   if (custom_desc.empty()) {
     cd = { SIZE_MAX, SIZE_MAX };
-  } else if (!check_is_str_part_of(scr->source, custom_desc)) {
+  } else {
     const basicf id = find_basicf(custom_desc);
     if (id == basicf::invalid) cd = store_string(scr, custom_desc);
     else cd = { static_cast<size_t>(id), SIZE_MAX };
-  } else {
-    cd = { size_t(custom_desc.data() - scr->source.data()), custom_desc.size(), 0 };
   }
 
   const int64_t scope_index = ctx->scope_stack.empty() ? -1 : ctx->scope_stack.back();
@@ -327,7 +424,10 @@ void system::setup_block_description(
       if (func != mfuncs.end()) {
         auto scope = func->second.find(std::string(ctx->current_scope_type()));
         if (scope == func->second.end()) scope = func->second.find(std::string(scope_type_name<void>()));
-        if (scope != func->second.end()) kind = scope->second.description_kind;
+        if (scope != func->second.end()) {
+          kind = scope->second.description_kind;
+          effect = type_is_void(scope->second.return_type);
+        }
       } else if (!token.empty()) {
         kind = container::description_node_kind::literal;
       }
@@ -335,7 +435,7 @@ void system::setup_block_description(
   }
 
   scr->block_descs.push_back({
-    tok, cd, size, 0, index, cmd_start, scr->cmds.size(), scope_index, ctx->description_placeholder_depth > 0, kind
+    tok, cd, size, 0, index, cmd_start, scr->cmds.size(), scope_index, ctx->description_placeholder_depth > 0, effect, kind
   });
 
   const size_t current_index = scr->block_descs.size() - 1;
@@ -351,6 +451,12 @@ void system::setup_block_description(
 
   scr->block_descs[current_index].args_count = counter;
   scr->block_descs[current_index].cmd_start = cmd_start;
+
+  // Stamp source positions for any commands emitted by this node that are not yet covered.
+  // Children describe themselves first, so this fills only the node's own trailing commands;
+  // build_description_index pads any stragglers (e.g. the final pushreturn) afterwards.
+  const script_container::src_loc loc{ static_cast<uint32_t>(ctx->source_line), static_cast<uint32_t>(ctx->source_column) };
+  if (scr->locs.size() < scr->cmds.size()) scr->locs.resize(scr->cmds.size(), loc);
 }
 
 namespace {
@@ -374,8 +480,8 @@ struct insn_info {
   function_t unsafe = nullptr;
   uint8_t   pops = 0;            // type-slots popped before the push
   push_kind pushes = push_kind::none;
-  bool      has_return = false;  // command_description flag (independent of the stack push)
-  uint8_t   arg_count = 0;       // command_description flag
+  bool      has_return = false;  // currently unused (was a command_description flag; left for the table's completeness)
+  uint8_t   arg_count = 0;       // currently unused (was a command_description flag)
 };
 
 constexpr size_t basicf_count = static_cast<size_t>(basicf::invalid) + 1;
@@ -432,6 +538,16 @@ constexpr auto insn_table = make_insn_table();
 
 }  // namespace
 
+basicf find_basicf_by_fp(function_t fp) noexcept {
+  if (fp == nullptr) return basicf::invalid;
+  for (size_t k = 0; k < basicf_count; ++k) {
+    if (insn_table[k].safe == fp || insn_table[k].unsafe == fp) return static_cast<basicf>(k);
+  }
+  // `jumpinvalid` is emitted for nullable object-block children but labelled as a condjump.
+  if (fp == &jumpinvalid) return basicf::condjump;
+  return basicf::invalid;
+}
+
 size_t system::push_basic_function(parse_ctx* ctx, container* scr, const basicf id, const int64_t arg) const {
   function_name_changer fnc(ctx, to_string(id));
 
@@ -459,14 +575,6 @@ size_t system::push_basic_function(parse_ctx* ctx, container* scr, const basicf 
     case push_kind::thisctxlist:   ctx->push<internal::thisctxlist>(); break;
   }
 
-  container::command_description desc(
-    { static_cast<size_t>(id), SIZE_MAX }, info.arg_count,
-    false, true, info.has_return, false, ctx->nest_level, SIZE_MAX
-  );
-  scr->descs.emplace_back(desc);
-
-  if (scr->cmds.size() != scr->descs.size()) raise_error(std::format("Unconsistent descriptions {} != {}", scr->cmds.size(), scr->descs.size()));
-
   return scr->cmds.size()-1;
 }
 
@@ -480,35 +588,42 @@ void system::emitter::bind(label& l) const {
   for (const size_t site : l.sites) scr->cmds[site].arg = target;
 }
 
-// Strings that point into `container::source` are stored as source spans; generated strings
-// are interned in `container::globals`.
-bool check_is_str_part_of(const std::string_view& big_str, const std::string_view& small_str) noexcept {
-  return (big_str.data() <= small_str.data()) && (big_str.data() + big_str.size() >= small_str.data() + small_str.size());
-}
-
 size_t system::push_string(parse_ctx* ctx, container* scr, const std::string_view& str) const {
   const auto stored = store_string(scr, str);
-  push_basic_function(ctx, scr, basicf::pushstring, packstrid(stored.global, stored.start, stored.count));
+  push_basic_function(ctx, scr, basicf::pushstring, packstrid(uint32_t(stored.start), uint32_t(stored.count)));
   return 1;
 }
 
-auto system::store_string(container* scr, const std::string_view& str) const -> container::command_description::global_string_view {
-  using sv_t = container::command_description::global_string_view;
-  if (!scr->source.empty() && check_is_str_part_of(scr->source, str)) {
-    const size_t pos = str.data() - scr->source.data();
-    if (!check_value(pos, packed_pos_bit_size)) raise_error(std::format("String '{}' position in script string cannot be packed in {} bits", str, packed_pos_bit_size));
-    if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bits", str, packed_size_bit_size));
-    return sv_t{ pos, str.size(), 0 };
-  }
+auto system::store_string(container* scr, const std::string_view& str) const -> script_container::string_ref {
+  using sv_t = script_container::string_ref;
+  if (str.empty()) return sv_t{ 0, 0 };
 
-  for (size_t i = 0; i < scr->globals.size(); ++i) {
-    if (scr->globals[i] == str) return sv_t{ 0, str.size(), static_cast<uint8_t>(i + 1) };
-  }
+  // The container keeps a single contiguous, deduplicated string pool (`scr->string_pool`). Reuse
+  // an existing byte range when the text already appears in the pool, otherwise append it; the
+  // result is always an (offset, size) reference into the pool.
+  // NOTE: dedup is a linear `find` per call (O(pool * str)); fine for typical scripts, but a
+  // hash index keyed by text -> offset would cut it to O(str) if it ever shows up in profiles.
+  if (!check_value(str.size(), packed_size_bit_size))
+    raise_error(std::format("String '{}' size in script string cannot be packed in {} bits", str, packed_size_bit_size));
 
-  if (scr->globals.size() >= UINT8_MAX - 1) raise_error(std::format("Script would store global string index in 8bit value, too many global strings"));
-  if (!check_value(str.size(), packed_size_bit_size)) raise_error(std::format("String '{}' size in script string cannot be packed in {} bits", str, packed_size_bit_size));
-  scr->globals.emplace_back(str);
-  return sv_t{ 0, str.size(), static_cast<uint8_t>(scr->globals.size()) };
+  size_t pos = scr->string_pool.find(str.data(), 0, str.size());
+  if (pos == std::string::npos) {
+    pos = scr->string_pool.size();
+    if (!check_value(pos, packed_pos_bit_size)) raise_error(std::format("String '{}' position in script string pool cannot be packed in {} bits", str, packed_pos_bit_size));
+    scr->string_pool.append(str);
+  } else if (!check_value(pos, packed_pos_bit_size)) {
+    raise_error(std::format("String '{}' position in script string pool cannot be packed in {} bits", str, packed_pos_bit_size));
+  }
+  return sv_t{ pos, str.size() };
+}
+
+void system::compact_source_storage(container* scr) const {
+  if (scr == nullptr) return;
+
+  // `store_string` builds `scr->string_pool` as a deduplicated, append-only pool, so every
+  // reference already points at the minimal set of live bytes — there is nothing to intern away.
+  // Just release the spare capacity left by reservation/append growth.
+  scr->string_pool.shrink_to_fit();
 }
 
 std::string_view system::static_string_arg(const command_block& block, const std::string_view& name) const {
@@ -662,6 +777,8 @@ std::optional<const_value> try_eval_const(const system::command_block& block) {
 size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& override_lvalue) const {
   if (block.empty()) return 0;
 
+  source_position_changer spc(ctx, block.line(), block.column());
+
   const auto exp_t = ctx->expected_type;
   const bool any_type_expected = type_is_any_type(exp_t);
 
@@ -708,7 +825,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
 
       std::array<rpn_conversion_ctx::block, 16 * 3+1> arr;
       auto [local_fname, count] = ctx->rpn_ctx.convert_scope(funcname, arr.data(), arr.size());
-      funcname = local_fname;
+      funcname = ctx->rpn_ctx.token_text(local_fname);
 
       if (count == 0) {
         const auto& itr = mfuncs.find(std::string(block.name()));
@@ -724,7 +841,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
           return 1;
         } else if (itr == mfuncs.end() && exp_t == utils::type_name<std::string_view>()) {
           set_function_type sft(ctx, function_type::rvalue);
-          push_string(ctx, scr, block.data[0].token);
+          push_string(ctx, scr, block.name());
           setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
           return 1;
         } else if (itr == mfuncs.end() && any_type_expected) {
@@ -748,17 +865,17 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
         return count;
       }
 
-      if (!local_fname.empty()) {
-        for (size_t i = 0; i < count; i += arr[i].args_count+1) {
+      if (local_fname.offset != SIZE_MAX) {
+        for (size_t i = 0; i < count; i += rpn_block_direct_child_count(arr.data() + i, count - i) + 1) {
           arr[i].size += 1;
         }
 
-        arr[count] = rpn_conversion_ctx::block{ local_fname, 0, 1 };
+        arr[count] = rpn_conversion_ctx::block{ local_fname, 1 };
         count += 1;
       }
       
       bool has_invalid_func_name = false;
-      command_block cb(std::span(arr.data(), count));
+      command_block cb(std::span(arr.data(), count), &ctx->rpn_ctx.token_storage);
       if (any_type_expected) {
         size_t curindex = 1;
         while (curindex < cb.size() && !has_invalid_func_name) {
@@ -901,9 +1018,6 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
       if (child.nullable()) {
         scr->cmds.push_back(container::command(&jumpinvalid, INT64_C(0)));
-        scr->descs.emplace_back(container::command_description(
-          { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
-        ));
         e.mark(skip_child, scr->cmds.size() - 1);
       }
 
@@ -948,9 +1062,6 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
       if (child.nullable()) {
         scr->cmds.push_back(container::command(&jumpinvalid, INT64_C(0)));
-        scr->descs.emplace_back(container::command_description(
-          { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
-        ));
         e.mark(skip_child, scr->cmds.size() - 1);
       }
 
@@ -1012,9 +1123,6 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     if (child.nullable() && (curid == basicf::string_block || curid == basicf::string_subblock || curid == basicf::object_subblock)) {
       auto skip_invalid = e.make_label();
       scr->cmds.push_back(container::command(&jumpinvalid, INT64_C(0)));
-      scr->descs.emplace_back(container::command_description(
-        { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
-      ));
       e.mark(skip_invalid, scr->cmds.size() - 1);
       e.bind(skip_invalid);
     }
@@ -1051,11 +1159,6 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
   return block.size();
 }
 
-void system::check_is_str_part_of_and_throw(const std::string_view& big_str, const std::string_view& small_str) const {
-  if (!(big_str.data() <= small_str.data() && big_str.data() + big_str.size() >= small_str.data() + small_str.size())) 
-    raise_error(std::format("'{}' is not part of script string? ( {} {} | {} {} )", small_str, std::bit_cast<size_t>(big_str.data()), std::bit_cast<size_t>(big_str.data() + big_str.size()), std::bit_cast<size_t>(small_str.data()), std::bit_cast<size_t>(small_str.data() + small_str.size())));
-}
-
 void system::configure_parser(tavl::parser& p) const {
   p.clear_operators();
   // structural call operators — not registered in mfuncs; lowest precedence, right-assoc.
@@ -1088,32 +1191,34 @@ void system::configure_parser(tavl::parser& p) const {
   }
 }
 
-std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_context& ctx, container& c) const {
+std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::parser& p, parse_context& ctx, container& c) const {
   if (!ctx.initialized) raise_error("parse_context is not initialized");
+  if (c.name.count == 0 && c.name.start == 0) c.name = store_string(&c, name);
 
   auto [ev, err] = make_script_ast(p, ctx.script_ast_ctx, ctx.script_ast_nodes);
   if (ev.type == tavl::event_type::not_enought_data || ctx.script_ast_nodes.empty()) return {ev, err};
   if (!err.no_error()) return {ev, err};
 
-  if (c.source.empty()) {
-    const size_t storage_end = p.storage.size();
-    const size_t live_size = p.storage.buffer_size();
-    const size_t released_size = storage_end - live_size;
-    const auto live_src = p.content(tavl::source_span{released_size, live_size, 1, 1});
-    std::string src(released_size, ' ');
-    src.append(live_src);
-    c.source = std::move(src);
-  }
+  // Reconstruct this batch's raw source into a local (padding keeps tavl spans at absolute
+  // offsets). It feeds normalize only; the container's `c.string_pool` is the compact token pool
+  // that `store_string` accumulates across calls, never the raw text.
+  const size_t storage_end = p.storage.size();
+  const size_t live_size = p.storage.buffer_size();
+  const size_t released_size = storage_end - live_size;
+  const auto live_src = p.content(tavl::source_span{released_size, live_size, 1, 1});
+  std::string raw_src(released_size, ' ');
+  raw_src.append(live_src);
 
   try {
-    const size_t cmds = ctx.rpn_ctx.normalize(ctx.script_ast_nodes, std::string_view(c.source));
+    ctx.rpn_ctx.token_storage.reserve(raw_src.size() + 4096);
+    ctx.rpn_ctx.normalize(ctx.script_ast_nodes, std::string_view(raw_src));
     auto output = ctx.rpn_ctx.output;
     ctx.script_ast_nodes.clear();
 
     const std::string_view root_block = !ctx.root_block_name.empty() ? ctx.root_block_name : std::string_view("__effect_block");
-    output.emplace(output.begin(), rpn_conversion_ctx::block{ root_block, cmds, output.size() + 1 });
+    output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.rpn_ctx.store_token(root_block), output.size() + 1 });
 
-    command_block script_cmds{std::span<rpn_conversion_ctx::block>(output)};
+    command_block script_cmds{std::span<rpn_conversion_ctx::block>(output), &ctx.rpn_ctx.token_storage};
     {
       set_expected_type set(&ctx, ctx.return_type);
       dispatch_node(&ctx, &c, script_cmds);
@@ -1170,23 +1275,8 @@ std::tuple<int32_t, int32_t, system::command_data::associativity, system::comman
   return std::make_tuple(it->second.priority, args_count, it->second.assoc, it->second.type);
 }
 
-size_t system::patch_prev_functions_descriptions(container* scr, const size_t start) const {
-  if (scr->descs.size() == 0) return 0;
-
-  size_t counter = 0;
-  const size_t last_index = scr->cmds.size()-1;
-  for (size_t i = start; i < scr->descs.size()-1; ++i) {
-    if (scr->descs[i].parent == SIZE_MAX) {
-      scr->descs[i].parent = last_index;
-      counter += 1;
-    }
-  }
-
-  return counter;
-}
-
 system::parse_context::parse_context() noexcept :
-  ftype(function_type::lvalue), nest_level(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0), initialized(false)
+  ftype(function_type::lvalue), nest_level(0), source_line(0), source_column(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0), initialized(false)
 {}
 
 bool system::parse_context::is_func_subblock() const {

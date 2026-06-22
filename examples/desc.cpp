@@ -174,11 +174,11 @@ int main() {
   sys.register_function_iter<&each_city>("each_city", { "value" });
   sys.register_function_iter<&each_notable_person>("each_notable_person", { "filter", "value" });
 
-  const auto cont1 = sys.parse<double, handle<person>>(scripts[0]);
-  const auto cont2 = sys.parse<double, handle<person>>(scripts[1]);
-  const auto cont3 = sys.parse<double, handle<person>>(scripts[2]);
-  const auto cont4 = sys.parse<double, handle<person>>(scripts[3]);
-  const auto cont5 = sys.parse<double, handle<person>>(scripts[4]);
+  const auto cont1 = sys.parse<double, handle<person>>("script", scripts[0]);
+  const auto cont2 = sys.parse<double, handle<person>>("script", scripts[1]);
+  const auto cont3 = sys.parse<double, handle<person>>("script", scripts[2]);
+  const auto cont4 = sys.parse<double, handle<person>>("script", scripts[3]);
+  const auto cont5 = sys.parse<double, handle<person>>("script", scripts[4]);
 
   ds::context ctx;
   ctx.set_arg(0, p1h);

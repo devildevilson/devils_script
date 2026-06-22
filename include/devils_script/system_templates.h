@@ -351,52 +351,6 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   return block.size();
 }
 
-template<auto f, typename HT, is_valid_t<HT> vf>
-  requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
-void system::setup_description(parse_ctx* ctx, container* scr, const std::string_view& token) const {
-  using F = decltype(f);
-  constexpr bool is_not_member_func = is_not_member_function<F>;
-  using scope_type = HT;
-  constexpr bool requires_scope = !utils::is_void_v<scope_type>;
-  constexpr size_t sig_args_count = utils::function_arguments_count<F>;
-  constexpr size_t args_count = sig_args_count - size_t(requires_scope && is_not_member_func);
-  using ret_type = std::remove_cvref_t<utils::function_result_type<F>>;
-
-  if (scr->source.empty()) raise_error(std::format("script source is empty"));
-
-  std::string_view name = token;
-  if (name == "__empty_lvalue") name = ctx->function_names.back();
-
-  const bool is_effect = utils::is_void_v<ret_type>;
-  const bool has_return = !utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>;
-
-  if (!check_is_str_part_of(scr->source, name)) {
-    const auto id = find_basicf(name);
-    if (id == basicf::invalid) raise_error(std::format("Function name '{}' could not easily store at description struct, use another method", name));
-
-    container::command_description desc(
-      { static_cast<size_t>(id), SIZE_MAX }, args_count,
-      requires_scope, is_not_member_func, has_return, is_effect, ctx->nest_level, SIZE_MAX
-    );
-    scr->descs.emplace_back(desc);
-  } else {
-    const size_t fname_start = name.data() - scr->source.data();
-    const size_t fname_size = name.size();
-
-    container::command_description desc(
-      { fname_start, fname_size }, args_count,
-      requires_scope, is_not_member_func, has_return, is_effect, ctx->nest_level, SIZE_MAX
-    );
-    scr->descs.emplace_back(desc);
-  }
-
-  if (scr->descs.size() != scr->cmds.size())
-    raise_error(std::format("After parsing function '{}' script description array size {} and commands array size {} are not equal", token, scr->descs.size(), scr->cmds.size()));
-
-  if (scr->get_string(scr->descs.back().name.start, scr->descs.back().name.count) != name)
-    raise_error(std::format("After parsing function '{}' script last description '{}' is not same as command name '{}'", token, scr->get_string(scr->descs.back().name.start, scr->descs.back().name.count), token));
-}
-
 template <typename FROM, typename TO>
 void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
   if (std::is_same_v<FROM, TO>) return;
@@ -405,22 +359,14 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
   const function_t fs[] = { &convert_unsafe<FROM, TO>, &convert<FROM, TO> };
   scr->cmds.push_back(container::command(fs[size_t(safety())], INT64_C(0)));
 
-  container::command_description desc(
-    { static_cast<size_t>(basicf::conversion), SIZE_MAX},
-    1, false, true, true, false, ctx->nest_level, SIZE_MAX
-  );
-  scr->descs.emplace_back(desc);
-
   if (!ctx->is<FROM>()) raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", ctx->stack_types.back(), utils::type_name<std::remove_cvref_t<FROM>>()));
   ctx->stack_types.back() = utils::type_name<final_stack_el_t<TO>>();
 }
 
 template <auto f, typename HT, is_valid_t<HT> vf>
   requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
-void system::emit_call_instruction(parse_ctx* ctx, container* scr, function_t safe, function_t unsafe, const int64_t scope_index, const std::string_view& name, const size_t patch_from) const {
+void system::emit_call_instruction(parse_ctx* ctx, container* scr, function_t safe, function_t unsafe, const int64_t scope_index) const {
   scr->cmds.push_back(container::command(safety() ? safe : unsafe, scope_index));
-  setup_description<f, HT, vf>(ctx, scr, name);
-  patch_prev_functions_descriptions(scr, patch_from);
 }
 
 template <typename RetT>
@@ -477,8 +423,6 @@ void system::register_function(std::string name, std::vector<std::string> func_a
       sys->raise_error(std::format("Trying to call function '{}' in wrong scope context: {} != {}", curfname, ctx->current_scope_type(), stn));
 
     if (!init_f) {
-      size_t curpos = scr->descs.size();
-
       if constexpr (!unlimited_args) {
         if (args_count != 0 && args.args_count() > args_count) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
       }
@@ -503,9 +447,8 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
           if (index == 0) return;
 
-          sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index, args.name(), curpos);
+          sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
           sys->apply_call_stack_effect<ret_type>(ctx, 2);
-          curpos = scr->cmds.size();
         });
 
         ctx->unlimited_func_index = prev_index;
@@ -513,7 +456,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         size_t offset = 1;
         offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, func_args_names);
         const size_t stack_size_with_args = ctx->stack_types.size();
-        sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index, args.name(), curpos);
+        sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
 
         if constexpr (std::is_same_v<scope_type, internal::thisctxlist>) {
           if (ctx->list_index_upvalue == SIZE_MAX) sys->raise_error(std::format("Trying to use list function '{}' without list context on stack", curfname));
@@ -540,9 +483,6 @@ void system::register_function(std::string name, std::vector<std::string> func_a
               constexpr function_t guard = &detail::nullable_scope_guard<ret_type, &is_valid<ret_type>>;
               const int32_t mode = type_is_bool(ctx->expected_type) ? 1 : (type_is_fundamental(ctx->expected_type) ? 2 : 0);
               scr->cmds.push_back(container::command(guard, pack2(0, mode)));
-              scr->descs.emplace_back(container::command_description(
-                { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
-              ));
             }
             sys->fold_block(ctx, scr, args, basicf::invalid);
             sys->scope_exit(ctx, scr, 1);
@@ -557,9 +497,6 @@ void system::register_function(std::string name, std::vector<std::string> func_a
               constexpr function_t guard = &detail::nullable_scope_guard<ret_type, &is_valid<ret_type>>;
               const int32_t mode = type_is_bool(ctx->expected_type) ? 1 : (type_is_fundamental(ctx->expected_type) ? 2 : 0);
               scr->cmds.push_back(container::command(guard, pack2(0, mode)));
-              scr->descs.emplace_back(container::command_description(
-                { static_cast<size_t>(basicf::condjump), SIZE_MAX }, 0, false, true, false, false, ctx->nest_level, SIZE_MAX
-              ));
             }
             sys->dispatch_node(ctx, scr, remaining);
             sys->scope_exit(ctx, scr, 1);
@@ -681,19 +618,16 @@ void system::register_operator(std::string name, const operator_props& ps, custo
 
         std::vector<size_t> jumps;
         if constexpr (unlimited_args) {
-          size_t curpos = scr->cmds.size();
           sys->parse_args<first_argument>(ctx, scr, args, 1, 0, {}, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
             if (index == 0) return;
 
-            sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index, args.name(), curpos);
+            sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index);
             sys->apply_call_stack_effect<ret_type>(ctx, 2);
-            curpos = scr->cmds.size();
           });
         } else {
-          size_t curpos = scr->cmds.size();
           size_t offset = 1;
           offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, {});
-          sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index, args.name(), curpos);
+          sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index);
           sys->apply_call_stack_effect<ret_type>(ctx, args_count);
           if constexpr (uftype == user_function_type::object) {
             // Scope-returning operators follow the same nested-block rules as functions.
@@ -780,7 +714,6 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
       } else {
         constexpr function_t fs[] = { &useriter_unsafe<f, HT, vf>, &useriter<f, HT, vf> };
         scr->cmds.emplace_back(container::command(fs[size_t(sys->safety())], scope_index));
-        sys->setup_description<f, HT, vf>(ctx, scr, args.name());
 
         std::vector<size_t> jumps;
         utils::static_for<args_count>([&](auto) {
@@ -917,21 +850,23 @@ void system::parse_context::init(const system& sys, container& c) {
 }
 
 template <typename RETURN_T, typename ROOT_T>
-std::tuple<tavl::event, tavl::error> system::parse(tavl::parser& p, parse_context& ctx, container& c) const {
+std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::parser& p, parse_context& ctx, container& c) const {
   if (!ctx.initialized) ctx.init<RETURN_T, ROOT_T>(*this, c);
-  return parse(p, ctx, c);
+  return parse(name, p, ctx, c);
 }
 
 template <typename RETURN_T, typename ROOT_T>
-container system::parse(std::string text) const {
+container system::parse(std::string_view name, std::string_view text) const {
   using ret_type = script_stack_el_t<RETURN_T>;
   using root_type = final_stack_el_t<ROOT_T>;
 
   container scr;
   parse_context ctx;
-  scr.source = std::move(text);
   ctx.init<RETURN_T, ROOT_T>(*this, scr);
-  const auto script_block = std::string_view(scr.source);
+  scr.name = store_string(&scr, name);
+  // Raw source stays local: it only feeds normalize/make_script_ast. The container never retains
+  // it — `store_string` builds the compact `scr.source` token pool during the semantic pass.
+  const auto script_block = std::string_view(text);
 
   // Path N: tavl lexes/structures/precedences the script (make_script_ast); normalize() turns its
   // AST into the same rpn block stream the semantic pass consumes. Replaces the old text parser +
@@ -939,13 +874,17 @@ container system::parse(std::string text) const {
   tavl::parser tp;
   configure_parser(tp);
   const auto tree = make_script_ast(tp, script_block);
-  const size_t cmds = ctx.rpn_ctx.normalize(tree, script_block);
+  // Reserve before the walk so token text accumulates without reallocating mid-traversal.
+  ctx.rpn_ctx.token_storage.reserve(script_block.size() + 4096);
+  ctx.rpn_ctx.normalize(tree, script_block);
   auto output = ctx.rpn_ctx.output;
-  output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.root_block_name, cmds, output.size()+1 });
+  output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.rpn_ctx.store_token(ctx.root_block_name), output.size()+1 });
+
+  scr.string_pool.reserve(script_block.size());
 
   set_function_type sft(&ctx, function_type::lvalue);
 
-  auto script_cmds = command_block(std::span<rpn_conversion_ctx::block>(output));
+  auto script_cmds = command_block(std::span<rpn_conversion_ctx::block>(output), &ctx.rpn_ctx.token_storage);
 
   {
     set_expected_type set(&ctx, scope_type_name<ret_type>());
@@ -971,6 +910,7 @@ container system::parse(std::string text) const {
   if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
 
   scr.build_description_index();
+  compact_source_storage(&scr);
 
   return scr;
 }

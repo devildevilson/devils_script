@@ -171,26 +171,29 @@ static ignore_value remove_from(const thisctxlist& l, const any_stack& val) {
 static double chance() { return 1; }
 static any_stack randomfn(double, const element_view&) { return any_stack{}; }
 
-static size_t line_for_command(const context* ctx, const container* scr) {
-  if (scr == nullptr || ctx->current_index >= scr->descs.size()) return 0;
-  const auto name = scr->descs[ctx->current_index].name;
-  if (name.count == SIZE_MAX || name.global != 0 || scr->source.empty()) return 0;
+static size_t line_for_command(const context* ctx, const script_container* scr) {
+  if (scr == nullptr || ctx->current_index >= scr->command_names.size()) return 0;
+  const auto name = scr->command_names[ctx->current_index];
+  if (name.count == SIZE_MAX || scr->string_pool.empty()) return 0;
+  // NOTE: `string_pool` is the compact token pool, not the raw source — it carries no newline
+  // layout, so this can no longer reconstruct true line numbers (it degrades to 1). Preserving
+  // real line/column would mean storing them per command (a deliberate memory cost).
   size_t line = 1;
-  const size_t end = std::min(name.start, scr->source.size());
-  for (size_t i = 0; i < end; ++i) line += size_t(scr->source[i] == '\n');
+  const size_t end = std::min(name.start, scr->string_pool.size());
+  for (size_t i = 0; i < end; ++i) line += size_t(scr->string_pool[i] == '\n');
   return line;
 }
 
-static std::string debug_environment(const context* ctx, const container* scr, const size_t consumed_args) {
-  const auto fn = scr != nullptr && ctx->current_index < scr->descs.size()
-    ? scr->get_string(scr->descs[ctx->current_index].name)
+static std::string debug_environment(const context* ctx, const script_container* scr, const size_t consumed_args) {
+  const auto fn = scr != nullptr
+    ? scr->get_command_name(ctx->current_index)
     : std::string_view();
   const int64_t scope_index = int64_t(ctx->stack.size()) - int64_t(consumed_args) - 1;
   const auto scope = scope_index >= 0 ? ctx->stack.type(scope_index) : std::string_view();
   return std::format("line {}, function '{}', scope '{}'", line_for_command(ctx, scr), fn, scope);
 }
 
-static int64_t debug_assert(int64_t, context* ctx, const container* scr) {
+static int64_t debug_assert(int64_t, context* ctx, const script_container* scr) {
   const auto message = ctx->stack.safe_pop<std::string_view>();
   const bool condition = ctx->stack.safe_pop<bool>();
   if (!condition) {
@@ -199,7 +202,7 @@ static int64_t debug_assert(int64_t, context* ctx, const container* scr) {
   return -2;
 }
 
-static int64_t debug_trace(int64_t, context* ctx, const container* scr) {
+static int64_t debug_trace(int64_t, context* ctx, const script_container* scr) {
   const auto message = ctx->stack.safe_pop<std::string_view>();
   if (ctx->trace) ctx->trace(std::format("Script trace: '{}' ({})", message, debug_environment(ctx, scr, 1)));
   return -1;
@@ -249,7 +252,6 @@ void system::init_basic_functions() {
     if (offset < args.size()) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
 
     scr->cmds.emplace_back(&internal::debug_assert, INT64_C(0));
-    sys->setup_description<&internal::ctx_save, void, is_valid_t<void>(nullptr)>(ctx, scr, args.name());
     ctx->pop();
     ctx->pop();
     return args.size();
@@ -266,7 +268,6 @@ void system::init_basic_functions() {
     if (offset < args.size()) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
 
     scr->cmds.emplace_back(&internal::debug_trace, INT64_C(0));
-    sys->setup_description<&internal::ctx_save, void, is_valid_t<void>(nullptr)>(ctx, scr, args.name());
     ctx->pop();
     return args.size();
   });
@@ -436,8 +437,6 @@ void system::init_basic_functions() {
       if (first_type != second_type) sys->raise_error(std::format("Could not make an equality check on different types '{}' and '{}'", first_type, second_type));
       ADD_CMD(internal::raweq)(sys, scr);
     }
-
-    sys->setup_description<&internal::raweq, void, is_valid_t<void>(nullptr)>(ctx, scr, args.name());
 
     ctx->pop();
     ctx->pop();
@@ -780,12 +779,7 @@ void system::init_basic_functions() {
 
       size_t index = scr->find_saved(child.name());
       if (index >= scr->saved.size()) {
-        if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
-
-        const size_t fname_start = child.name().data() - scr->source.data();
-        const size_t fname_size = child.name().size();
-
-        scr->saved.push_back({ { fname_start, fname_size }, top });
+        scr->saved.push_back({ sys->store_string(scr, child.name()), top });
         index = scr->saved.size()-1;
       } else {
         scr->saved[index].type = top;
@@ -809,12 +803,7 @@ void system::init_basic_functions() {
     const auto type = ctx->stack_types[scope_index];
     size_t index = scr->find_saved(child.name());
     if (index >= scr->saved.size()) {
-      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
-
-      const size_t fname_start = child.name().data() - scr->source.data();
-      const size_t fname_size = child.name().size();
-
-      scr->saved.push_back({ { fname_start, fname_size }, type });
+      scr->saved.push_back({ sys->store_string(scr, child.name()), type });
       index = scr->saved.size()-1;
     } else {
         scr->saved[index].type = type;
@@ -838,12 +827,7 @@ void system::init_basic_functions() {
 
     size_t index = scr->find_arg(child.name());
     if (index >= scr->args.size()) {
-      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
-
-      const size_t fname_start = child.name().data() - scr->source.data();
-      const size_t fname_size = child.name().size();
-
-      scr->args.push_back({ { fname_start, fname_size }, exp_value });
+      scr->args.push_back({ sys->store_string(scr, child.name()), exp_value });
       index = scr->args.size()-1;
     } else {
       if (type_is_bool(scr->args[index].type) || type_is_fundamental(scr->args[index].type) || type_is_string(scr->args[index].type)) {
@@ -886,12 +870,7 @@ void system::init_basic_functions() {
 
       size_t index = scr->find_saved(child.name());
       if (index >= scr->args.size()) {
-        if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
-
-        const size_t fname_start = child.name().data() - scr->source.data();
-        const size_t fname_size = child.name().size();
-
-        scr->args.push_back({ { fname_start, fname_size }, top });
+        scr->args.push_back({ sys->store_string(scr, child.name()), top });
         index = scr->args.size()-1;
       } else {
         scr->args[index].type = top;
@@ -915,12 +894,7 @@ void system::init_basic_functions() {
     const auto type = ctx->stack_types[scope_index];
     size_t index = scr->find_saved(child.name());
     if (index >= scr->args.size()) {
-      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
-
-      const size_t fname_start = child.name().data() - scr->source.data();
-      const size_t fname_size = child.name().size();
-
-      scr->args.push_back({ { fname_start, fname_size }, type });
+      scr->args.push_back({ sys->store_string(scr, child.name()), type });
       index = scr->args.size() - 1;
     } else {
       scr->args[index].type = type;
@@ -939,12 +913,7 @@ void system::init_basic_functions() {
 
     size_t index = scr->find_list(child.name());
     if (index >= scr->lists.size()) {
-      if (!check_is_str_part_of(scr->source, child.name())) sys->raise_error(std::format("'{}' is not a part of original script string", child.name()));
-
-      const size_t fname_start = child.name().data() - scr->source.data();
-      const size_t fname_size = child.name().size();
-
-      scr->lists.push_back({ { fname_start, fname_size }, std::string_view() });
+      scr->lists.push_back({ sys->store_string(scr, child.name()), std::string_view() });
       index = scr->lists.size()-1;
     } else {}
 
@@ -1016,13 +985,6 @@ void system::init_basic_functions() {
 
       auto direct_body = [](const command_block& op) {
         return op.size() > 1 ? command_block(op, 1) : command_block();
-      };
-
-      auto emit_desc = [&](const command_block& op, const bool has_return) {
-        using sv_t = container::command_description::global_string_view;
-        sv_t name{ static_cast<size_t>(basicf::invalid), SIZE_MAX };
-        if (check_is_str_part_of(scr->source, op.name())) name = { size_t(op.name().data() - scr->source.data()), op.name().size() };
-        scr->descs.emplace_back(name, 1, true, true, has_return, false, ctx->nest_level, SIZE_MAX);
       };
 
       auto compile_value_section = [&](const command_block& body, const std::string_view expected) {
@@ -1110,7 +1072,6 @@ void system::init_basic_functions() {
         const size_t meta_index = scr->list_pipeline_ops.size();
         scr->list_pipeline_ops.push_back(meta);
         scr->cmds.emplace_back(container::command(&list_pipeline, int64_t(meta_index)));
-        emit_desc(op, is_reducer(kind));
 
         if (kind == container::list_pipeline_kind::add_to) {
           const auto [s, en, result_type] = compile_default_section(direct_body(op), utils::type_name<any_stack>());

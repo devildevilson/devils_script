@@ -157,7 +157,7 @@ TEST_CASE("Real usage 1") {
   sys.register_function_iter<&each_notable_person>("each_notable_person", { "filter", "value" });
 
   SUBCASE("script1") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[0]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[0]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
     cont.process(&ctx);
@@ -166,7 +166,7 @@ TEST_CASE("Real usage 1") {
   }
 
   SUBCASE("script2") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[1]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[1]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
     cont.process(&ctx);
@@ -175,7 +175,7 @@ TEST_CASE("Real usage 1") {
   }
 
   SUBCASE("script3") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[2]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[2]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
     cont.process(&ctx);
@@ -184,7 +184,7 @@ TEST_CASE("Real usage 1") {
   }
 
   SUBCASE("script4") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[3]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[3]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
     cont.process(&ctx);
@@ -193,7 +193,7 @@ TEST_CASE("Real usage 1") {
   }
 
   SUBCASE("script5") {
-    const auto cont = sys.parse<double, handle<person>>(scripts[4]);
+    const auto cont = sys.parse<double, handle<person>>("script", scripts[4]);
     ds::context ctx;
     ctx.set_arg(0, p1h); // set root
     cont.process(&ctx);
@@ -217,7 +217,7 @@ TEST_CASE("Real usage 1") {
 
     for (size_t i = 0; i < 5; ++i) {
       CAPTURE(i);
-      const auto cont = sys.parse<double, handle<person>>(scripts[i]);
+      const auto cont = sys.parse<double, handle<person>>("script", scripts[i]);
       ds::context ctx;
       ctx.set_arg(0, p1h);
       ctx.create_lists(&cont);

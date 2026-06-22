@@ -41,11 +41,14 @@ struct node_view {
   bool traverse(const container* scr, const fn_t &fn);
 };
 
-struct container {
-  using local_stack_element = std::tuple<std::string_view, stack_element>;
-  using description_output_t = std::function<void(const container*, const size_t, const local_stack_element&, const std::span<local_stack_element>&)>;
+struct script_container {
+  struct string_ref { size_t start, count; };
 
-  struct command { 
+  // Source position of the construct that emitted a command, kept 1:1 with `cmds`.
+  // Survives strip_description so runtime error messages can report `script '<name>' @ L:C`.
+  struct src_loc { uint32_t line, column; };
+
+  struct command {
     function_t fp; 
     int64_t arg; 
 
@@ -54,85 +57,9 @@ struct container {
     explicit command(function_t fp, double arg) noexcept;
     explicit command(function_t fp, int64_t arg) noexcept;
   };
-  
-  // Description metadata for one emitted command.
-  struct command_description {
-    struct global_string_view { size_t start, count; uint8_t global = 0; };
-
-    global_string_view name;
-    uint32_t argument_count;
-    bool requires_scope;
-    bool is_not_member_function;
-    bool has_return;
-    bool effect;
-    size_t nest_level;
-    size_t parent;
-
-    command_description() noexcept;
-    command_description(
-      const global_string_view &name,
-      uint32_t argument_count,
-      bool requires_scope,
-      bool is_not_member_function,
-      bool has_return,
-      bool effect,
-      size_t nest_level,
-      size_t parent
-    ) noexcept;
-  };
-
-  enum class description_node_kind {
-    unknown,
-    literal,
-    function,
-    effect,
-    operator_t,
-    iterator,
-    block,
-    argument,
-    scope,
-    control_flow,
-    conversion,
-    instruction
-  };
-
-  // Structural description node. The tree is stored in prefix order like command_block,
-  // but each node references the command range that evaluates it.
-  struct block_description {
-    command_description::global_string_view name;
-    command_description::global_string_view custom_description;
-    size_t size;
-    size_t args_count;
-    size_t cmd_index;
-    size_t cmd_start;
-    size_t cmd_end;
-    int64_t scope_index;
-    bool placeholder;
-    description_node_kind kind;
-  };
-
-  enum class description_value_state {
-    unavailable,
-    value,
-    placeholder
-  };
-
-  struct description_entry {
-    size_t node;
-    std::string_view name;
-    std::string_view custom_description;
-    size_t nest_level;
-    description_node_kind kind;
-    description_value_state state;
-    any_stack value;
-    any_stack scope;
-    std::string error;
-  };
-
-  using description_callback_t = std::function<void(const description_entry&)>;
 
   struct argument_data {
-    command_description::global_string_view name;
+    string_ref name;
     std::string_view type;
   };
 
@@ -169,26 +96,25 @@ struct container {
   uint64_t prng_state;
 
   std::vector<command> cmds;
-  std::vector<command_description> descs;
-  std::vector<block_description> block_descs;
-  std::vector<size_t> description_cmd_index_offsets;
-  std::vector<size_t> description_cmd_index_nodes;
-
-  std::string source;
-  std::vector<std::string> globals;
+  std::vector<src_loc> locs;
   std::vector<argument_data> args;
   std::vector<argument_data> saved;
   std::vector<argument_data> lists;
   std::vector<list_pipeline_op> list_pipeline_ops;
+  std::string string_pool;
+  std::vector<string_ref> command_names;
+  string_ref name{};
 
-  container() noexcept;
+  script_container() noexcept;
   void process(context* ctx) const;
-  void make_table(context* ctx, std::vector<std::tuple<any_stack, any_stack>> &table) const;
-  void make_table(context* ctx, node_view& viewer) const;
-  void build_description_index();
-  void describe(context* ctx, const description_callback_t& fn) const;
+  void shrink_to_fit();
   std::string_view get_string(const size_t start, const size_t count) const;
-  std::string_view get_string(const command_description::global_string_view& str) const;
+  std::string_view get_string(const string_ref& str) const;
+  std::string_view get_name() const;
+  std::string_view get_command_name(const size_t index) const;
+  // Throws std::runtime_error prefixed with `script '<name>' @ <line>:<column>: ` using the
+  // source position of the command at ctx->current_index. Used by runtime command handlers.
+  [[noreturn]] void error_at(const context* ctx, const std::string_view& msg) const;
   size_t find_arg(const std::string_view &name) const;
   std::string_view get_arg_name(const size_t index) const;
   size_t find_saved(const std::string_view& name) const;
@@ -197,13 +123,93 @@ struct container {
   std::string_view get_list_name(const size_t index) const;
 };
 
+struct container : public script_container {
+  using local_stack_element = std::tuple<std::string_view, stack_element>;
+  using description_output_t = std::function<void(const container*, const size_t, const local_stack_element&, const std::span<local_stack_element>&)>;
+  using command = script_container::command;
+  using argument_data = script_container::argument_data;
+  using list_pipeline_kind = script_container::list_pipeline_kind;
+  using list_pipeline_op = script_container::list_pipeline_op;
+
+  enum class description_node_kind {
+    unknown,
+    literal,
+    function,
+    effect,
+    operator_t,
+    iterator,
+    block,
+    argument,
+    scope,
+    control_flow,
+    conversion,
+    instruction
+  };
+
+  // Structural description node. The tree is stored in prefix order like command_block,
+  // but each node references the command range that evaluates it.
+  struct block_description {
+    script_container::string_ref name;
+    script_container::string_ref custom_description;
+    size_t size;
+    size_t args_count;
+    size_t cmd_index;
+    size_t cmd_start;
+    size_t cmd_end;
+    int64_t scope_index;
+    bool placeholder;
+    bool effect;   // node is a void function/iterator: skip evaluation during describe()
+    description_node_kind kind;
+  };
+
+  enum class description_value_state {
+    unavailable,
+    value,
+    placeholder
+  };
+
+  struct description_entry {
+    size_t node;
+    std::string_view name;
+    std::string_view custom_description;
+    size_t nest_level;
+    description_node_kind kind;
+    description_value_state state;
+    any_stack value;
+    any_stack scope;
+    std::string error;
+  };
+
+  using description_callback_t = std::function<void(const description_entry&)>;
+
+  // Per-command link to the block_description node that produced it (or SIZE_MAX for commands
+  // with no described node, e.g. internal control-flow jumps). Built by build_description_index.
+  // The command's opcode name and effect-ness are derived from this node, never stored per command.
+  std::vector<size_t> cmd_node;
+  std::vector<block_description> block_descs;
+  std::vector<size_t> description_cmd_index_offsets;
+  std::vector<size_t> description_cmd_index_nodes;
+
+  container() noexcept;
+  script_container strip_description() const&;
+  script_container strip_description() &&;
+  void shrink_to_fit();
+  void make_table(context* ctx, std::vector<std::tuple<any_stack, any_stack>> &table) const;
+  void make_table(context* ctx, node_view& viewer) const;
+  void build_description_index();
+  void describe(context* ctx, const description_callback_t& fn) const;
+};
+
+void shrink_to_fit(std::span<script_container> scripts);
+void shrink_to_fit(std::span<container> scripts);
+
 // Executable view over a command range; used to pass script subblocks into iterator callbacks.
 struct container_view {
-  const container* scr; 
+  const script_container* scr; 
   size_t start; 
   size_t end;
 
-  container_view(const container* scr, const size_t start, const size_t end) noexcept;
+  container_view(const script_container* scr, const size_t start, const size_t end) noexcept;
   void process(context* ctx) const;
   std::string_view get_string(const size_t start, const size_t count) const;
 };
@@ -214,13 +220,13 @@ struct script_function;
 template <typename R, typename Arg>
 struct script_function<R(Arg)> {
   context* ctx;
-  const container* scr;
+  const script_container* scr;
   size_t start;
   size_t end;
 
   script_function() noexcept : ctx(nullptr), scr(nullptr), start(0), end(0) {}
   script_function(std::nullptr_t) noexcept : script_function() {}
-  script_function(context* ctx, const container* scr, const size_t start, const size_t end) noexcept :
+  script_function(context* ctx, const script_container* scr, const size_t start, const size_t end) noexcept :
     ctx(ctx), scr(scr), start(start), end(end)
   {}
 

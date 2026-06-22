@@ -44,7 +44,6 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 #endif
 
-bool check_is_str_part_of(const std::string_view& big_str, const std::string_view& small_str) noexcept;
 
 class system {
 public:
@@ -65,19 +64,35 @@ public:
   constexpr static std::string_view get_user_function_type_name(const user_function_type t);
 
   struct rpn_conversion_ctx {
+    enum class block_kind : uint8_t {
+      node,
+      string_literal,
+      nullable_call,
+      braced_call,
+      nullable_braced_call,
+      scope_path,
+      scope_path_call,
+    };
+
+    struct token_ref {
+      size_t offset = SIZE_MAX;
+      size_t size = 0;
+      size_t line = 0;
+      size_t column = 0;
+    };
+
     struct block {
-      std::string_view token;
-      size_t args_count;
+      token_ref token;
       size_t size;
-      bool nullable = false;
-      bool string_literal = false;
-      bool braced_args = false;
+      block_kind kind = block_kind::node;
     };
 
     std::vector<block> output;
-    std::deque<std::string> literal_storage;
+    std::string token_storage;
 
-    std::tuple<std::string_view, size_t> convert_scope(const std::string_view& expr, block* arr, const size_t max_size) const;
+    std::tuple<token_ref, size_t> convert_scope(const std::string_view& expr, block* arr, const size_t max_size);
+    std::string_view token_text(const token_ref& token) const noexcept;
+    token_ref store_token(std::string_view text, size_t line = 0, size_t column = 0);
 
     // Path N: build the same rpn block stream as convert_block, but from a tavl AST (make_script_ast)
     // instead of text. Reuses convert_scope for lvalue scope-path splitting; tavl already supplies math
@@ -86,20 +101,23 @@ public:
     size_t normalize_block(const tavl::node* block, std::string_view src);
     void normalize_row(const tavl::node* row, std::string_view src);
     size_t normalize_expr(const tavl::node* n, std::string_view src);
-    std::string_view normalize_token_text(const tavl::node* n, std::string_view src);
+    token_ref normalize_token(const tavl::node* n, std::string_view src);
 
     void clear();
   };
 
   struct command_block {
     std::span<rpn_conversion_ctx::block> data;
+    const std::string* token_storage = nullptr;
 
     command_block() noexcept;
-    command_block(const std::span<rpn_conversion_ctx::block> &data) noexcept;
+    command_block(const std::span<rpn_conversion_ctx::block> &data, const std::string* token_storage) noexcept;
     command_block(const command_block& block, const size_t index) noexcept;
     command_block find(const std::string_view &name) const;
     command_block at(const size_t index) const;
     std::string_view name() const;
+    size_t line() const;
+    size_t column() const;
     size_t args_count() const;
     size_t size() const;
     bool nullable() const;
@@ -139,6 +157,8 @@ public:
     std::string_view string_upvalue;
     std::string_view scope_type_upvalue;
     size_t nest_level;
+    size_t source_line;     // 1-based source position of the block currently being emitted
+    size_t source_column;   // (used to stamp script_container::locs for error reporting)
     size_t unlimited_func_index;
     size_t list_index_upvalue;
     size_t prev_chaining;
@@ -261,6 +281,17 @@ public:
     ~nest_level_changer() noexcept;
   };
 
+  // Tracks the source position of the block currently being emitted so that emitted commands
+  // can be stamped into script_container::locs. Restores the previous position on scope exit,
+  // which leaves a parent block's position in effect again after its children are processed.
+  class source_position_changer {
+  public:
+    parse_ctx* ctx;
+    size_t prev_line, prev_column;
+    source_position_changer(parse_ctx* ctx, const size_t line, const size_t column) noexcept;
+    ~source_position_changer() noexcept;
+  };
+
   class function_name_changer {
   public:
     parse_ctx* ctx;
@@ -321,6 +352,7 @@ public:
   void raise_warning(const std::string& msg) const;
   uint64_t get_seed() const;
   void reseed(const uint64_t val);
+  std::string dump_registered_functions() const;
 
   template <typename Arg>
   size_t parse_args(parse_ctx* ctx, container* scr, const command_block& block, const size_t offset, const size_t index, const std::vector<std::string>& func_args_names) const;
@@ -352,19 +384,14 @@ public:
   template <typename Arg>
   size_t parse_arg(parse_ctx* ctx, container* scr, const command_block& block, const size_t index, const std::string_view& override_expected, const basicf& override_block_behaviour, const std::string& arg_name, const argument_callback& fn = nullptr) const;
 
-  template <auto f, typename HT, is_valid_t<HT> vf>
-    requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
-  void setup_description(parse_ctx* ctx, container* scr, const std::string_view& token) const;
-
   template <typename FROM, typename TO>
   void setup_type_conversion(parse_ctx* ctx, container* scr) const;
 
-  // Emits a call instruction (safety-aware) plus its description, then back-patches pending
-  // scope descriptions. Single source for the cmd/desc pair of a registered function/operator
-  // call — the cmds/descs consistency check lives inside setup_description.
+  // Emits a safety-aware call instruction for a registered function/operator. The structural
+  // description node (with name/effect) is produced separately by setup_block_description.
   template <auto f, typename HT, is_valid_t<HT> vf>
     requires(valid_function_type<decltype(f)> && valid_stack_type_v<HT>)
-  void emit_call_instruction(parse_ctx* ctx, container* scr, function_t safe, function_t unsafe, const int64_t scope_index, const std::string_view& name, const size_t patch_from) const;
+  void emit_call_instruction(parse_ctx* ctx, container* scr, function_t safe, function_t unsafe, const int64_t scope_index) const;
 
   // Applies a call's declared stack effect: consume `pops` argument slots, push the result type.
   template <typename RetT>
@@ -425,12 +452,12 @@ public:
   void register_enum(F fn);
 
   template <typename RETURN_T, typename ROOT_T>
-  container parse(std::string text) const;
+  container parse(std::string_view name, std::string_view text) const;
 
-  std::tuple<tavl::event, tavl::error> parse(tavl::parser& p, parse_context& ctx, container& c) const;
+  std::tuple<tavl::event, tavl::error> parse(std::string_view name, tavl::parser& p, parse_context& ctx, container& c) const;
 
   template <typename RETURN_T, typename ROOT_T>
-  std::tuple<tavl::event, tavl::error> parse(tavl::parser& p, parse_context& ctx, container& c) const;
+  std::tuple<tavl::event, tavl::error> parse(std::string_view name, tavl::parser& p, parse_context& ctx, container& c) const;
 
   void setup_block_description(
     parse_ctx* ctx,
@@ -444,7 +471,8 @@ public:
 
   size_t push_basic_function(parse_ctx* ctx, container* scr, const basicf id, const int64_t arg) const;
   size_t push_string(parse_ctx* ctx, container* scr, const std::string_view &str) const;
-  container::command_description::global_string_view store_string(container* scr, const std::string_view& str) const;
+  script_container::string_ref store_string(container* scr, const std::string_view& str) const;
+  void compact_source_storage(container* scr) const;
   std::string_view static_string_arg(const command_block& block, const std::string_view& name) const;
   size_t push_enum_literal(parse_ctx* ctx, container* scr, const std::string_view& enum_type, const std::string_view& value) const;
   std::optional<int64_t> resolve_enum(const std::string_view& enum_type, const std::string_view& value) const;
@@ -453,7 +481,6 @@ public:
   size_t fold_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const;
   command_data::ftype get_token_type(const std::string_view& name) const;
   std::tuple<int32_t, int32_t, command_data::associativity, command_data::ftype> get_token_caps(const std::string_view& name) const;
-  size_t patch_prev_functions_descriptions(container* scr, const size_t start) const;
 
   // Register this system's operators into a tavl parser (name + precedence + fixity + assoc), so
   // make_script_ast lexes/folds them correctly. Data-driven from mfuncs; `=`/`?=` (structural call
@@ -461,8 +488,6 @@ public:
   void configure_parser(tavl::parser& p) const;
   void scope_exit(parse_ctx* ctx, container* scr, const size_t count) const;
 private:
-  void check_is_str_part_of_and_throw(const std::string_view& big_str, const std::string_view& small_str) const;
-
   uint64_t seed;
   enum safety safet;
   err_fn error;

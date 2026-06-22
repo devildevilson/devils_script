@@ -17,12 +17,12 @@ namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
 
 static std::string disasm_double(const char* script) {
   ds::system sys; sys.init_basic_functions(); sys.init_math();
-  return ds::disassemble(sys.parse<double, void>(script));
+  return ds::disassemble(sys.parse<double, void>("script", script));
 }
 
 static std::string disasm_bool(const char* script) {
   ds::system sys; sys.init_basic_functions(); sys.init_math();
-  return ds::disassemble(sys.parse<bool, void>(script));
+  return ds::disassemble(sys.parse<bool, void>("script", script));
 }
 
 TEST_CASE("script AST row-level parsing") {
@@ -66,11 +66,14 @@ TEST_CASE("script AST row-level parsing") {
     ds::container cont;
     ctx.init<std::string_view, void>(sys, cont);
 
-    auto [ev, err] = sys.parse(p, ctx, cont);
+    auto [ev, err] = sys.parse("script", p, ctx, cont);
     REQUIRE(err.no_error());
     CHECK(ev.type == tavl::event_type::row_end);
-    CHECK(cont.source == "red, 6");
-    CHECK(cont.globals.empty());
+    // `source` is the compact token pool now, not the raw script text: it holds the script name
+    // ("script", stored first) followed by the referenced token ("red"); get_string resolves
+    // description names against it (checked below).
+    CHECK(cont.get_name() == "script");
+    CHECK(cont.string_pool == "scriptred");
     REQUIRE(!cont.block_descs.empty());
     bool found_red = false;
     for (const auto& desc : cont.block_descs) {
@@ -89,7 +92,7 @@ TEST_CASE("script AST row-level parsing") {
     sys.init_basic_functions();
     sys.init_math();
 
-    CHECK_THROWS(sys.parse<double, void>("red"));
+    CHECK_THROWS(sys.parse<double, void>("script", "red"));
 
     tavl::parser p;
     sys.configure_parser(p);
@@ -100,7 +103,7 @@ TEST_CASE("script AST row-level parsing") {
     ds::container cont;
     ctx.init<double, void>(sys, cont);
 
-    auto [ev, err] = sys.parse(p, ctx, cont);
+    auto [ev, err] = sys.parse("script", p, ctx, cont);
     CHECK(ev.type == tavl::event_type::row_end);
     CHECK_FALSE(err.no_error());
   }

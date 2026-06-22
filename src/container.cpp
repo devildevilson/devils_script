@@ -6,41 +6,65 @@
 #include <string>
 #include "devils_script/context.h"
 #include <iostream>
+#include <utility>
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 #endif
 
-container::command::command() noexcept : fp(nullptr), arg(0) {}
-container::command::command(function_t fp, bool arg) noexcept : fp(fp), arg(arg) {}
-container::command::command(function_t fp, double arg) noexcept : fp(fp), arg(std::bit_cast<int64_t>(arg)) {}
-container::command::command(function_t fp, int64_t arg) noexcept : fp(fp), arg(arg) {}
+script_container::command::command() noexcept : fp(nullptr), arg(0) {}
+script_container::command::command(function_t fp, bool arg) noexcept : fp(fp), arg(arg) {}
+script_container::command::command(function_t fp, double arg) noexcept : fp(fp), arg(std::bit_cast<int64_t>(arg)) {}
+script_container::command::command(function_t fp, int64_t arg) noexcept : fp(fp), arg(arg) {}
 
-container::command_description::command_description() noexcept : name({ 0,0 }), argument_count(0), requires_scope(false), is_not_member_function(false), has_return(false), effect(false), nest_level(0), parent(SIZE_MAX) {}
-container::command_description::command_description(
-  const global_string_view& name,
-  uint32_t argument_count,
-  bool requires_scope,
-  bool is_not_member_function,
-  bool has_return,
-  bool effect,
-  size_t nest_level,
-  size_t parent
-) noexcept :
-  name(name), argument_count(argument_count), requires_scope(requires_scope),
-  is_not_member_function(is_not_member_function), has_return(has_return), effect(effect), nest_level(nest_level), parent(parent)
-{}
+script_container::script_container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {}
 
-container::container() noexcept : prng_state(0x9e3779b97f4a7c15ULL) {}
-void container::process(context* ctx) const {
-  const container* prev_script = ctx->current_script;
+container::container() noexcept = default;
+
+void script_container::process(context* ctx) const {
+  const script_container* prev_script = ctx->current_script;
   ctx->current_script = this;
   for (; ctx->current_index < cmds.size(); ++ctx->current_index) {
     const auto& cmd = cmds[ctx->current_index];
     std::invoke(cmd.fp, cmd.arg, ctx, this);
   }
   ctx->current_script = prev_script;
+}
+
+void script_container::shrink_to_fit() {
+  cmds.shrink_to_fit();
+  locs.shrink_to_fit();
+  args.shrink_to_fit();
+  saved.shrink_to_fit();
+  lists.shrink_to_fit();
+  list_pipeline_ops.shrink_to_fit();
+  string_pool.shrink_to_fit();
+  command_names.shrink_to_fit();
+}
+
+script_container container::strip_description() const& {
+  return static_cast<const script_container&>(*this);
+}
+
+script_container container::strip_description() && {
+  return std::move(static_cast<script_container&>(*this));
+}
+
+void container::shrink_to_fit() {
+  script_container::shrink_to_fit();
+  cmd_node.shrink_to_fit();
+  block_descs.shrink_to_fit();
+  description_cmd_index_offsets.shrink_to_fit();
+  description_cmd_index_nodes.shrink_to_fit();
+}
+
+void shrink_to_fit(std::span<script_container> scripts) {
+  for (auto& script : scripts) script.shrink_to_fit();
+}
+
+void shrink_to_fit(std::span<container> scripts) {
+  for (auto& script : scripts) script.shrink_to_fit();
 }
 
 void container::make_table(context* ctx, std::vector<std::tuple<any_stack, any_stack>>& table) const {
@@ -55,8 +79,26 @@ void container::make_table(context* ctx, node_view& viewer) const {
 }
 
 void container::build_description_index() {
+  // Pad source locations for any commands not stamped during emission (e.g. the trailing
+  // pushreturn or internal control-flow jumps emitted outside a described node).
+  if (locs.size() < cmds.size()) locs.resize(cmds.size(), src_loc{ 0, 0 });
+
+  // Link each command to the innermost description node whose command range [cmd_start, cmd_index]
+  // encloses it. This recovers the command's opcode/function name (the construct that produced it)
+  // for both result commands and intermediate ones (e.g. scope-chain calls, unlimited-fold ops).
+  cmd_node.assign(cmds.size(), SIZE_MAX);
+  std::vector<size_t> best_span(cmds.size(), SIZE_MAX);
+  for (size_t node = 0; node < block_descs.size(); ++node) {
+    const auto& bd = block_descs[node];
+    if (bd.cmd_start > bd.cmd_index) continue;
+    const size_t span = bd.cmd_index - bd.cmd_start;
+    for (size_t i = bd.cmd_start; i <= bd.cmd_index && i < cmds.size(); ++i)
+      if (span < best_span[i]) { best_span[i] = span; cmd_node[i] = node; }
+  }
+
   description_cmd_index_offsets.assign(cmds.size() + 1, 0);
   description_cmd_index_nodes.clear();
+  command_names.assign(cmds.size(), { SIZE_MAX, SIZE_MAX });
 
   for (size_t node = 0; node < block_descs.size(); ++node) {
     const auto& bd = block_descs[node];
@@ -76,6 +118,14 @@ void container::build_description_index() {
     if (bd.cmd_start == bd.cmd_index) continue;
     description_cmd_index_nodes[cursor[bd.cmd_start]++] = node;
   }
+
+  // Opcode names are not stored per command: basic ops resolve via their function pointer,
+  // user functions via their producing node's name.
+  for (size_t i = 0; i < cmds.size(); ++i) {
+    const basicf bf = find_basicf_by_fp(cmds[i].fp);
+    if (bf != basicf::invalid) command_names[i] = { static_cast<size_t>(bf), SIZE_MAX };
+    else if (cmd_node[i] != SIZE_MAX) command_names[i] = block_descs[cmd_node[i]].name;
+  }
 }
 
 void container::describe(context* ctx, const description_callback_t& fn) const {
@@ -91,13 +141,20 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
   context work = *ctx;
   work.current_index = 0;
 
+  // Effect-ness is a property of the producing node (a void function/iterator): only its result
+  // command is the effect to skip — argument pushes inside it must still be evaluated.
+  const auto cmd_is_effect = [&](const size_t i) {
+    const size_t n = i < cmd_node.size() ? cmd_node[i] : SIZE_MAX;
+    return n != SIZE_MAX && block_descs[n].effect && block_descs[n].cmd_index == i;
+  };
+
   size_t counter = 0;
   for (size_t i = 0; i < cmds.size(); ++i) {
     const bool reached = i >= work.current_index;
     bool ok = reached;
     std::string error;
 
-    if (reached && !descs[i].effect) {
+    if (reached && !cmd_is_effect(i)) {
       context before = work;
       try {
         const auto& cmd = cmds[i];
@@ -122,7 +179,7 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
       auto& entry = table[node];
       if (entry.has_value) return;
       entry.visited = reached;
-      if (ok && reached && !descs[i].effect && work.stack.size() > 0) {
+      if (ok && reached && !cmd_is_effect(i) && work.stack.size() > 0) {
         entry.has_value = true;
         entry.value = work.stack.get<any_stack>();
         const auto si = block_descs[node].scope_index;
@@ -135,14 +192,14 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
     if (description_cmd_index_offsets.size() == cmds.size() + 1) {
       for (size_t offset = description_cmd_index_offsets[i]; offset < description_cmd_index_offsets[i + 1]; ++offset) {
         const size_t node = description_cmd_index_nodes[offset];
-        if (get_string(block_descs[node].name) != get_string(descs[i].name)) continue;
+        if (get_string(block_descs[node].name) != get_command_name(i)) continue;
         record(node);
       }
     } else {
       for (size_t node = 0; node < block_descs.size(); ++node) {
         const auto& bd = block_descs[node];
         if (bd.cmd_start != i || bd.cmd_start == bd.cmd_index) continue;
-        if (get_string(bd.name) != get_string(descs[i].name)) continue;
+        if (get_string(bd.name) != get_command_name(i)) continue;
         record(node);
       }
     }
@@ -194,34 +251,44 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
   if (!block_descs.empty()) traverse(traverse, block_descs.size() - 1, 0);
 }
 
-std::string_view container::get_string(const size_t start, const size_t count) const {
+std::string_view script_container::get_string(const size_t start, const size_t count) const {
   if (count == SIZE_MAX) return to_string(static_cast<basicf>(start));
 
-  if (start + count > source.size()) return std::string_view();
-  return std::string_view(source).substr(start, count);
+  if (start + count > string_pool.size()) return std::string_view();
+  return std::string_view(string_pool).substr(start, count);
 }
 
-std::string_view container::get_string(const command_description::global_string_view& str) const {
+std::string_view script_container::get_string(const string_ref& str) const {
   if (str.count == SIZE_MAX) return to_string(static_cast<basicf>(str.start));
-  if (str.global == 0) return get_string(str.start, str.count);
+  return get_string(str.start, str.count);
+}
 
-  const size_t index = size_t(str.global - 1);
-  if (index >= globals.size()) return std::string_view();
-  if (str.start + str.count > globals[index].size()) return std::string_view();
-  return std::string_view(globals[index]).substr(str.start, str.count);
+std::string_view script_container::get_name() const {
+  return get_string(name);
+}
+
+void script_container::error_at(const context* ctx, const std::string_view& msg) const {
+  const size_t i = ctx->current_index;
+  const src_loc loc = i < locs.size() ? locs[i] : src_loc{ 0, 0 };
+  throw std::runtime_error(std::format("script '{}' @ {}:{}: {}", get_name(), loc.line, loc.column, msg));
+}
+
+std::string_view script_container::get_command_name(const size_t index) const {
+  if (index >= command_names.size()) return std::string_view();
+  return get_string(command_names[index]);
 }
 
 std::string disassemble(const container& scr) {
   std::string out;
   for (size_t i = 0; i < scr.cmds.size(); ++i) {
-    const auto& desc = scr.descs[i];
     const int64_t arg = scr.cmds[i].arg;
-    const std::string_view name = scr.get_string(desc.name);
 
-    // A desc whose name has count == SIZE_MAX is a basic instruction; its `start` is the
-    // basicf id (see push_basic_function). User-function descs carry a real global string.
-    const bool is_basic = desc.name.count == SIZE_MAX;
-    const basicf op = is_basic ? static_cast<basicf>(desc.name.start) : basicf::invalid;
+    // Opcode identity is recovered from the function pointer (basic ops) or, for user functions,
+    // from the producing description node (via cmd_node) — never stored per command.
+    const basicf op = find_basicf_by_fp(scr.cmds[i].fp);
+    std::string_view name;
+    if (op != basicf::invalid) name = to_string(op);
+    else if (i < scr.cmd_node.size() && scr.cmd_node[i] != SIZE_MAX) name = scr.get_string(scr.block_descs[scr.cmd_node[i]].name);
 
     std::string argstr;
     switch (op) {
@@ -242,45 +309,45 @@ std::string disassemble(const container& scr) {
   return out;
 }
 
-size_t container::find_arg(const std::string_view& name) const {
+size_t script_container::find_arg(const std::string_view& name) const {
   size_t i = 0;
   for (; i < args.size() && get_string(args[i].name) != name; ++i) {}
   return i < args.size() ? i : SIZE_MAX;
 }
 
-std::string_view container::get_arg_name(const size_t index) const {
+std::string_view script_container::get_arg_name(const size_t index) const {
   if (index >= args.size()) return std::string_view();
   return get_string(args[index].name);
 }
 
-size_t container::find_saved(const std::string_view& name) const {
+size_t script_container::find_saved(const std::string_view& name) const {
   size_t i = 0;
   for (; i < saved.size() && get_string(saved[i].name) != name; ++i) {}
   return i < saved.size() ? i : SIZE_MAX;
 }
 
-std::string_view container::get_saved_name(const size_t index) const {
+std::string_view script_container::get_saved_name(const size_t index) const {
   if (index >= saved.size()) return std::string_view();
   return get_string(saved[index].name);
 }
 
-size_t container::find_list(const std::string_view& name) const {
+size_t script_container::find_list(const std::string_view& name) const {
   size_t i = 0;
   for (; i < lists.size() && get_string(lists[i].name) != name; ++i) {}
   return i < lists.size() ? i : SIZE_MAX;
 }
 
-std::string_view container::get_list_name(const size_t index) const {
+std::string_view script_container::get_list_name(const size_t index) const {
   if (index >= lists.size()) return std::string_view();
   return get_string(lists[index].name);
 }
 
-container_view::container_view(const container* scr, const size_t start, const size_t end) noexcept :
+container_view::container_view(const script_container* scr, const size_t start, const size_t end) noexcept :
   scr(scr), start(start), end(end)
 {}
 
 void container_view::process(context* ctx) const {
-  const container* prev_script = ctx->current_script;
+  const script_container* prev_script = ctx->current_script;
   ctx->current_script = scr;
   for (ctx->current_index = start; ctx->current_index < end; ++ctx->current_index) {
     const auto& cmd = scr->cmds[ctx->current_index];

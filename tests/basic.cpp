@@ -1,5 +1,7 @@
 #include <doctest/doctest.h>
 #include <optional>
+#include <span>
+#include <utility>
 #include "devils_script/system.h"
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
@@ -21,7 +23,7 @@ TEST_CASE("Script basics") {
     sys.init_basic_functions();
     sys.init_math();
 
-    const auto cont = sys.parse<double, void>(script1);
+    const auto cont = sys.parse<double, void>("script", script1);
 
     ds::context ctx;
     ctx.clear();
@@ -36,7 +38,7 @@ TEST_CASE("Script basics") {
     sys.init_basic_functions();
     sys.init_math();
 
-    const auto cont = sys.parse<double, void>(script2);
+    const auto cont = sys.parse<double, void>("script", script2);
 
     ds::context ctx;
     ctx.clear();
@@ -52,7 +54,7 @@ TEST_CASE("Script basics") {
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
-      cont1 = sys.parse<double, void>(script3);
+      cont1 = sys.parse<double, void>("script", script3);
     }
 
     {
@@ -71,7 +73,7 @@ TEST_CASE("Script basics") {
       sys.init_basic_functions();
       sys.init_math();
       sys.register_function<&g>("g");
-      cont2 = sys.parse<double, void>(script4);
+      cont2 = sys.parse<double, void>("script", script4);
     }
 
     {
@@ -80,6 +82,46 @@ TEST_CASE("Script basics") {
       cont2.process(&ctx);
       REQUIRE(ctx.is_return<double>());
       REQUIRE(ctx.get_return<double>() == 31.0);
+    }
+  }
+
+  SUBCASE("script_container runtime-only usage") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    std::vector<ds::container> compiled;
+    // Empty script name keeps the pool to just the referenced tokens for this compactness check.
+    compiled.push_back(sys.parse<double, void>("", script2));
+    compiled.push_back(sys.parse<double, void>("", script3));
+    // `source` is now the compact, deduplicated token pool (not the raw script): it holds only
+    // the strings actually referenced by the container, so it stays well under the source length.
+    CHECK(compiled[0].string_pool.size() < script2.size());
+    CHECK(compiled[1].string_pool.size() < script3.size());
+    ds::shrink_to_fit(std::span<ds::container>(compiled));
+
+    std::vector<ds::script_container> scripts;
+    scripts.reserve(compiled.size());
+    for (auto& cont : compiled) {
+      REQUIRE(!cont.block_descs.empty());
+      scripts.push_back(std::move(cont).strip_description());
+    }
+    ds::shrink_to_fit(std::span<ds::script_container>(scripts));
+
+    {
+      ds::context ctx;
+      ctx.clear();
+      scripts[0].process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 10.0);
+    }
+
+    {
+      ds::context ctx;
+      ctx.clear();
+      scripts[1].process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 8.5);
     }
   }
 }
@@ -100,7 +142,7 @@ TEST_CASE("Script functions and functions call") {
     ds::system sys;
     sys.init_math();
     sys.register_function<&f>("ADD"); // it is required for arithmetic scripts
-    const auto cont = sys.parse<double, void>(script1);
+    const auto cont = sys.parse<double, void>("script", script1);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -114,7 +156,7 @@ TEST_CASE("Script functions and functions call") {
     sys.register_function<&f>("ADD"); // it is required for arithmetic scripts
     sys.register_function<&f>("f");
     sys.register_operator<&f>("+", { 11, mf::binary, at::left });
-    const auto cont = sys.parse<double, void>(script2);
+    const auto cont = sys.parse<double, void>("script", script2);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -125,7 +167,7 @@ TEST_CASE("Script functions and functions call") {
     ds::system sys;
     sys.register_function<&f>("ADD"); // it is required for arithmetic scripts
     sys.register_function<&f>("f");
-    const auto cont = sys.parse<double, void>(script3);
+    const auto cont = sys.parse<double, void>("script", script3);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -138,7 +180,7 @@ TEST_CASE("Script functions and functions call") {
     ds::system sys;
     sys.register_function<&m>("AND"); // it is required for boolean scripts
     sys.register_operator<&m>("m", { 3, mf::binary, at::left });
-    const auto cont = sys.parse<bool, void>(script4);
+    const auto cont = sys.parse<bool, void>("script", script4);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<bool>());
@@ -151,7 +193,7 @@ TEST_CASE("Script functions and functions call") {
     ds::system sys;
     sys.register_function<&m>("AND"); // it is required for boolean scripts
     sys.register_operator<&m>("m", { 3, mf::binary, at::left });
-    const auto cont = sys.parse<bool, void>(script5);
+    const auto cont = sys.parse<bool, void>("script", script5);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<bool>());
@@ -266,7 +308,7 @@ TEST_CASE("on_effect callbacks") {
     sys.init_math();
     sys.register_function<&effect_sum, &on_effect_sum>("effect_sum");
 
-    const auto cont = sys.parse<double, void>("effect_sum = { 2, 3 }");
+    const auto cont = sys.parse<double, void>("script", "effect_sum = { 2, 3 }");
     effect_stats stats;
     ds::context ctx;
     ctx.userptr = &stats;
@@ -287,7 +329,7 @@ TEST_CASE("on_effect callbacks") {
     sys.init_math();
     sys.register_function<&effect_touch, &on_effect_touch>("effect_touch");
 
-    const auto cont = sys.parse<void, void>("effect_touch = 7");
+    const auto cont = sys.parse<void, void>("script", "effect_touch = 7");
     effect_stats stats;
     ds::context ctx;
     ctx.userptr = &stats;
@@ -305,7 +347,7 @@ TEST_CASE("on_effect callbacks") {
     sys.init_math();
     sys.register_function<&effect_object_score, object_ref, &on_effect_object_score>("effect_object_score");
 
-    const auto cont = sys.parse<double, object_ref>("effect_object_score = 5");
+    const auto cont = sys.parse<double, object_ref>("script", "effect_object_score = 5");
     effect_stats stats;
     ds::context ctx;
     ctx.userptr = &stats;
@@ -346,7 +388,7 @@ TEST_CASE("Advanced example") {
   sys.register_function<&func9>("func9");
 
   SUBCASE("script1") {
-    const auto cont = sys.parse<scope1, scope1>(script1);
+    const auto cont = sys.parse<scope1, scope1>("script", script1);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
     cont.process(&ctx);
@@ -354,7 +396,7 @@ TEST_CASE("Advanced example") {
   }
 
   SUBCASE("script2") {
-    const auto cont = sys.parse<double, scope1>(script2);
+    const auto cont = sys.parse<double, scope1>("script", script2);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
     cont.process(&ctx);
@@ -363,7 +405,7 @@ TEST_CASE("Advanced example") {
   }
 
   SUBCASE("script3") {
-    const auto cont = sys.parse<double, scope1>(script3);
+    const auto cont = sys.parse<double, scope1>("script", script3);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
     cont.process(&ctx);
@@ -372,7 +414,7 @@ TEST_CASE("Advanced example") {
   }
 
   SUBCASE("script4") {
-    const auto cont = sys.parse<scope1, scope1>(script4);
+    const auto cont = sys.parse<scope1, scope1>("script", script4);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
     cont.process(&ctx);
@@ -380,7 +422,7 @@ TEST_CASE("Advanced example") {
   }
 
   SUBCASE("script5") {
-    const auto cont = sys.parse<scope1, scope1>(script5);
+    const auto cont = sys.parse<scope1, scope1>("script", script5);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
     cont.process(&ctx);
@@ -388,7 +430,7 @@ TEST_CASE("Advanced example") {
   }
 
   SUBCASE("script6") {
-    const auto cont = sys.parse<scope1, scope1>(script6);
+    const auto cont = sys.parse<scope1, scope1>("script", script6);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
     cont.process(&ctx);
@@ -396,7 +438,7 @@ TEST_CASE("Advanced example") {
   }
 
   SUBCASE("script7") {
-    const auto cont = sys.parse<double, scope1>(script7);
+    const auto cont = sys.parse<double, scope1>("script", script7);
     ds::context ctx;
     ctx.set_arg(0, scope1{}); // set root
     cont.process(&ctx);
@@ -418,7 +460,7 @@ TEST_CASE("Object rvalue scripts") {
   sys.register_function<&wrong_object>("wrong_object");
 
   SUBCASE("object chain can be used as rvalue argument") {
-    const auto cont = sys.parse<bool, object_ref>("is_married_to = liege.first_child.nemesis");
+    const auto cont = sys.parse<bool, object_ref>("script", "is_married_to = liege.first_child.nemesis");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 1 });
     cont.process(&ctx);
@@ -427,7 +469,7 @@ TEST_CASE("Object rvalue scripts") {
   }
 
   SUBCASE("object block skips false conditioned subblock and returns fallback object") {
-    const auto cont = sys.parse<object_ref, object_ref>("{ { condition = false, liege }, this }");
+    const auto cont = sys.parse<object_ref, object_ref>("script", "{ { condition = false, liege }, this }");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 1 });
     cont.process(&ctx);
@@ -436,7 +478,7 @@ TEST_CASE("Object rvalue scripts") {
   }
 
   SUBCASE("object block result can be consumed by object-scoped function") {
-    const auto cont = sys.parse<bool, object_ref>("object_arg_id_is = { marker, { { condition = false, liege }, this }, 1 }");
+    const auto cont = sys.parse<bool, object_ref>("script", "object_arg_id_is = { marker, { { condition = false, liege }, this }, 1 }");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 1 });
     cont.process(&ctx);
@@ -445,7 +487,7 @@ TEST_CASE("Object rvalue scripts") {
   }
 
   SUBCASE("wrong object type is rejected in object context") {
-    CHECK_THROWS(sys.parse<object_ref, object_ref>("wrong_object"));
+    CHECK_THROWS(sys.parse<object_ref, object_ref>("script", "wrong_object"));
   }
 }
 
@@ -459,7 +501,7 @@ TEST_CASE("Scoped overload resolution") {
 
   SUBCASE("same script name dispatches by root scope") {
     {
-      const auto cont = sys.parse<double, scope1>("overloaded");
+      const auto cont = sys.parse<double, scope1>("script", "overloaded");
       ds::context ctx;
       ctx.set_arg(0, scope1{});
       cont.process(&ctx);
@@ -468,7 +510,7 @@ TEST_CASE("Scoped overload resolution") {
     }
 
     {
-      const auto cont = sys.parse<double, scope2>("overloaded");
+      const auto cont = sys.parse<double, scope2>("script", "overloaded");
       ds::context ctx;
       ctx.set_arg(0, scope2{});
       cont.process(&ctx);
@@ -478,7 +520,7 @@ TEST_CASE("Scoped overload resolution") {
   }
 
   SUBCASE("scope chain uses overload for current scope") {
-    const auto cont = sys.parse<double, scope1>("to_scope2.overloaded");
+    const auto cont = sys.parse<double, scope1>("script", "to_scope2.overloaded");
     ds::context ctx;
     ctx.set_arg(0, scope1{});
     cont.process(&ctx);
@@ -496,7 +538,7 @@ TEST_CASE("Enum literals") {
   sys.register_function<&rank_is_at_least>("rank_is_at_least");
 
   SUBCASE("enum callback resolves function arguments") {
-    const auto cont = sys.parse<bool, object_ref>("rank_is_at_least = { kingdom }");
+    const auto cont = sys.parse<bool, object_ref>("script", "rank_is_at_least = { kingdom }");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 3 });
     cont.process(&ctx);
@@ -505,7 +547,7 @@ TEST_CASE("Enum literals") {
   }
 
   SUBCASE("enum return compares with enum literal") {
-    const auto cont = sys.parse<bool, object_ref>("rank >= kingdom");
+    const auto cont = sys.parse<bool, object_ref>("script", "rank >= kingdom");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 4 });
     cont.process(&ctx);
@@ -515,7 +557,7 @@ TEST_CASE("Enum literals") {
 
   SUBCASE("enum literals compare with numbers") {
     {
-      const auto cont = sys.parse<bool, void>("kingdom >= 3");
+      const auto cont = sys.parse<bool, void>("script", "kingdom >= 3");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -523,7 +565,7 @@ TEST_CASE("Enum literals") {
     }
 
     {
-      const auto cont = sys.parse<bool, void>("2 < kingdom");
+      const auto cont = sys.parse<bool, void>("script", "2 < kingdom");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -534,7 +576,7 @@ TEST_CASE("Enum literals") {
   SUBCASE("function names have priority over enum literals") {
     sys.register_function<&kingdom>("kingdom");
 
-    const auto cont = sys.parse<double, void>("kingdom");
+    const auto cont = sys.parse<double, void>("script", "kingdom");
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -591,7 +633,7 @@ TEST_CASE("Iterators example") {
   sys.register_function_iter<&func10>("func10", { "count", "value" });
 
   SUBCASE("script1") {
-    const auto cont = sys.parse<double, scope2>(script1);
+    const auto cont = sys.parse<double, scope2>("script", script1);
     ds::context ctx;
     ctx.set_arg(0, scope2{}); // set root
     cont.process(&ctx);
@@ -600,7 +642,7 @@ TEST_CASE("Iterators example") {
   }
 
   SUBCASE("script2") {
-    const auto cont = sys.parse<double, scope2>(script2);
+    const auto cont = sys.parse<double, scope2>("script", script2);
     ds::context ctx;
     ctx.set_arg(0, scope2{}); // set root
     cont.process(&ctx);
@@ -609,7 +651,7 @@ TEST_CASE("Iterators example") {
   }
 
   SUBCASE("script3") {
-    const auto cont = sys.parse<double, scope2>(script3);
+    const auto cont = sys.parse<double, scope2>("script", script3);
     ds::context ctx;
     ctx.set_arg(0, scope2{}); // set root
     cont.process(&ctx);
@@ -631,7 +673,7 @@ TEST_CASE("Iterators example") {
     sys.register_function_iter<&any_child>("any_child", { "value", "filter", "count" });
 
     {
-      const auto cont = sys.parse<bool, object_ref>("{ any_child = { value = { child_id >= 3 }, filter = child_is_even, count = child_count_one } }");
+      const auto cont = sys.parse<bool, object_ref>("script", "{ any_child = { value = { child_id >= 3 }, filter = child_is_even, count = child_count_one } }");
       ds::context ctx;
       ctx.set_arg(0, object_ref{ 1 });
       cont.process(&ctx);
@@ -640,7 +682,7 @@ TEST_CASE("Iterators example") {
     }
 
     {
-      const auto cont = sys.parse<bool, object_ref>("{ any_child = { value = { child_id >= 3 }, filter = child_is_even, count = child_count_two } }");
+      const auto cont = sys.parse<bool, object_ref>("script", "{ any_child = { value = { child_id >= 3 }, filter = child_is_even, count = child_count_two } }");
       ds::context ctx;
       ctx.set_arg(0, object_ref{ 1 });
       cont.process(&ctx);
@@ -649,7 +691,7 @@ TEST_CASE("Iterators example") {
     }
 
     {
-      const auto cont = sys.parse<bool, object_ref>("{ any_child = { value = { child_id >= 4 } } }");
+      const auto cont = sys.parse<bool, object_ref>("script", "{ any_child = { value = { child_id >= 4 } } }");
       ds::context ctx;
       ctx.set_arg(0, object_ref{ 1 });
       cont.process(&ctx);
@@ -659,7 +701,7 @@ TEST_CASE("Iterators example") {
 
     {
       g_any_child_value_calls = 0;
-      const auto cont = sys.parse<bool, object_ref>("{ any_child = { value = counted_child_is_even, count = child_count_one } }");
+      const auto cont = sys.parse<bool, object_ref>("script", "{ any_child = { value = counted_child_is_even, count = child_count_one } }");
       ds::context ctx;
       ctx.set_arg(0, object_ref{ 1 });
       cont.process(&ctx);
@@ -684,7 +726,7 @@ TEST_CASE("Main lang statements") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>(script1);
+    const auto cont = sys.parse<double, void>("script", script1);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -695,7 +737,7 @@ TEST_CASE("Main lang statements") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<bool, void>(script2);
+    const auto cont = sys.parse<bool, void>("script", script2);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<bool>());
@@ -706,7 +748,7 @@ TEST_CASE("Main lang statements") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>(script3);
+    const auto cont = sys.parse<double, void>("script", script3);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -717,7 +759,7 @@ TEST_CASE("Main lang statements") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>(script4);
+    const auto cont = sys.parse<double, void>("script", script4);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -729,7 +771,7 @@ TEST_CASE("Main lang statements") {
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
-      const auto cont = sys.parse<bool, void>(script6);
+      const auto cont = sys.parse<bool, void>("script", script6);
       ds::context ctx;
       ctx.prng_state = 1;
       cont.process(&ctx);
@@ -741,7 +783,7 @@ TEST_CASE("Main lang statements") {
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
-      const auto cont = sys.parse<bool, void>(script6);
+      const auto cont = sys.parse<bool, void>("script", script6);
       ds::context ctx;
       ctx.prng_state = 352;
       cont.process(&ctx);
@@ -755,7 +797,7 @@ TEST_CASE("Main lang statements") {
       ds::system sys(o);
       sys.init_basic_functions();
       sys.init_math();
-      const auto cont = sys.parse<bool, void>(script6);
+      const auto cont = sys.parse<bool, void>("script", script6);
       ds::context ctx;
       ctx.prng_state = 1;
       cont.process(&ctx);
@@ -768,7 +810,7 @@ TEST_CASE("Main lang statements") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>(script7);
+    const auto cont = sys.parse<double, void>("script", script7);
     ds::context ctx;
     ctx.prng_state = 125;
     cont.process(&ctx);
@@ -787,7 +829,7 @@ TEST_CASE("Main lang statements") {
 
     {
       g_short_circuit_calls = 0;
-      const auto cont = sys.parse<bool, void>("{ runtime_false, counted_true }");
+      const auto cont = sys.parse<bool, void>("script", "{ runtime_false, counted_true }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -797,7 +839,7 @@ TEST_CASE("Main lang statements") {
 
     {
       g_short_circuit_calls = 0;
-      const auto cont = sys.parse<bool, void>("{ OR = { runtime_true, counted_false } }");
+      const auto cont = sys.parse<bool, void>("script", "{ OR = { runtime_true, counted_false } }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -807,7 +849,7 @@ TEST_CASE("Main lang statements") {
 
     {
       g_short_circuit_calls = 0;
-      const auto cont = sys.parse<bool, void>("{ runtime_true, counted_true }");
+      const auto cont = sys.parse<bool, void>("script", "{ runtime_true, counted_true }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -823,7 +865,7 @@ TEST_CASE("Main lang statements") {
       ds::system sys(opts);
       sys.init_basic_functions();
       sys.init_math();
-      const auto cont = sys.parse<bool, void>("chance < 0.5");
+      const auto cont = sys.parse<bool, void>("script", "chance < 0.5");
 
       ds::context ctx1;
       ctx1.prng_state = 777;
@@ -844,7 +886,7 @@ TEST_CASE("Main lang statements") {
       ds::system sys(opts);
       sys.init_basic_functions();
       sys.init_math();
-      const auto cont = sys.parse<double, void>("{ random = { { weight = 1, 3 }, { weight = 2, 6 }, { weight = 3, 9 } } }");
+      const auto cont = sys.parse<double, void>("script", "{ random = { { weight = 1, 3 }, { weight = 2, 6 }, { weight = 3, 9 } } }");
 
       ds::context ctx1;
       ctx1.prng_state = 555;
@@ -865,8 +907,8 @@ TEST_CASE("Main lang statements") {
     sys.init_basic_functions();
     sys.init_math();
 
-    CHECK_THROWS(sys.parse<double, void>("ADD = { 5 + AND = { true, 1 } + 10 }"));
-    CHECK_THROWS(sys.parse<double, void>("5 + AND = { true, 1 }"));
+    CHECK_THROWS(sys.parse<double, void>("script", "ADD = { 5 + AND = { true, 1 } + 10 }"));
+    CHECK_THROWS(sys.parse<double, void>("script", "5 + AND = { true, 1 }"));
   }
 }
 
@@ -875,7 +917,7 @@ TEST_CASE("switch statement") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>("{ switch = { value = 2, { value = 1, 10 }, { value = 2, 20 }, { value = 3, 30 } } }");
+    const auto cont = sys.parse<double, void>("script", "{ switch = { value = 2, { value = 1, 10 }, { value = 2, 20 }, { value = 3, 30 } } }");
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -886,7 +928,7 @@ TEST_CASE("switch statement") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>("{ switch = { value = red, { value = blue, 10 }, { value = red, 20 } } }");
+    const auto cont = sys.parse<double, void>("script", "{ switch = { value = red, { value = blue, 10 }, { value = red, 20 } } }");
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -899,7 +941,7 @@ TEST_CASE("switch statement") {
     sys.init_math();
     sys.register_function<&liege>("liege");
     sys.register_function<&object_id_is>("object_id_is");
-    const auto cont = sys.parse<double, object_ref>("{ switch = { value = this, { value = liege, 10 }, { value = this, 20 } } }");
+    const auto cont = sys.parse<double, object_ref>("script", "{ switch = { value = this, { value = liege, 10 }, { value = this, 20 } } }");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 1 });
     cont.process(&ctx);
@@ -912,7 +954,7 @@ TEST_CASE("switch statement") {
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
-      CHECK_THROWS(sys.parse<double, void>("{ switch = { value = 1, { value = red, 10 } } }"));
+      CHECK_THROWS(sys.parse<double, void>("script", "{ switch = { value = 1, { value = red, 10 } } }"));
     }
 
     {
@@ -920,7 +962,7 @@ TEST_CASE("switch statement") {
       sys.init_basic_functions();
       sys.init_math();
       sys.register_function<&wrong_object>("wrong_object");
-      CHECK_THROWS(sys.parse<double, object_ref>("{ switch = { value = this, { value = wrong_object, 10 } } }"));
+      CHECK_THROWS(sys.parse<double, object_ref>("script", "{ switch = { value = this, { value = wrong_object, 10 } } }"));
     }
   }
 }
@@ -934,11 +976,11 @@ TEST_CASE("Type checking and valid argument checks") {
     sys.register_function<&object_id_is>("object_id_is");
     sys.register_function<&wrong_object>("wrong_object");
 
-    CHECK_THROWS(sys.parse<double, void>("unknown_function"));
-    CHECK_THROWS(sys.parse<double, scope2>("func9 = { 1 }"));
-    CHECK_THROWS(sys.parse<double, scope1>("func9 = { 1, 2 }"));
-    CHECK_THROWS(sys.parse<bool, object_ref>("object_id_is = { red }"));
-    CHECK_THROWS(sys.parse<object_ref, object_ref>("wrong_object"));
+    CHECK_THROWS(sys.parse<double, void>("script", "unknown_function"));
+    CHECK_THROWS(sys.parse<double, scope2>("script", "func9 = { 1 }"));
+    CHECK_THROWS(sys.parse<double, scope1>("script", "func9 = { 1, 2 }"));
+    CHECK_THROWS(sys.parse<bool, object_ref>("script", "object_id_is = { red }"));
+    CHECK_THROWS(sys.parse<object_ref, object_ref>("script", "wrong_object"));
   }
 
   SUBCASE("runtime valid checks reject invalid scopes") {
@@ -947,7 +989,7 @@ TEST_CASE("Type checking and valid argument checks") {
     sys.init_math();
     sys.register_function<&object_id_is>("object_id_is");
 
-    const auto cont = sys.parse<bool, object_ref>("object_id_is = { 1 }");
+    const auto cont = sys.parse<bool, object_ref>("script", "object_id_is = { 1 }");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 0 });
     CHECK_THROWS(cont.process(&ctx));
@@ -959,7 +1001,7 @@ TEST_CASE("Type checking and valid argument checks") {
     sys.init_math();
     sys.register_function<&object_id_is>("object_id_is");
 
-    const auto cont = sys.parse<bool, object_ref>("object_id_is = { 1 }");
+    const auto cont = sys.parse<bool, object_ref>("script", "object_id_is = { 1 }");
     ds::context ctx;
     ctx.set_arg(0, 1.0);
     CHECK_THROWS(cont.process(&ctx));
@@ -971,7 +1013,7 @@ TEST_CASE("Type checking and valid argument checks") {
     sys.init_math();
     sys.register_function<&checked_score>("checked_score");
 
-    const auto cont = sys.parse<double, checked_ref>("checked_score");
+    const auto cont = sys.parse<double, checked_ref>("script", "checked_score");
 
     {
       ds::context ctx;
@@ -994,7 +1036,7 @@ TEST_CASE("Type checking and valid argument checks") {
     sys.init_math();
     sys.register_function<&checked_score, checked_ref, &checked_ref_is_even>("checked_score");
 
-    const auto cont = sys.parse<double, checked_ref>("checked_score");
+    const auto cont = sys.parse<double, checked_ref>("script", "checked_score");
 
     {
       ds::context ctx;
@@ -1016,7 +1058,7 @@ TEST_CASE("Type checking and valid argument checks") {
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
-      const auto cont = sys.parse<std::string_view, void>("red");
+      const auto cont = sys.parse<std::string_view, void>("script", "red");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<std::string_view>());
@@ -1028,7 +1070,7 @@ TEST_CASE("Type checking and valid argument checks") {
       sys.init_basic_functions();
       sys.init_math();
       sys.register_function<&liege>("liege");
-      const auto cont = sys.parse<object_ref, object_ref>("liege");
+      const auto cont = sys.parse<object_ref, object_ref>("script", "liege");
       ds::context ctx;
       ctx.set_arg(0, object_ref{ 1 });
       cont.process(&ctx);
@@ -1041,7 +1083,7 @@ TEST_CASE("Type checking and valid argument checks") {
       sys.init_basic_functions();
       sys.init_math();
       sys.register_function<&object_effect>("object_effect");
-      const auto cont = sys.parse<void, object_ref>("object_effect");
+      const auto cont = sys.parse<void, object_ref>("script", "object_effect");
       ds::context ctx;
       ctx.set_arg(0, object_ref{ 1 });
       CHECK_NOTHROW(cont.process(&ctx));
@@ -1059,7 +1101,7 @@ TEST_CASE("Script description evaluation") {
     sys.init_basic_functions();
     sys.init_math();
 
-    const auto cont = sys.parse<double, void>("5 + 5");
+    const auto cont = sys.parse<double, void>("script", "5 + 5");
     ds::context ctx;
     bool found_value = false;
 
@@ -1078,7 +1120,7 @@ TEST_CASE("Script description evaluation") {
     sys.init_math();
     sys.register_function<&object_id_is>("object_id_is");
 
-    const auto cont = sys.parse<bool, object_ref>("object_id_is = { 11 }");
+    const auto cont = sys.parse<bool, object_ref>("script", "object_id_is = { 11 }");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 0 });
 
@@ -1099,7 +1141,7 @@ TEST_CASE("Script description evaluation") {
     sys.init_math();
     sys.register_function_iter<&func6>("func6", { "value" });
 
-    const auto cont = sys.parse<double, scope2>("{ func6 = { value = 5 + 5 } }");
+    const auto cont = sys.parse<double, scope2>("script", "{ func6 = { value = 5 + 5 } }");
     CHECK(cont.description_cmd_index_offsets.size() == cont.cmds.size() + 1);
     CHECK(cont.description_cmd_index_nodes.size() > 0);
 
@@ -1127,7 +1169,7 @@ TEST_CASE("Script description evaluation") {
     sys.register_function<&runtime_num>("runtime_num");
 
     {
-      const auto cont = sys.parse<double, void>("runtime_num + runtime_num");
+      const auto cont = sys.parse<double, void>("script", "runtime_num + runtime_num");
       ds::context ctx;
 
       bool saw_function = false;
@@ -1142,7 +1184,7 @@ TEST_CASE("Script description evaluation") {
     }
 
     {
-      const auto cont = sys.parse<std::string_view, void>("red");
+      const auto cont = sys.parse<std::string_view, void>("script", "red");
       ds::context ctx;
       bool saw_literal = false;
       cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
@@ -1158,7 +1200,7 @@ TEST_CASE("Script description evaluation") {
     sys.init_math();
     sys.register_function<&object_effect>("object_effect");
 
-    const auto cont = sys.parse<void, object_ref>("object_effect");
+    const auto cont = sys.parse<void, object_ref>("script", "object_effect");
     ds::context ctx;
     ctx.set_arg(0, object_ref{ 1 });
 
@@ -1175,7 +1217,7 @@ TEST_CASE("Script description evaluation") {
     sys.init_math();
     sys.register_function<&runtime_num>("runtime_num");
 
-    const auto cont = sys.parse<double, void>("{ custom_description = summary, runtime_num, 5 }");
+    const auto cont = sys.parse<double, void>("script", "{ custom_description = summary, runtime_num, 5 }");
     ds::context ctx;
     size_t nodes = 0;
     bool saw_summary = false;
@@ -1199,7 +1241,7 @@ TEST_CASE("Script description evaluation") {
 
     {
       sys.register_function<&runtime_num>("runtime_num");
-      const auto cont = sys.parse<double, void>("{ custom_description = 'abc abc', runtime_num }");
+      const auto cont = sys.parse<double, void>("script", "{ custom_description = 'abc abc', runtime_num }");
       ds::context ctx;
       bool saw_desc = false;
       cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
@@ -1212,7 +1254,7 @@ TEST_CASE("Script description evaluation") {
     }
 
     {
-      const auto cont = sys.parse<double, void>("{ custom_description = abc.def.123, 5 }");
+      const auto cont = sys.parse<double, void>("script", "{ custom_description = abc.def.123, 5 }");
       ds::context ctx;
       bool saw_desc = false;
       cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
@@ -1221,8 +1263,8 @@ TEST_CASE("Script description evaluation") {
       CHECK(saw_desc);
     }
 
-    CHECK_THROWS(sys.parse<double, void>("{ custom_description = { 5 }, 5 }"));
-    CHECK_THROWS(sys.parse<double, void>("{ custom_description = {}, 5 }"));
+    CHECK_THROWS(sys.parse<double, void>("script", "{ custom_description = { 5 }, 5 }"));
+    CHECK_THROWS(sys.parse<double, void>("script", "{ custom_description = {}, 5 }"));
   }
 }
 
@@ -1232,7 +1274,7 @@ TEST_CASE("Debug assert and trace") {
     sys.init_basic_functions();
     sys.init_math();
 
-    const auto cont = sys.parse<void, void>("assert = { false, failed_check }");
+    const auto cont = sys.parse<void, void>("script", "assert = { false, failed_check }");
     {
       ds::context ctx;
       CHECK_THROWS_WITH_AS(cont.process(&ctx), doctest::Contains("failed_check"), std::runtime_error);
@@ -1248,7 +1290,7 @@ TEST_CASE("Debug assert and trace") {
     sys.init_basic_functions();
     sys.init_math();
 
-    const auto cont = sys.parse<void, void>("trace = \"123 123\"");
+    const auto cont = sys.parse<void, void>("script", "trace = \"123 123\"");
     ds::context ctx;
     std::string out;
     ctx.trace = [&](const std::string& msg) { out = msg; };
@@ -1262,14 +1304,14 @@ TEST_CASE("Debug assert and trace") {
     sys.init_basic_functions();
     sys.init_math();
 
-    const auto cont = sys.parse<void, void>("trace = abc.def.123");
+    const auto cont = sys.parse<void, void>("script", "trace = abc.def.123");
     ds::context ctx;
     std::string out;
     ctx.trace = [&](const std::string& msg) { out = msg; };
     cont.process(&ctx);
     CHECK(out.find("abc.def.123") != std::string::npos);
 
-    CHECK_THROWS(sys.parse<void, void>("trace = { 5 + 5 }"));
+    CHECK_THROWS(sys.parse<void, void>("script", "trace = { 5 + 5 }"));
   }
 }
 
@@ -1285,7 +1327,7 @@ TEST_CASE("Nullable scope operator") {
   sys.register_function<&object_ref_name>("object_ref_name");
 
   SUBCASE("?= returns false in condition blocks when scope is invalid") {
-    const auto cont = sys.parse<bool, object_ref>("liege ?= { object_ref_is_eleven }");
+    const auto cont = sys.parse<bool, object_ref>("script", "liege ?= { object_ref_is_eleven }");
 
     {
       ds::context ctx;
@@ -1305,7 +1347,7 @@ TEST_CASE("Nullable scope operator") {
   }
 
   SUBCASE("?= returns zero in numeric blocks when scope is invalid") {
-    const auto cont = sys.parse<double, object_ref>("liege ?= { child_id }");
+    const auto cont = sys.parse<double, object_ref>("script", "liege ?= { child_id }");
 
     {
       ds::context ctx;
@@ -1325,7 +1367,7 @@ TEST_CASE("Nullable scope operator") {
   }
 
   SUBCASE("?= skips invalid object branches") {
-    const auto cont = sys.parse<object_ref, object_ref>("{ liege ?= { first_child }, nemesis }");
+    const auto cont = sys.parse<object_ref, object_ref>("script", "{ liege ?= { first_child }, nemesis }");
 
     {
       ds::context ctx;
@@ -1345,7 +1387,7 @@ TEST_CASE("Nullable scope operator") {
   }
 
   SUBCASE("?= skips invalid string branches") {
-    const auto cont = sys.parse<std::string_view, object_ref>("{ liege ?= { object_ref_name }, object_ref_name }");
+    const auto cont = sys.parse<std::string_view, object_ref>("script", "{ liege ?= { object_ref_name }, object_ref_name }");
 
     {
       ds::context ctx;
@@ -1387,7 +1429,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>(script1);
+    const auto cont = sys.parse<double, void>("script", script1);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -1398,7 +1440,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>(script2);
+    const auto cont = sys.parse<double, void>("script", script2);
     ds::context ctx;
     const size_t first_index = cont.find_arg("first");
     ctx.set_arg(first_index, 5.0);
@@ -1413,7 +1455,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>("{ ctx:arg:first }");
+    const auto cont = sys.parse<double, void>("script", "{ ctx:arg:first }");
 
     {
       ds::context ctx;
@@ -1441,7 +1483,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.init_math();
     sys.register_function<&func1>("func1");
     sys.register_function<&func7>("func7");
-    const auto cont = sys.parse<double, scope1>(script3);
+    const auto cont = sys.parse<double, scope1>("script", script3);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");
     ctx.set_arg(root_index, scope1{}); // set root
@@ -1456,7 +1498,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.init_math();
     sys.register_function<&func1>("func1");
     sys.register_function<&func7>("func7");
-    const auto cont = sys.parse<double, scope1>(script4);
+    const auto cont = sys.parse<double, scope1>("script", script4);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");
     ctx.set_arg(root_index, scope1{}); // set root
@@ -1472,7 +1514,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.register_function<&func1>("func1");
     sys.register_function<&func7>("func7");
     sys.register_function_iter<&every_on_list>("every_on_list", { "value" });
-    const auto cont = sys.parse<double, scope2>(script5);
+    const auto cont = sys.parse<double, scope2>("script", script5);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");
     ctx.set_arg(root_index, scope2{}); // set root
@@ -1489,7 +1531,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.register_function<&func1>("func1");
     sys.register_function<&func7>("func7");
     sys.register_function_iter<&every_on_list>("every_on_list", { "value" });
-    const auto cont = sys.parse<double, scope2>(script6);
+    const auto cont = sys.parse<double, scope2>("script", script6);
     ds::context ctx;
     const size_t root_index = cont.find_arg("root");
     ctx.set_arg(root_index, scope2{}); // set root
@@ -1507,7 +1549,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.register_function<&even_child>("even_child");
     sys.register_function<&child_is_even>("child_is_even");
 
-    const auto cont = sys.parse<double, object_ref>(
+    const auto cont = sys.parse<double, object_ref>("script", 
       "{ ctx:list:children = { add_to = outer, add_to = outer.liege, add_to = outer.even_child }, ctx:list:children = { filter = child_is_even, count } }"
     );
     ds::context ctx;
@@ -1526,7 +1568,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.register_function<&even_child>("even_child");
     sys.register_function<&child_id>("child_id");
 
-    const auto cont = sys.parse<object_ref, object_ref>(
+    const auto cont = sys.parse<object_ref, object_ref>("script", 
       "{ ctx:list:children = { add_to = outer, add_to = outer.even_child, map = liege, first = { child_id >= 12 }, default = this } }"
     );
     ds::context ctx;
@@ -1544,9 +1586,9 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.register_function<&liege>("liege");
     sys.register_function<&child_is_even>("child_is_even");
 
-    CHECK_THROWS(sys.parse<object_ref, object_ref>("{ ctx:list:children = { add_to = outer, first = child_is_even } }"));
+    CHECK_THROWS(sys.parse<object_ref, object_ref>("script", "{ ctx:list:children = { add_to = outer, first = child_is_even } }"));
 
-    const auto cont = sys.parse<object_ref, object_ref>(
+    const auto cont = sys.parse<object_ref, object_ref>("script", 
       "{ ctx:list:children = { add_to = outer, add_to = outer.liege, first = child_is_even, default = this } }"
     );
     ds::context ctx;
@@ -1565,7 +1607,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.register_function<&child_id>("child_id");
 
     {
-      const auto cont = sys.parse<double, object_ref>(
+      const auto cont = sys.parse<double, object_ref>("script", 
         "{ ctx:list:children = { add_to = outer, add_to = outer.even_child }, ctx:list:children = { sum = child_id } }"
       );
       ds::context ctx;
@@ -1577,8 +1619,8 @@ TEST_CASE("Using arguments + save to context + lists") {
     }
 
     {
-      CHECK_THROWS(sys.parse<double, object_ref>("{ ctx:list:children = { min = child_id } }"));
-      const auto cont = sys.parse<double, object_ref>("{ ctx:list:children = { add_to = outer, clear, min = child_id, default = 42 } }");
+      CHECK_THROWS(sys.parse<double, object_ref>("script", "{ ctx:list:children = { min = child_id } }"));
+      const auto cont = sys.parse<double, object_ref>("script", "{ ctx:list:children = { add_to = outer, clear, min = child_id, default = 42 } }");
       ds::context ctx;
       ctx.set_arg(cont.find_arg("root"), object_ref{ 1 });
       ctx.create_lists(&cont);
@@ -1588,7 +1630,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     }
 
     {
-      const auto cont = sys.parse<double, object_ref>(
+      const auto cont = sys.parse<double, object_ref>("script", 
         "{ ctx:list:children = { add_to = outer, add_to = outer.even_child }, ctx:list:children = { average = child_id, default = 0 } }"
       );
       ds::context ctx;
@@ -1604,7 +1646,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     ds::system sys;
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>(script7);
+    const auto cont = sys.parse<double, void>("script", script7);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -1621,7 +1663,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.init_math();
     sys.register_function<&func1>("func1");
     sys.register_function<&func7>("func7");
-    const auto cont = sys.parse<double, scope1>(script8);
+    const auto cont = sys.parse<double, scope1>("script", script8);
     ds::context ctx;
     ctx.set_arg(cont.find_arg("root"), scope1{});
     cont.process(&ctx);
@@ -1635,7 +1677,7 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.init_basic_functions();
     sys.init_math();
     sys.register_function<&func7>("func7");
-    CHECK_THROWS(sys.parse<double, void>("{ ctx_set = { first = 7 }, ctx:arg:first = { func7 } }"));
+    CHECK_THROWS(sys.parse<double, void>("script", "{ ctx_set = { first = 7 }, ctx:arg:first = { func7 } }"));
   }
 }
 
@@ -1651,7 +1693,7 @@ TEST_CASE("unsafe-mode execution") {
     sys.init_basic_functions();
     sys.init_math();
     sys.register_function<&g>("g");
-    const auto cont = sys.parse<double, void>("{1,2,3,g(4,5,6),NAND={false, false},max={7,8,9}}");
+    const auto cont = sys.parse<double, void>("script", "{1,2,3,g(4,5,6),NAND={false, false},max={7,8,9}}");
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -1663,7 +1705,7 @@ TEST_CASE("unsafe-mode execution") {
     sys.toggle_safety();
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>("35 * 2 + (-3) * (10 + 12) + (3 / 4) * max(5,6)");
+    const auto cont = sys.parse<double, void>("script", "35 * 2 + (-3) * (10 + 12) + (3 / 4) * max(5,6)");
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -1682,7 +1724,7 @@ TEST_CASE("unsafe-mode execution") {
 
     {
       g_short_circuit_calls = 0;
-      const auto cont = sys.parse<bool, void>("{ runtime_false, counted_true }");
+      const auto cont = sys.parse<bool, void>("script", "{ runtime_false, counted_true }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -1692,7 +1734,7 @@ TEST_CASE("unsafe-mode execution") {
 
     {
       g_short_circuit_calls = 0;
-      const auto cont = sys.parse<bool, void>("{ OR = { runtime_true, counted_false } }");
+      const auto cont = sys.parse<bool, void>("script", "{ OR = { runtime_true, counted_false } }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -1702,7 +1744,7 @@ TEST_CASE("unsafe-mode execution") {
 
     {
       g_short_circuit_calls = 0;
-      const auto cont = sys.parse<bool, void>("{ runtime_true, counted_true }");
+      const auto cont = sys.parse<bool, void>("script", "{ runtime_true, counted_true }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
@@ -1718,7 +1760,7 @@ TEST_CASE("unsafe-mode execution") {
     sys.init_math();
 
     {
-      const auto cont = sys.parse<double, void>("{ select = { { condition = false, 10 }, { condition = true, 20 }, { 100 } } }");
+      const auto cont = sys.parse<double, void>("script", "{ select = { { condition = false, 10 }, { condition = true, 20 }, { 100 } } }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<double>());
@@ -1726,7 +1768,7 @@ TEST_CASE("unsafe-mode execution") {
     }
 
     {
-      const auto cont = sys.parse<double, void>("{ sequence = { { condition = true, 5 }, { condition = true, 10 }, { condition = false, 15 } } }");
+      const auto cont = sys.parse<double, void>("script", "{ sequence = { { condition = true, 5 }, { condition = true, 10 }, { condition = false, 15 } } }");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<double>());
@@ -1739,7 +1781,7 @@ TEST_CASE("unsafe-mode execution") {
     sys.toggle_safety();
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>("{ switch = { value = 2, { value = 1, 10 }, { value = 2, 20 }, { value = 3, 30 } } }");
+    const auto cont = sys.parse<double, void>("script", "{ switch = { value = 2, { value = 1, 10 }, { value = 2, 20 }, { value = 3, 30 } } }");
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -1751,7 +1793,7 @@ TEST_CASE("unsafe-mode execution") {
     sys.toggle_safety();
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<double, void>("{ random = { { weight = 1, 3 }, { weight = 2, 6 }, { weight = 3, 9 } } }");
+    const auto cont = sys.parse<double, void>("script", "{ random = { { weight = 1, 3 }, { weight = 2, 6 }, { weight = 3, 9 } } }");
     ds::context ctx;
     ctx.prng_state = 125;
     cont.process(&ctx);
@@ -1764,7 +1806,7 @@ TEST_CASE("unsafe-mode execution") {
     sys.toggle_safety();
     sys.init_basic_functions();
     sys.init_math();
-    const auto cont = sys.parse<bool, void>("{ 5.0 == 5.00000000001 }");
+    const auto cont = sys.parse<bool, void>("script", "{ 5.0 == 5.00000000001 }");
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<bool>());
@@ -1812,7 +1854,7 @@ TEST_CASE("math and trig builtins") {
 
   for (const auto& c : cases) {
     CAPTURE(c.script);
-    const auto cont = sys.parse<double, void>(c.script);
+    const auto cont = sys.parse<double, void>("script", c.script);
     ds::context ctx;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
@@ -1825,7 +1867,7 @@ static void parse_void_d(const std::string& script) {
   ds::system sys;
   sys.init_basic_functions();
   sys.init_math();
-  (void)sys.parse<double, void>(script);
+  (void)sys.parse<double, void>("script", script);
 }
 
 // Locks in the diagnostic (raise_error) branches: malformed scripts must be rejected
