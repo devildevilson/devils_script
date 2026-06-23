@@ -369,6 +369,12 @@ void system::emit_call_instruction(parse_ctx*, container* scr, function_t safe, 
   scr->cmds.push_back(container::command(safety() ? safe : unsafe, scope_index));
 }
 
+inline void system::emit_command_name(parse_ctx* ctx, container* scr, const std::string_view& name) const {
+  const auto ref = store_string(scr, name);
+  scr->cmds.push_back(container::command(&push_command_name, packstrid(uint32_t(ref.start), uint32_t(ref.count))));
+  ctx->push<std::string_view>();
+}
+
 template <typename RetT>
 void system::apply_call_stack_effect(parse_ctx* ctx, const size_t pops) const {
   for (size_t i = 0; i < pops; ++i) ctx->pop();
@@ -447,8 +453,10 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
           if (index == 0) return;
 
+          // For an effect, push its name on top of the two fold operands so on_effect can read it.
+          if constexpr (eff != nullptr) sys->emit_command_name(ctx, scr, curfname);
           sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
-          sys->apply_call_stack_effect<ret_type>(ctx, 2);
+          sys->apply_call_stack_effect<ret_type>(ctx, eff != nullptr ? 3 : 2);
         });
 
         ctx->unlimited_func_index = prev_index;
@@ -456,6 +464,8 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         size_t offset = 1;
         offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, func_args_names);
         const size_t stack_size_with_args = ctx->stack_types.size();
+        // For an effect, push its name on top of the args so on_effect can read it as a stack value.
+        if constexpr (eff != nullptr) sys->emit_command_name(ctx, scr, curfname);
         sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
 
         if constexpr (std::is_same_v<scope_type, internal::thisctxlist>) {
@@ -468,7 +478,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
           }
         }
 
-        sys->apply_call_stack_effect<ret_type>(ctx, args_count);
+        sys->apply_call_stack_effect<ret_type>(ctx, eff != nullptr ? args_count + 1 : args_count);
         const size_t stack_size = stack_size_with_args - args_count; // size after consuming args, before the result push
         if constexpr (uftype == user_function_type::object) {
           // Scope-returning functions may be followed by a nested block. If the function

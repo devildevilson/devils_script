@@ -39,7 +39,6 @@ void script_container::shrink_to_fit() {
   saved.shrink_to_fit();
   lists.shrink_to_fit();
   string_pool.shrink_to_fit();
-  command_names.shrink_to_fit();
 }
 
 script_container container::strip_description() const& {
@@ -97,7 +96,6 @@ void container::build_description_index() {
 
   description_cmd_index_offsets.assign(cmds.size() + 1, 0);
   description_cmd_index_nodes.clear();
-  command_names.assign(cmds.size(), { SIZE_MAX, SIZE_MAX });
 
   for (size_t node = 0; node < block_descs.size(); ++node) {
     const auto& bd = block_descs[node];
@@ -116,14 +114,6 @@ void container::build_description_index() {
     if (bd.cmd_start >= cmds.size()) continue;
     if (bd.cmd_start == bd.cmd_index) continue;
     description_cmd_index_nodes[cursor[bd.cmd_start]++] = node;
-  }
-
-  // Opcode names are not stored per command: basic ops resolve via their function pointer,
-  // user functions via their producing node's name.
-  for (size_t i = 0; i < cmds.size(); ++i) {
-    const basicf bf = find_basicf_by_fp(cmds[i].fp);
-    if (bf != basicf::invalid) command_names[i] = { static_cast<size_t>(bf), SIZE_MAX };
-    else if (cmd_node[i] != SIZE_MAX) command_names[i] = block_descs[cmd_node[i]].name;
   }
 }
 
@@ -188,17 +178,24 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
       }
     };
 
+    // Command name for matching: basic ops from the fp, user functions from the producing node.
+    const auto cmd_name = [&](const size_t k) -> std::string_view {
+      const basicf bf = find_basicf_by_fp(cmds[k].fp);
+      if (bf != basicf::invalid) return to_string(bf);
+      return k < cmd_node.size() && cmd_node[k] != SIZE_MAX ? get_string(block_descs[cmd_node[k]].name) : std::string_view();
+    };
+
     if (description_cmd_index_offsets.size() == cmds.size() + 1) {
       for (size_t offset = description_cmd_index_offsets[i]; offset < description_cmd_index_offsets[i + 1]; ++offset) {
         const size_t node = description_cmd_index_nodes[offset];
-        if (get_string(block_descs[node].name) != get_command_name(i)) continue;
+        if (get_string(block_descs[node].name) != cmd_name(i)) continue;
         record(node);
       }
     } else {
       for (size_t node = 0; node < block_descs.size(); ++node) {
         const auto& bd = block_descs[node];
         if (bd.cmd_start != i || bd.cmd_start == bd.cmd_index) continue;
-        if (get_string(bd.name) != get_command_name(i)) continue;
+        if (get_string(bd.name) != cmd_name(i)) continue;
         record(node);
       }
     }
@@ -276,9 +273,13 @@ void script_container::error_at(const context* ctx, const std::string_view& msg)
   throw std::runtime_error(std::format("script '{}' @ {}:{}: {}", get_name(), loc.line, loc.column, msg));
 }
 
-std::string_view script_container::get_command_name(const size_t index) const {
-  if (index >= command_names.size()) return std::string_view();
-  return get_string(command_names[index]);
+std::string_view container::get_command_name(const size_t index) const {
+  // Names are not stored per command: basic ops resolve from their function pointer, user functions
+  // and builtins (assert/trace/...) from their producing description node via cmd_node.
+  if (index >= cmds.size()) return std::string_view();
+  const basicf bf = find_basicf_by_fp(cmds[index].fp);
+  if (bf != basicf::invalid) return to_string(bf);
+  return index < cmd_node.size() && cmd_node[index] != SIZE_MAX ? get_string(block_descs[cmd_node[index]].name) : std::string_view();
 }
 
 std::string disassemble(const container& scr) {

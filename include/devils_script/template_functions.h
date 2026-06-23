@@ -215,16 +215,25 @@ int64_t invoke_mathfunc(int64_t val, context* ctx, const script_container* scr, 
   return -int64_t(COUNT) + 1;
 }
 
+// Reads the command name pushed on the stack top ahead of an effect call and removes it, leaving the
+// function's arguments back on top. Called at the start of every on_effect branch so the name reaches
+// the callback as an ordinary stack value (no command_names side table).
+inline std::string_view take_command_name(context* ctx) {
+  const auto name = ctx->stack.safe_get<std::string_view>(-1);
+  ctx->stack.erase();
+  return name;
+}
+
 template <size_t OFF, size_t COUNT, auto f, on_effect_t<decltype(f), scope_t<decltype(f)>> eff, size_t... I>
-int64_t invoke_userfunc(context* ctx, const script_container* scr, std::index_sequence<I...>) {
+int64_t invoke_userfunc(context* ctx, [[maybe_unused]] const script_container* scr, std::index_sequence<I...>) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       const auto& t = std::make_tuple(stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       std::apply(f, t);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, t);
     }
 
@@ -236,11 +245,11 @@ int64_t invoke_userfunc(context* ctx, const script_container* scr, std::index_se
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       auto t = std::make_tuple(stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
 
@@ -249,15 +258,15 @@ int64_t invoke_userfunc(context* ctx, const script_container* scr, std::index_se
 }
 
 template <size_t OFF, size_t COUNT, auto f, typename HT, on_effect_t<decltype(f), HT> eff, size_t... I>
-int64_t invoke_userfunc_scope(context* ctx, const script_container* scr, HT &scope, std::index_sequence<I...>) {
+int64_t invoke_userfunc_scope(context* ctx, [[maybe_unused]] const script_container* scr, HT &scope, std::index_sequence<I...>) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f, scope, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       const auto& t = std::make_tuple(scope, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       std::apply(f, t);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, t);
     }
 
@@ -269,11 +278,11 @@ int64_t invoke_userfunc_scope(context* ctx, const script_container* scr, HT &sco
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       const auto& t = std::make_tuple(scope, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
 
@@ -299,15 +308,15 @@ int64_t invoke_mathfunc_unsafe(int64_t val, context* ctx, const script_container
 }
 
 template <size_t OFF, size_t COUNT, auto f, on_effect_t<decltype(f), scope_t<decltype(f)>> eff, size_t... I>
-int64_t invoke_userfunc_unsafe(context* ctx, const script_container* scr, std::index_sequence<I...>) {
+int64_t invoke_userfunc_unsafe(context* ctx, [[maybe_unused]] const script_container* scr, std::index_sequence<I...>) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       auto t = std::make_tuple(stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       std::apply(f, t);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, t);
     }
 
@@ -318,11 +327,11 @@ int64_t invoke_userfunc_unsafe(context* ctx, const script_container* scr, std::i
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       auto t = std::make_tuple(stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
 
@@ -331,15 +340,15 @@ int64_t invoke_userfunc_unsafe(context* ctx, const script_container* scr, std::i
 }
 
 template <size_t OFF, size_t COUNT, auto f, typename HT, on_effect_t<decltype(f), HT> eff, size_t... I>
-int64_t invoke_userfunc_scope_unsafe(context* ctx, const script_container* scr, HT &scope, std::index_sequence<I...>) {
+int64_t invoke_userfunc_scope_unsafe(context* ctx, [[maybe_unused]] const script_container* scr, HT &scope, std::index_sequence<I...>) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f, scope, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       const auto& t = std::make_tuple(scope, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       std::apply(f, t);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, t);
     }
 
@@ -350,11 +359,11 @@ int64_t invoke_userfunc_scope_unsafe(context* ctx, const script_container* scr, 
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // pushed on top ahead of the args
       auto t = std::make_tuple(scope, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
       const auto ret = std::apply(f, t);
       ctx->stack.resize(ctx->stack.size() - COUNT);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, t);
     }
 
@@ -377,14 +386,14 @@ int64_t invoke_mathfunc_noargs(int64_t val, context* ctx, const script_container
 }
 
 template <auto f, on_effect_t<decltype(f), scope_t<decltype(f)>> eff>
-int64_t invoke_userfunc_noargs(context* ctx, const script_container* scr) {
+int64_t invoke_userfunc_noargs(context* ctx, [[maybe_unused]] const script_container* scr) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f);
     } else {
+      const auto name = take_command_name(ctx);   // the only thing pushed ahead of a no-arg call
       std::invoke(f);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, std::tuple<>{});
     }
 
@@ -394,9 +403,9 @@ int64_t invoke_userfunc_noargs(context* ctx, const script_container* scr) {
       const auto ret = std::invoke(f);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // remove the name before pushing the result
       const auto ret = std::invoke(f);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, std::tuple<>{});
     }
 
@@ -405,14 +414,14 @@ int64_t invoke_userfunc_noargs(context* ctx, const script_container* scr) {
 }
 
 template <auto f, typename HT, on_effect_t<decltype(f), HT> eff>
-int64_t invoke_userfunc_scope_noargs(context* ctx, const script_container* scr, HT& scope) {
+int64_t invoke_userfunc_scope_noargs(context* ctx, [[maybe_unused]] const script_container* scr, HT& scope) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f, scope);
     } else {
+      const auto name = take_command_name(ctx);   // the only thing pushed ahead of a no-arg call
       std::invoke(f, scope);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, std::make_tuple(scope));
     }
 
@@ -422,9 +431,9 @@ int64_t invoke_userfunc_scope_noargs(context* ctx, const script_container* scr, 
       const auto ret = std::invoke(f, scope);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // remove the name before pushing the result
       const auto ret = std::invoke(f, scope);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, std::make_tuple(scope));
     }
 
@@ -448,14 +457,14 @@ int64_t invoke_mathfunc_unsafe_noargs(int64_t val, context* ctx, const script_co
 }
 
 template <auto f, on_effect_t<decltype(f), scope_t<decltype(f)>> eff>
-int64_t invoke_userfunc_unsafe_noargs(context* ctx, const script_container* scr) {
+int64_t invoke_userfunc_unsafe_noargs(context* ctx, [[maybe_unused]] const script_container* scr) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f);
     } else {
+      const auto name = take_command_name(ctx);   // the only thing pushed ahead of a no-arg call
       std::invoke(f);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, std::tuple<>{});
     }
 
@@ -465,9 +474,9 @@ int64_t invoke_userfunc_unsafe_noargs(context* ctx, const script_container* scr)
       const auto ret = std::invoke(f);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // remove the name before pushing the result
       const auto ret = std::invoke(f);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, std::tuple<>{});
     }
 
@@ -476,14 +485,14 @@ int64_t invoke_userfunc_unsafe_noargs(context* ctx, const script_container* scr)
 }
 
 template <auto f, typename HT, on_effect_t<decltype(f), HT> eff>
-int64_t invoke_userfunc_scope_unsafe_noargs(context* ctx, const script_container* scr, HT& scope) {
+int64_t invoke_userfunc_scope_unsafe_noargs(context* ctx, [[maybe_unused]] const script_container* scr, HT& scope) {
   using ret_val_t = std::remove_cvref_t<utils::function_result_type<decltype(f)>>;
   if constexpr (utils::is_void_v<ret_val_t> || std::is_same_v<ret_val_t, ignore_value>) {
     if constexpr (eff == nullptr) {
       std::invoke(f, scope);
     } else {
+      const auto name = take_command_name(ctx);   // the only thing pushed ahead of a no-arg call
       std::invoke(f, scope);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, std::make_tuple(scope));
     }
 
@@ -493,9 +502,9 @@ int64_t invoke_userfunc_scope_unsafe_noargs(context* ctx, const script_container
       const auto ret = std::invoke(f, scope);
       detail::stack_push_result(ctx, ret);
     } else {
+      const auto name = take_command_name(ctx);   // remove the name before pushing the result
       const auto ret = std::invoke(f, scope);
       detail::stack_push_result(ctx, ret);
-      const auto& name = scr->get_command_name(ctx->current_index);
       std::invoke(eff, ctx->userptr, name, ret, std::make_tuple(scope));
     }
 

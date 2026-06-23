@@ -219,7 +219,6 @@ TEST_CASE("Description golden (partial evaluation)") {
 
     REQUIRE(!cont.block_descs.empty());
     for (const auto& d : cont.block_descs) { check_ref(d.name); check_ref(d.custom_description); }
-    for (const auto& n : cont.command_names) check_ref(n);
 
     // ...and describe surfaces every expected named node, each resolved from the pool.
     ds::context ctx;

@@ -508,6 +508,14 @@ void push_any_to_list(std::vector<stack_element>& list, const any_stack& val) {
 
 int64_t list_op_data(int64_t, context*, const script_container*) { return 0; }
 
+// Push the command name (packed string-pool ref in `arg`) onto the stack just before an effect call,
+// so the on_effect callback can read it as an ordinary stack value instead of a per-command side table.
+int64_t push_command_name(int64_t arg, context* ctx, const script_container* scr) {
+  const auto [pos, size] = unpackstrid(arg);
+  ctx->stack.push(scr->get_string(pos, size));
+  return 1;
+}
+
 int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
   // Metadata lives inline in the instruction stream, not a side table: the opcode arg packs
   // (kind, list_index); the three following cmd slots carry, as immediates read here, the callback

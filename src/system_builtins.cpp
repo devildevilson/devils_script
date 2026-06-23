@@ -171,10 +171,9 @@ static ignore_value remove_from(const thisctxlist& l, const any_stack& val) {
 static double chance() { return 1; }
 static any_stack randomfn(double, const element_view&) { return any_stack{}; }
 
-static std::string debug_environment(const context* ctx, const script_container* scr, const size_t consumed_args) {
-  const auto fn = scr != nullptr
-    ? scr->get_command_name(ctx->current_index)
-    : std::string_view();
+// The command name is passed explicitly by the caller (assert/trace know their own name) — it is no
+// longer looked up from a per-command table, which has been removed.
+static std::string debug_environment(const context* ctx, const std::string_view fn, const size_t consumed_args) {
   const int64_t scope_index = int64_t(ctx->stack.size()) - int64_t(consumed_args) - 1;
   const auto scope = scope_index >= 0 ? ctx->stack.type(scope_index) : std::string_view();
   return std::format("function '{}', scope '{}'", fn, scope);
@@ -183,14 +182,14 @@ static std::string debug_environment(const context* ctx, const script_container*
 static int64_t debug_assert(int64_t, context* ctx, const script_container* scr) {
   const auto message = ctx->stack.safe_pop<std::string_view>();
   const bool condition = ctx->stack.safe_pop<bool>();
-  if (!condition) scr->error_at(ctx, std::format("assert failed: '{}' ({})", message, debug_environment(ctx, scr, 2)));
+  if (!condition) scr->error_at(ctx, std::format("assert failed: '{}' ({})", message, debug_environment(ctx, "assert", 2)));
   return -2;
 }
 
 static int64_t debug_trace(int64_t, context* ctx, const script_container* scr) {
   const auto message = ctx->stack.safe_pop<std::string_view>();
   const auto loc = scr->loc_at(ctx);
-  ctx->trace(std::format("Script trace @ {}:{}: '{}' ({})", loc.line, loc.column, message, debug_environment(ctx, scr, 1)));
+  ctx->trace(std::format("Script trace @ {}:{}: '{}' ({})", loc.line, loc.column, message, debug_environment(ctx, "trace", 1)));
   return -1;
 }
 // Grow ctx->lists by `arg` fresh empty slots: the sub-script's list frame. Emitted by the execute

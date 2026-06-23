@@ -114,6 +114,9 @@ int64_t list_pipeline(int64_t, context*, const script_container*);
 // Placeholder for the immediate-data cmd slots that follow a list_pipeline opcode (its packed
 // ranges/input-type). Never executed — list_pipeline reads them as data and skips past them.
 int64_t list_op_data(int64_t, context*, const script_container*);
+// Pushes a command name (packed string-pool ref) onto the stack ahead of an effect call so its
+// on_effect callback can read the name as a normal stack value (no command_names side table).
+int64_t push_command_name(int64_t, context*, const script_container*);
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 }

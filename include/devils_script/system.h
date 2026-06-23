@@ -406,6 +406,11 @@ public:
   template <typename RetT>
   void apply_call_stack_effect(parse_ctx* ctx, const size_t pops) const;
 
+  // Emits a push_command_name opcode (carrying `name` as a packed string-pool ref) and tracks the
+  // extra string_view on the parse stack. Used right before an effect call so its on_effect callback
+  // reads the name off the stack — replacing the per-command command_names side table.
+  void emit_command_name(parse_ctx* ctx, container* scr, const std::string_view& name) const;
+
   template <auto f>
     requires(valid_function_type<decltype(f)>)
   void register_function(std::string name, std::vector<std::string> func_args_names = {}, custom_init_fn_t init_f = nullptr);

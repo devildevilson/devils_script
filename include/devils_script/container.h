@@ -90,7 +90,6 @@ struct script_container {
   std::vector<argument_data> saved;
   std::vector<argument_data> lists;
   std::string string_pool;
-  std::vector<string_ref> command_names;
   string_ref name{};
   // Static return type of this script (the parse-time RETURN_T), as a stable type-name view.
   // Used by `execute` to type-check a sub-script's return against the caller's expected type.
@@ -102,7 +101,6 @@ struct script_container {
   std::string_view get_string(const size_t start, const size_t count) const;
   std::string_view get_string(const string_ref& str) const;
   std::string_view get_name() const;
-  std::string_view get_command_name(const size_t index) const;
   // Source position of the command at ctx->current_index ({0,0} if out of range).
   src_loc loc_at(const context* ctx) const;
   // Throws std::runtime_error prefixed with `script '<name>' @ <line>:<column>: ` using the
@@ -190,6 +188,10 @@ struct container : public script_container {
   void make_table(context* ctx, node_view& viewer) const;
   void build_description_index();
   void describe(context* ctx, const description_callback_t& fn) const;
+  // Opcode name for command `index`: basic ops resolve from the function pointer, user functions from
+  // the producing description node (cmd_node). Introspection-only — needs the description data that a
+  // stripped script_container does not retain.
+  std::string_view get_command_name(const size_t index) const;
 };
 
 void shrink_to_fit(std::span<script_container> scripts);
