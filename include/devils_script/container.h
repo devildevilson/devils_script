@@ -101,10 +101,6 @@ struct script_container {
   std::vector<argument_data> saved;
   std::vector<argument_data> lists;
   std::vector<list_pipeline_op> list_pipeline_ops;
-  // One entry per `execute` opcode (its int64 arg indexes this table): the resolved, caller-owned
-  // sub-script to run. The arguments (root first when present, then named args in slot order) are
-  // pushed onto the stack by the caller and consumed by the opcode, so nothing else is recorded.
-  std::vector<const script_container*> subscripts;
   std::string string_pool;
   std::vector<string_ref> command_names;
   string_ref name{};

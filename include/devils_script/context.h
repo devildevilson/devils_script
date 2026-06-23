@@ -105,6 +105,15 @@ struct context {
   // stack indices — pushthis/pushprev/erase and the packed two-index ops — resolve relative to the
   // live stack top instead of requiring the parent's stack to be copied aside.
   size_t frame_base;
+  // Base offsets for a sub-script's argument, saved-value and list frames (the same idea as
+  // frame_base, but for the fixed-size args_stack/saved_stack and the growable lists vector). A
+  // sub-script's compiled arg/saved/list indices are added to these so its frame sits above the
+  // caller's; all are zero at top level and set/restored by the `execute` opcode. Because arg slots
+  // are frame-local, a sub never clobbers the caller's arguments — no snapshot/restore is needed, and
+  // a sub-script's final argument values survive the call (read back by the in/out write-back opcodes).
+  size_t arg_base;
+  size_t saved_base;
+  size_t list_base;
   void* userptr;
   const script_container* current_script;
   std::function<void(const std::string&)> trace;
@@ -116,7 +125,7 @@ struct context {
   // Any non-zero seed is valid; containers can override it with their own parse seed.
   inline context() noexcept
     : stack(stack_size), saved_stack(local_vars_size), args_stack(script_arguments_size),
-      prng_state(0xdeadbab1ull), current_index(0), frame_base(0), userptr(nullptr), current_script(nullptr),
+      prng_state(0xdeadbab1ull), current_index(0), frame_base(0), arg_base(0), saved_base(0), list_base(0), userptr(nullptr), current_script(nullptr),
       trace([](const std::string& msg) { std::cout << msg << '\n'; }) {
     // Saved values and args are indexed directly by compiled code, not pushed sequentially.
     saved_stack._size = saved_stack._data.size();
@@ -163,7 +172,7 @@ struct context {
   inline std::string_view arg_type(const int64_t index) const { return args_stack.type(index); }
   inline std::string_view saved_type(const int64_t index) const { return saved_stack.type(index); }
   inline std::string_view return_type() const { return _return_value.type(); }
-  inline void clear() { current_index = 0; frame_base = 0; stack.resize(0); }
+  inline void clear() { current_index = 0; frame_base = 0; arg_base = 0; saved_base = 0; list_base = 0; stack.resize(0); }
   void create_lists(const script_container* scr);
 };
 

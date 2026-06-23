@@ -193,49 +193,118 @@ static int64_t debug_trace(int64_t, context* ctx, const script_container* scr) {
   ctx->trace(std::format("Script trace @ {}:{}: '{}' ({})", loc.line, loc.column, message, debug_environment(ctx, scr, 1)));
   return -1;
 }
+// Grow ctx->lists by `arg` fresh empty slots: the sub-script's list frame. Emitted by the execute
+// builtin right before the call when the target uses lists; paired with list_frame_exit afterwards.
+static int64_t list_frame_enter(int64_t arg, context* ctx, const script_container*) {
+  ctx->lists.resize(ctx->lists.size() + size_t(arg));
+  return 0;
+}
 
-// Runs a resolved sub-script in the current context as a script-in-script call. The call frame is
-// just C++ locals plus a stack base offset: `args_stack`/`saved_stack` are flat fixed-size arrays
-// indexed directly, so we snapshot only the slots the sub-script will clobber; the main stack is
-// NOT copied — instead `ctx->frame_base` is bumped to the live stack top so the sub-script's
-// compiled (zero-based, absolute) stack indices resolve above the parent's frame. The sub-script's
-// arguments (root first when present, then named args in declared-slot order) sit on the stack top:
-// the caller pushed them, and here we move them straight into `args_stack` before the call.
+// Drop the top `arg` list slots — the sub-script's list frame — once the call has returned.
+static int64_t list_frame_exit(int64_t arg, context* ctx, const script_container*) {
+  ctx->lists.resize(ctx->lists.size() - size_t(arg));
+  return 0;
+}
+
+// In/out list binding (path B), emitted both BEFORE and AFTER the execute opcode (double-swap, O(1)).
+// `arg` packs (top_off, caller_index): the sub-script's list slot sits `top_off` entries below the
+// end of ctx->lists (independent of any base, since list_frame_enter just appended it), and the
+// caller's list is `caller_index + ctx->list_base`. Both swaps run while ctx->list_base is the
+// CALLER's base — the execute opcode sets and restores its own list_base internally — so the pre-swap
+// moves the caller's contents into the sub's slot and the post-swap moves the sub's mutations back.
+static int64_t swap_bound_list(int64_t arg, context* ctx, const script_container*) {
+  const auto [top_off, caller_index] = unpack2(arg);
+  std::swap(ctx->lists[ctx->lists.size() - size_t(top_off)], ctx->lists[size_t(caller_index) + ctx->list_base]);
+  return 0;
+}
+
+// Index of the just-returned sub-script's argument frame. The sub's arg slots survive the execute
+// opcode (args are frame-local — no snapshot/restore), so an in/out write-back runs AFTER execute
+// while ctx->arg_base/current_script are the CALLER's: the sub's frame sits at caller_arg_base +
+// caller's arg count. (Bounded by script_arguments_size, guaranteed at parse + by execute's guard.)
+static inline size_t returned_sub_arg_base(const context* ctx, const script_container* scr) {
+  return ctx->arg_base + scr->args.size();
+}
+
+// In/out scalar write-back: copy the sub-script's final value of arg slot `sub_slot` (high half of
+// arg) into the caller's saved slot (caller_index + ctx->saved_base). Emitted after execute for a
+// `name = ctx:saved:x` binding.
+static int64_t writeback_arg_to_saved(int64_t arg, context* ctx, const script_container* scr) {
+  const auto [sub_slot, caller_index] = unpack2(arg);
+  ctx->set_saved(size_t(caller_index) + ctx->saved_base, ctx->get_arg<any_stack>(returned_sub_arg_base(ctx, scr) + size_t(sub_slot)));
+  return 0;
+}
+
+// In/out scalar write-back into the caller's arg slot (caller_index + ctx->arg_base). Emitted after
+// execute for a `name = ctx:arg:x` binding.
+static int64_t writeback_arg_to_arg(int64_t arg, context* ctx, const script_container* scr) {
+  const auto [sub_slot, caller_index] = unpack2(arg);
+  ctx->set_arg(size_t(caller_index) + ctx->arg_base, ctx->get_arg<any_stack>(returned_sub_arg_base(ctx, scr) + size_t(sub_slot)));
+  return 0;
+}
+
+// Runs a resolved sub-script in the current context as a script-in-script call. The target sub-script
+// pointer is packed directly into `arg` (caller-owned, outlives the call — same lifetime model as the
+// resolver). The call frame is just base offsets + a little transient state in C++ locals; nothing is
+// copied. The main stack is NOT copied — `ctx->frame_base` is bumped to the live stack top so the
+// sub-script's compiled (zero-based, absolute) stack indices resolve above the parent's frame. Args,
+// saved values and lists are all frame-local via arg_base/saved_base/list_base, so a sub never
+// clobbers the caller's slots and needs no snapshot. The sub-script's arguments (root first when
+// present, then named args in slot order) sit on the stack top; here we move them into args_stack.
+// List-frame append/shrink and in/out swaps/write-backs are handled by the surrounding opcodes.
 static int64_t execute_script(int64_t arg, context* ctx, const script_container* scr) {
-  const script_container* sub = scr->subscripts[size_t(arg)];
+  const auto* sub = reinterpret_cast<const script_container*>(static_cast<intptr_t>(arg));
   const size_t nargs = sub->args.size();
 
-  // Snapshot the parent frame slots the sub-script may overwrite, plus the transient runtime state.
-  std::array<stack_element, context::script_arguments_size> saved_args;
-  std::array<std::string_view, context::script_arguments_size> saved_arg_types;
-  for (size_t i = 0; i < nargs; ++i) { saved_args[i] = ctx->args_stack._data[i]; saved_arg_types[i] = ctx->args_stack._types[i]; }
+  // Arguments are frame-local: the sub's arg frame sits above the caller's, so the caller's slots are
+  // never touched and the sub's final values survive for the in/out write-back opcodes.
+  const size_t new_arg_base = ctx->arg_base + scr->args.size();
+  if (new_arg_base + nargs > context::script_arguments_size)
+    scr->error_at(ctx, std::format("script-in-script argument frame overflow: '{}' needs {} arg slots at base {}, only {} available", sub->get_name(), nargs, new_arg_base, context::script_arguments_size));
   const size_t nsaved = sub->saved.size();
-  std::array<stack_element, context::local_vars_size> saved_vals;
-  std::array<std::string_view, context::local_vars_size> saved_val_types;
-  for (size_t i = 0; i < nsaved; ++i) { saved_vals[i] = ctx->saved_stack._data[i]; saved_val_types[i] = ctx->saved_stack._types[i]; }
+  // Saved values are frame-local: the sub-script's saved frame sits ABOVE the caller's.
+  const size_t new_saved_base = ctx->saved_base + scr->saved.size();
+  if (new_saved_base + nsaved > context::local_vars_size)
+    scr->error_at(ctx, std::format("script-in-script saved-value frame overflow: '{}' needs {} saved slots at base {}, only {} available", sub->get_name(), nsaved, new_saved_base, context::local_vars_size));
+  // Lists are frame-local: the sub's list frame is the top `nlists` slots of ctx->lists, already
+  // appended by the preceding list_frame_enter opcode (and dropped by list_frame_exit afterwards).
+  const size_t nlists = sub->lists.size();
+  const size_t new_list_base = ctx->lists.size() - nlists;
+  const size_t saved_list_base = ctx->list_base;
+
   const size_t saved_index = ctx->current_index;
-  const size_t saved_base = ctx->frame_base;
+  const size_t saved_frame_base = ctx->frame_base;
+  const size_t saved_arg_base = ctx->arg_base;
+  const size_t saved_saved_base = ctx->saved_base;
   const any_stack saved_return = ctx->_return_value;
 
-  // Move the argument values (top `nargs` of the stack, in declared-slot order) into args_stack.
+  // Move the argument values (top `nargs` of the stack, in slot order) into the sub's arg frame.
   const size_t base = ctx->stack._size - nargs;
   for (size_t k = 0; k < nargs; ++k) {
-    ctx->args_stack._data[k] = ctx->stack._data[base + k];
-    ctx->args_stack._types[k] = ctx->stack._types[base + k];
+    ctx->args_stack._data[new_arg_base + k] = ctx->stack._data[base + k];
+    ctx->args_stack._types[new_arg_base + k] = ctx->stack._types[base + k];
   }
   ctx->stack._size = base;       // consume the arguments; sub-script runs above this point
 
   ctx->frame_base = base;        // zero-based sub indices resolve relative to the live stack top
+  ctx->arg_base = new_arg_base;      // sub's arg slots sit above the caller's frame
+  ctx->saved_base = new_saved_base;  // sub's saved slots sit above the caller's frame
+  ctx->list_base = new_list_base;    // sub's lists sit above the caller's in ctx->lists
+  // The sub-script starts with a fresh saved frame: clear its slot types so a read before write is
+  // caught by the usual type check rather than seeing a parent's stale value.
+  for (size_t i = 0; i < nsaved; ++i) ctx->saved_stack._types[new_saved_base + i] = std::string_view();
   ctx->current_index = 0;
   sub->process(ctx);             // process() saves/restores current_script itself
 
   const any_stack result = ctx->_return_value;
 
-  // Restore the parent frame.
+  // Restore the parent frame. The sub's arg slots are left as-is (scratch above the caller's frame) so
+  // the in/out write-back opcodes that follow can still read them.
   ctx->stack._size = base;
-  ctx->frame_base = saved_base;
-  for (size_t i = 0; i < nargs; ++i) { ctx->args_stack._data[i] = saved_args[i]; ctx->args_stack._types[i] = saved_arg_types[i]; }
-  for (size_t i = 0; i < nsaved; ++i) { ctx->saved_stack._data[i] = saved_vals[i]; ctx->saved_stack._types[i] = saved_val_types[i]; }
+  ctx->frame_base = saved_frame_base;
+  ctx->arg_base = saved_arg_base;
+  ctx->saved_base = saved_saved_base;
+  ctx->list_base = saved_list_base;
   ctx->_return_value = saved_return;
   ctx->current_index = saved_index;
 
@@ -335,7 +404,6 @@ void system::init_basic_functions() {
     const script_container* sub = sys->resolve_script(script_name);
     if (sub == nullptr) sys->raise_error(std::format("'execute' could not resolve script '{}' (is a script_resolver installed?)", script_name));
     if (sub == static_cast<const script_container*>(scr)) sys->raise_error(std::format("'execute' cannot call the script currently being compiled ('{}')", script_name));
-    if (!sub->lists.empty()) sys->raise_error(std::format("'execute' target script '{}' uses lists, which is not supported yet", script_name));
 
     const bool has_root = !sub->args.empty() && sub->args[0].name.count == SIZE_MAX;
     const size_t named_base = has_root ? 1 : 0;
@@ -352,16 +420,63 @@ void system::init_basic_functions() {
       ctx->push(cur_type);
     }
 
-    // Collect provided named-argument children: `name = <value>` pairs.
+    // Collect provided children. `name = <value>` (args_count 1) is a scalar argument; a bare `name`
+    // (args_count 0) is an in/out LIST binding: the caller's list `ctx:list:name` is bound by name to
+    // the sub-script's same-named list, and the two are double-swapped around the call at runtime so
+    // the sub's mutations land in the caller's list. A sub list left unbound here stays sub-local
+    // scratch (path A).
     std::vector<std::pair<std::string_view, command_block>> provided;
+    struct list_bind { size_t sub_slot; size_t caller_idx; };
+    std::vector<list_bind> list_bindings;
     while (offset < args.size()) {
       auto child = command_block(args, offset);
       offset += child.size();
       if (child.name() == custom_description_constant) continue;
+
+      if (child.args_count() == 0) {
+        const auto lname = child.name();
+        const size_t sub_slot = sub->find_list(lname);
+        if (sub_slot >= sub->lists.size())
+          sys->raise_error(std::format("'execute' target '{}' has no list parameter '{}'", script_name, lname));
+        for (const auto& b : list_bindings) if (b.sub_slot == sub_slot)
+          sys->raise_error(std::format("'execute' list parameter '{}' bound more than once", lname));
+
+        size_t caller_idx = scr->find_list(lname);
+        if (caller_idx >= scr->lists.size()) {
+          scr->lists.push_back({ sys->store_string(scr, lname), sub->lists[sub_slot].type });
+          caller_idx = scr->lists.size() - 1;
+        } else if (scr->lists[caller_idx].type.empty()) {
+          scr->lists[caller_idx].type = sub->lists[sub_slot].type;
+        } else if (!sub->lists[sub_slot].type.empty() && scr->lists[caller_idx].type != sub->lists[sub_slot].type) {
+          sys->raise_error(std::format("'execute' list '{}' type mismatch: caller holds '{}', target '{}' expects '{}'",
+            lname, scr->lists[caller_idx].type, script_name, sub->lists[sub_slot].type));
+        }
+        list_bindings.push_back({ sub_slot, caller_idx });
+        continue;
+      }
+
       if (child.args_count() != 1)
         sys->raise_error(std::format("'execute' argument '{}' must be of the form '{} = <value>'", child.name(), child.name()));
       provided.emplace_back(child.name(), command_block(child, 1));
     }
+
+    // Detect an in/out scalar: a value that is EXACTLY a bare caller lvalue path `ctx:saved:X` /
+    // `ctx:arg:X` (a single scope-path block whose full name is that path). Such a value is still read
+    // by-value as the sub's input, but after the call the sub's final arg value is written back into
+    // that caller slot. Anything else (a computed expression) is plain by-value.
+    const auto inout_target = [](const command_block& v) -> std::optional<std::pair<bool, std::string_view>> {
+      if (v.args_count() != 0 || v.size() != 1) return std::nullopt;
+      const auto n = v.name();
+      constexpr std::string_view sp = "ctx:saved:", ap = "ctx:arg:";
+      std::string_view var; bool is_saved;
+      if (n.starts_with(sp)) { var = n.substr(sp.size()); is_saved = true; }
+      else if (n.starts_with(ap)) { var = n.substr(ap.size()); is_saved = false; }
+      else return std::nullopt;
+      if (var.empty() || var.find(':') != std::string_view::npos) return std::nullopt;  // direct slot only
+      return std::make_pair(is_saved, var);
+    };
+    struct inout_bind { size_t sub_slot; bool is_saved; size_t caller_idx; };
+    std::vector<inout_bind> scalar_inout;
 
     const size_t nargs = sub->args.size();
     size_t matched = 0;
@@ -374,6 +489,8 @@ void system::init_basic_functions() {
       if (value == nullptr) sys->raise_error(std::format("'execute' target '{}' is missing argument '{}'", script_name, arg_name));
       matched += 1;
 
+      const auto inout = inout_target(*value);
+
       {
         set_expected_type set(ctx, expected);
         sys->dispatch_node(ctx, scr, *value);
@@ -383,6 +500,9 @@ void system::init_basic_functions() {
         const bool top_num = type_is_bool(top) || type_is_fundamental(top);
         const bool exp_num = type_is_bool(expected) || type_is_fundamental(expected);
         if (top_num && exp_num) {
+          // An in/out target must round-trip into the same caller slot, so a silent numeric
+          // conversion would corrupt its stored type — require an exact match instead.
+          if (inout) sys->raise_error(std::format("'execute' in/out argument '{}' of '{}' must match type '{}' exactly, got '{}'", arg_name, script_name, expected, top));
           if (type_is_bool(expected)) {
             if (type_is_integral(top)) sys->setup_type_conversion<int64_t, bool>(ctx, scr);
             else if (type_is_floating_point(top)) sys->setup_type_conversion<double, bool>(ctx, scr);
@@ -397,6 +517,13 @@ void system::init_basic_functions() {
           sys->raise_error(std::format("'execute' argument '{}' of '{}' expects type '{}', got '{}'", arg_name, script_name, expected, top));
         }
       }
+
+      if (inout) {
+        const auto [is_saved, var] = *inout;
+        // The dispatch above read (and for ctx:arg, ensured the existence of) the caller slot.
+        const size_t caller_idx = is_saved ? scr->find_saved(var) : scr->find_arg(var);
+        scalar_inout.push_back({ slot, is_saved, caller_idx });
+      }
     }
     if (matched != provided.size())
       sys->raise_error(std::format("'execute' target '{}' received an unknown argument", script_name));
@@ -405,9 +532,25 @@ void system::init_basic_functions() {
     if (!type_is_void(ret) && type_is_void(ctx->expected_type))
       sys->raise_error(std::format("'execute' target '{}' returns '{}' but is used in an effect context", script_name, ret));
 
-    const size_t op_index = scr->subscripts.size();
-    scr->subscripts.push_back(sub);
-    scr->cmds.emplace_back(container::command(&internal::execute_script, int64_t(op_index)));
+    // Emit the call as a short opcode sequence. The sub-script pointer is packed straight into the
+    // execute opcode's arg (no side table). When the target uses lists, a list_frame_enter/exit pair
+    // brackets the call to append/drop the sub's list frame, and each in/out binding emits a
+    // swap_bound_list both before and after the execute opcode (double-swap). list_*/swap opcodes have
+    // no net stack effect, so the parse-time stack model only accounts for the execute opcode itself.
+    const size_t nlists = sub->lists.size();
+    const auto swap_arg = [&](const list_bind& b) { return pack2(int32_t(nlists - b.sub_slot), int32_t(b.caller_idx)); };
+
+    if (nlists > 0) scr->cmds.emplace_back(container::command(&internal::list_frame_enter, int64_t(nlists)));
+    for (const auto& b : list_bindings) scr->cmds.emplace_back(container::command(&internal::swap_bound_list, swap_arg(b)));
+    scr->cmds.emplace_back(container::command(&internal::execute_script, int64_t(reinterpret_cast<intptr_t>(sub))));
+    // In/out scalar write-backs: read while the sub's arg frame is still live (before list_frame_exit,
+    // which is unrelated, but ordering is harmless either way).
+    for (const auto& b : scalar_inout)
+      scr->cmds.emplace_back(container::command(
+        b.is_saved ? &internal::writeback_arg_to_saved : &internal::writeback_arg_to_arg,
+        pack2(int32_t(b.sub_slot), int32_t(b.caller_idx))));
+    for (const auto& b : list_bindings) scr->cmds.emplace_back(container::command(&internal::swap_bound_list, swap_arg(b)));
+    if (nlists > 0) scr->cmds.emplace_back(container::command(&internal::list_frame_exit, int64_t(nlists)));
 
     for (size_t k = 0; k < nargs; ++k) ctx->pop();   // consume root (if any) + named arguments
     if (!type_is_void(ret)) ctx->push(ret);
@@ -1012,7 +1155,10 @@ void system::init_basic_functions() {
 
       const auto top = ctx->top();
 
-      size_t index = scr->find_saved(child.name());
+      // Match an EXISTING argument by name (find_arg, not find_saved — args and saved are separate
+      // tables) so re-setting an arg the script already reads updates that slot instead of creating a
+      // duplicate; only push a fresh arg when the name is genuinely new.
+      size_t index = scr->find_arg(child.name());
       if (index >= scr->args.size()) {
         scr->args.push_back({ sys->store_string(scr, child.name()), top });
         index = scr->args.size()-1;

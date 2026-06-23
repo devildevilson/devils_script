@@ -19,7 +19,7 @@ void check_script_arg_type(const int64_t arg, const context* ctx, const script_c
   const auto expected = scr->args[static_cast<size_t>(arg)].type;
   if (expected.empty() || type_is_any_type(expected)) return;
 
-  const auto actual = ctx->arg_type(arg);
+  const auto actual = ctx->arg_type(arg + int64_t(ctx->arg_base));
   if (actual != expected) {
     throw std::runtime_error(std::format("Script argument #{} has type '{}', expected '{}'", arg, actual, expected));
   }
@@ -379,7 +379,7 @@ int64_t pushstring(int64_t arg, context* ctx, const script_container* scr) {
 
 int64_t pushroot(int64_t, context* ctx, const script_container*) {
   check_script_arg_type(0, ctx, ctx->current_script);
-  ctx->stack.push(ctx->safe_get_arg<any_stack>(0));
+  ctx->stack.push(ctx->safe_get_arg<any_stack>(ctx->arg_base));
   return 1;
 }
 
@@ -448,39 +448,39 @@ int64_t pushcontext(int64_t, context* ctx, const script_container*) {
 
 int64_t pushargvalue(int64_t arg, context* ctx, const script_container* scr) {
   check_script_arg_type(arg, ctx, scr);
-  ctx->stack.push(ctx->get_arg<any_stack>(arg));
+  ctx->stack.push(ctx->get_arg<any_stack>(arg + int64_t(ctx->arg_base)));
   return 1;
 }
 
 int64_t setargrvalue(int64_t arg, context* ctx, const script_container*) {
-  ctx->set_arg(arg, ctx->stack.pop<any_stack>());
+  ctx->set_arg(arg + int64_t(ctx->arg_base), ctx->stack.pop<any_stack>());
   return -1;
 }
 
 int64_t setarglvalue(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
-  ctx->set_arg(id2, ctx->stack.get<any_stack>(id1 + int64_t(ctx->frame_base)));
+  ctx->set_arg(id2 + int64_t(ctx->arg_base), ctx->stack.get<any_stack>(id1 + int64_t(ctx->frame_base)));
   return 0;
 }
 
 int64_t pushctxvalue(int64_t arg, context* ctx, const script_container*) {
-  ctx->stack.push(ctx->get_saved<any_stack>(arg));
+  ctx->stack.push(ctx->get_saved<any_stack>(arg + int64_t(ctx->saved_base)));
   return 1;
 }
 
 int64_t savectxrvalue(int64_t arg, context* ctx, const script_container*) {
-  ctx->set_saved(arg, ctx->stack.pop<any_stack>());
+  ctx->set_saved(arg + int64_t(ctx->saved_base), ctx->stack.pop<any_stack>());
   return -1;
 }
 
 int64_t savectxlvalue(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
-  ctx->set_saved(id2, ctx->stack.get<any_stack>(id1 + int64_t(ctx->frame_base)));
+  ctx->set_saved(id2 + int64_t(ctx->saved_base), ctx->stack.get<any_stack>(id1 + int64_t(ctx->frame_base)));
   return 0;
 }
 
 int64_t pushlist(int64_t arg, context* ctx, const script_container*) {
-  ctx->stack.push(internal::thisctxlist{ ctx, size_t(arg) });
+  ctx->stack.push(internal::thisctxlist{ ctx, size_t(arg) + ctx->list_base });
   return 1;
 }
 
@@ -508,7 +508,7 @@ void push_any_to_list(std::vector<stack_element>& list, const any_stack& val) {
 
 int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
   const auto& op = scr->list_pipeline_ops[size_t(arg)];
-  auto& list = ctx->lists[op.list_index];
+  auto& list = ctx->lists[op.list_index + ctx->list_base];  // physical slot; scr->lists is per-container metadata, not offset
   const auto type = scr->lists[op.list_index].type;
   const auto input_type = op.input_type.empty() ? type : op.input_type;
 

@@ -154,6 +154,244 @@ TEST_CASE("execute: script-in-script calls") {
   }
 }
 
+TEST_CASE("execute: sub-script saved values are frame-local") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // Root-less sub that writes a ctx_save slot, then reads it back twice (returns 2*n).
+  const auto savesub = sys.parse<double, void>(
+    "savesub", "{ ctx_save = { number = ctx:arg:n + 0.0 }, ctx:saved:number + ctx:saved:number }");
+
+  registry reg;
+  reg.add("savesub", savesub);
+  reg.install(sys);
+
+  SUBCASE("sub using ctx_save runs correctly under saved_base") {
+    const auto cont = sys.parse<double, void>("caller", "execute = { savesub, n = 3 }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(6.0));
+  }
+
+  SUBCASE("caller's saved value survives a sub that saves into the same logical slot") {
+    // Caller's `keep` and the sub's `number` are both saved slot 0; the sub's saved frame must sit
+    // ABOVE the caller's via saved_base, so reading ctx:saved:keep after the call still sees 100.
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ ctx_save = { keep = 100 }, execute = { savesub, n = 3 }, ctx:saved:keep }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(106.0));  // 6 from the sub + 100 kept
+  }
+
+  SUBCASE("nested saves stack: caller -> sub -> sub each keep their own slot") {
+    // `outer` saves its own slot then calls savesub, so three saved frames stack via saved_base.
+    const auto outer = sys.parse<double, void>(
+      "outer", "{ ctx_save = { mid = 50 }, execute = { savesub, n = ctx:arg:m + 0.0 }, ctx:saved:mid }");
+    registry reg2;
+    reg2.add("savesub", savesub);
+    reg2.add("outer", outer);
+    reg2.install(sys);
+
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ ctx_save = { keep = 100 }, execute = { outer, m = 4 }, ctx:saved:keep }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    // outer = (2*4) + 50 = 58; caller = 58 + 100 = 158
+    CHECK(ctx.get_return<double>() == doctest::Approx(158.0));
+  }
+}
+
+TEST_CASE("execute: sub-script lists are frame-local scratch") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // Root-less sub that builds a 2-element list from its args and returns its element count.
+  const auto countsub = sys.parse<double, void>(
+    "countsub",
+    "{ ctx:list:nums = { add_to = ctx:arg:a + 0.0, add_to = ctx:arg:b + 0.0 }, ctx:list:nums = { count } }");
+
+  registry reg;
+  reg.add("countsub", countsub);
+  reg.install(sys);
+
+  SUBCASE("sub using a list internally runs (lists appended/shrunk per call)") {
+    const auto cont = sys.parse<double, void>("caller", "execute = { countsub, a = 3.0, b = 4.0 }");
+    ds::context ctx;
+    ctx.clear();                 // caller has no lists and never calls create_lists
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(2.0));
+  }
+
+  SUBCASE("two list-using executes do not accumulate (scratch is dropped on return)") {
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ execute = { countsub, a = 1.0, b = 2.0 }, execute = { countsub, a = 10.0, b = 20.0 } }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(4.0));  // 2 + 2; would be 6 if scratch carried over
+  }
+
+  SUBCASE("caller's own list is untouched by a sub that also uses a list") {
+    // Caller's `mine` and the sub's `nums` are both list slot 0; list_base must place the sub's list
+    // ABOVE the caller's, so `mine` still counts 1 (would total 6 if the sub appended into it).
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:mine = { add_to = 100.0 }, execute = { countsub, a = 3.0, b = 4.0 }, ctx:list:mine = { count } }");
+    ds::context ctx;
+    ctx.clear();
+    ctx.create_lists(&cont);     // caller owns one list
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(3.0));  // 2 from the sub + 1 kept
+  }
+}
+
+TEST_CASE("execute: in/out list binding (path B)") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // Void sub that appends an arg-derived value to its `nums` list.
+  const auto adder = sys.parse<void, void>("adder", "{ ctx:list:nums = { add_to = ctx:arg:v + 0.0 } }");
+  // Sub that counts whatever its `nums` list holds.
+  const auto counter = sys.parse<double, void>("counter", "ctx:list:nums = { count }");
+
+  registry reg;
+  reg.add("adder", adder);
+  reg.add("counter", counter);
+  reg.install(sys);
+
+  SUBCASE("sub reads the caller's bound list contents (caller -> sub)") {
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:nums = { add_to = 5.0, add_to = 6.0 }, execute = { counter, nums } }");
+    ds::context ctx;
+    ctx.clear();
+    ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(2.0));  // sub sees the caller's 2 elements
+  }
+
+  SUBCASE("sub mutations land in the caller's bound list (sub -> caller)") {
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:nums = { add_to = 1.0 }, execute = { adder, nums, v = 2.0 }, ctx:list:nums = { count } }");
+    ds::context ctx;
+    ctx.clear();
+    ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(2.0));  // [1.0] + sub's 2.0 == 2 elements
+  }
+
+  SUBCASE("an unbound same-named list stays sub-local scratch (binding is opt-in)") {
+    // `nums` is NOT listed in the execute, so the sub's `nums` is fresh scratch and the caller's list
+    // is untouched: count stays 1, not 2.
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:nums = { add_to = 1.0 }, execute = { adder, v = 2.0 }, ctx:list:nums = { count } }");
+    ds::context ctx;
+    ctx.clear();
+    ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(1.0));
+  }
+
+  SUBCASE("binding an unknown sub list parameter is a parse error") {
+    CHECK_THROWS(sys.parse<double, void>("caller", "execute = { counter, nope }"));
+  }
+}
+
+TEST_CASE("execute: in/out scalar arguments (write-back)") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // Void sub that adds 10 to its `v` argument in place (via arg:set).
+  const auto bump = sys.parse<void, void>("bump", "{ ctx_set = { v = ctx:arg:v + 10.0 } }");
+
+  registry reg;
+  reg.add("bump", bump);
+  reg.install(sys);
+
+  SUBCASE("a bare ctx:saved lvalue is in/out — the sub's change is written back") {
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ ctx_save = { x = 5.0 }, execute = { bump, v = ctx:saved:x }, ctx:saved:x }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(15.0));  // 5 + 10 written back
+  }
+
+  SUBCASE("a computed expression is by-value — the caller's slot is untouched") {
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ ctx_save = { x = 5.0 }, execute = { bump, v = ctx:saved:x + 0.0 }, ctx:saved:x }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(5.0));  // by-value: x stays 5
+  }
+
+  SUBCASE("a bare ctx:arg lvalue is in/out — written back into the caller's arg") {
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ execute = { bump, v = ctx:arg:y }, ctx:arg:y }");
+    ds::context ctx;
+    ctx.clear();
+    ctx.set_arg(cont.find_arg("y"), 7.0);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(17.0));  // 7 + 10 written back into arg y
+  }
+
+  SUBCASE("two in/out args write back independently") {
+    const auto add = sys.parse<void, void>(
+      "add2", "{ ctx_set = { a = ctx:arg:a + 1.0, b = ctx:arg:b + 100.0 } }");
+    registry reg2;
+    reg2.add("add2", add);
+    reg2.install(sys);
+
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx_save = { p = 1.0, q = 2.0 }, execute = { add2, a = ctx:saved:p, b = ctx:saved:q }, ctx:saved:p + ctx:saved:q }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(104.0));  // (1+1) + (2+100)
+  }
+
+  SUBCASE("in/out write-back survives nested execute") {
+    // `outer` forwards its own in/out arg into bump, so the write-back chains two frames deep.
+    const auto outer = sys.parse<void, void>("outer", "execute = { bump, v = ctx:arg:w }");
+    registry reg2;
+    reg2.add("bump", bump);
+    reg2.add("outer", outer);
+    reg2.install(sys);
+
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ ctx_save = { x = 1.0 }, execute = { outer, w = ctx:saved:x }, ctx:saved:x }");
+    ds::context ctx;
+    ctx.clear();
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(11.0));  // 1 + 10 chained back to the caller
+  }
+}
+
 TEST_CASE("execute: no-scope, no-arg, and prev invariants") {
   ds::system sys;
   sys.init_basic_functions();
@@ -359,3 +597,4 @@ TEST_CASE("execute: parse-time errors") {
     CHECK_THROWS(sys.parse<handle<person>, void>("caller", "execute = { addup, base = 1, bonus = 2 }"));
   }
 }
+
