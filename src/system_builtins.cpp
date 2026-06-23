@@ -1358,22 +1358,26 @@ void system::init_basic_functions() {
           offset += def.size();
         }
 
-        container::list_pipeline_op meta{ kind, index, scr->lists[index].type, 0, 0, 0, 0, 0 };
-        const size_t meta_index = scr->list_pipeline_ops.size();
-        scr->list_pipeline_ops.push_back(meta);
-        scr->cmds.emplace_back(container::command(&list_pipeline, int64_t(meta_index)));
+        // Emit the op + three immediate-data slots; the metadata (callback ranges, resume point,
+        // input element type) is backpatched into those slots once the sections are compiled — no
+        // side table. Offsets are stored relative to the opcode's own cmd index (op_cmd).
+        const auto input_type_at_op = scr->lists[index].type;  // element type fed to this op's callback
+        const size_t op_cmd = scr->cmds.size();
+        scr->cmds.emplace_back(container::command(&list_pipeline, pack2(int32_t(kind), int32_t(index))));
+        scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+1] value range
+        scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+2] default_start + end
+        scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+3] input_type string ref
+        size_t value_start = 0, value_end = 0, default_start = 0;  // absolute cmd indices; 0 == section absent
 
         if (kind == container::list_pipeline_kind::add_to) {
           const auto [s, en, result_type] = compile_default_section(direct_body(op), utils::type_name<any_stack>());
-          scr->list_pipeline_ops[meta_index].default_start = s;
-          scr->list_pipeline_ops[meta_index].default_end = en;
+          default_start = s;  // default_end is always the resume point `end`
           if (type_is_ignore(result_type) || type_is_void(result_type)) sys->raise_error(std::format("List operation '{}' cannot add '{}'", op.name(), result_type));
           if (scr->lists[index].type.empty()) scr->lists[index].type = result_type;
           else if (scr->lists[index].type != result_type) sys->raise_error(std::format("List '{}' expects '{}', got '{}'", child.name(), scr->lists[index].type, result_type));
         } else if (has_value_callback(kind)) {
           const auto [s, en, result_type] = compile_value_section(direct_body(op), callback_expected(kind));
-          scr->list_pipeline_ops[meta_index].value_start = s;
-          scr->list_pipeline_ops[meta_index].value_end = en;
+          value_start = s; value_end = en;
           if (kind == container::list_pipeline_kind::map) {
             if (type_is_ignore(result_type) || type_is_void(result_type)) sys->raise_error(std::format("List operation '{}' cannot map to '{}'", op.name(), result_type));
             scr->lists[index].type = result_type;
@@ -1385,11 +1389,17 @@ void system::init_basic_functions() {
             ? utils::type_name<double>()
             : (scr->lists[index].type.empty() ? utils::type_name<any_stack>() : scr->lists[index].type);
           const auto [s, en, result_type] = compile_default_section(default_body, expected);
-          scr->list_pipeline_ops[meta_index].default_start = s;
-          scr->list_pipeline_ops[meta_index].default_end = en;
+          default_start = s;  // default_end == end
         }
 
-        scr->list_pipeline_ops[meta_index].end = scr->cmds.size();
+        const size_t end_abs = scr->cmds.size();
+        scr->cmds[op_cmd + 1].arg = pack2(int32_t(value_start ? value_start - op_cmd : 0), int32_t(value_end ? value_end - op_cmd : 0));
+        scr->cmds[op_cmd + 2].arg = pack2(int32_t(default_start ? default_start - op_cmd : 0), int32_t(end_abs - op_cmd));
+        if (!input_type_at_op.empty()) {
+          const auto ref = sys->store_string(scr, input_type_at_op);
+          scr->cmds[op_cmd + 3].arg = packstrid(uint32_t(ref.start), uint32_t(ref.count));
+        }
+
         if (kind == container::list_pipeline_kind::filter || kind == container::list_pipeline_kind::map || kind == container::list_pipeline_kind::clear) {
           // no stack value
         } else if (kind == container::list_pipeline_kind::count || kind == container::list_pipeline_kind::count_if || kind == container::list_pipeline_kind::sum ||

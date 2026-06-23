@@ -82,17 +82,6 @@ struct script_container {
     last
   };
 
-  struct list_pipeline_op {
-    list_pipeline_kind kind;
-    size_t list_index;
-    std::string_view input_type;
-    size_t value_start;
-    size_t value_end;
-    size_t default_start;
-    size_t default_end;
-    size_t end;
-  };
-
   uint64_t prng_state;
 
   std::vector<command> cmds;
@@ -100,7 +89,6 @@ struct script_container {
   std::vector<argument_data> args;
   std::vector<argument_data> saved;
   std::vector<argument_data> lists;
-  std::vector<list_pipeline_op> list_pipeline_ops;
   std::string string_pool;
   std::vector<string_ref> command_names;
   string_ref name{};
@@ -134,7 +122,6 @@ struct container : public script_container {
   using command = script_container::command;
   using argument_data = script_container::argument_data;
   using list_pipeline_kind = script_container::list_pipeline_kind;
-  using list_pipeline_op = script_container::list_pipeline_op;
 
   enum class description_node_kind {
     unknown,

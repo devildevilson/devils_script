@@ -506,15 +506,35 @@ void push_any_to_list(std::vector<stack_element>& list, const any_stack& val) {
 }
 }
 
-int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
-  const auto& op = scr->list_pipeline_ops[size_t(arg)];
-  auto& list = ctx->lists[op.list_index + ctx->list_base];  // physical slot; scr->lists is per-container metadata, not offset
-  const auto type = scr->lists[op.list_index].type;
-  const auto input_type = op.input_type.empty() ? type : op.input_type;
+int64_t list_op_data(int64_t, context*, const script_container*) { return 0; }
 
-  switch (op.kind) {
+int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
+  // Metadata lives inline in the instruction stream, not a side table: the opcode arg packs
+  // (kind, list_index); the three following cmd slots carry, as immediates read here, the callback
+  // ranges, the resume point and the captured input element type. P is this opcode's own index.
+  const size_t P = ctx->current_index;
+  const auto [kind_raw, list_index_raw] = unpack2(arg);
+  const auto kind = container::list_pipeline_kind(kind_raw);
+  const size_t list_index = size_t(list_index_raw);
+
+  const auto [vs_off, ve_off] = unpack2(scr->cmds[P + 1].arg);
+  const auto [ds_off, end_off] = unpack2(scr->cmds[P + 2].arg);
+  const auto [it_pos, it_size] = unpackstrid(scr->cmds[P + 3].arg);
+
+  const size_t value_start = P + size_t(vs_off);
+  const size_t value_end = P + size_t(ve_off);
+  const size_t default_start = P + size_t(ds_off);
+  const size_t end = P + size_t(end_off);
+  const size_t default_end = end;  // a default section, when present, is always the last one
+
+  auto& list = ctx->lists[list_index + ctx->list_base];  // physical slot; scr->lists is per-container metadata, not offset
+  const auto type = scr->lists[list_index].type;
+  const auto stored_input = it_size == 0 ? std::string_view() : scr->get_string(it_pos, it_size);
+  const auto input_type = stored_input.empty() ? type : stored_input;
+
+  switch (kind) {
     case container::list_pipeline_kind::add_to: {
-      const auto val = run_default_callback(ctx, scr, op.default_start, op.default_end);
+      const auto val = run_default_callback(ctx, scr, default_start, default_end);
       if (!type.empty() && val.type() != type) throw std::runtime_error(std::format("List expects '{}', got '{}'", type, val.type()));
       push_any_to_list(list, val);
       break;
@@ -528,7 +548,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     case container::list_pipeline_kind::filter: {
       size_t out = 0;
       for (size_t i = 0; i < list.size(); ++i) {
-        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, list[i])) {
+        if (run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, list[i])) {
           if (out != i) list[out] = list[i];
           out += 1;
         }
@@ -542,7 +562,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
       tmp.reserve(list.size());
       std::string_view mapped_type;
       for (auto& item : list) {
-        const auto val = run_list_callback<any_stack>(ctx, scr, op.value_start, op.value_end, input_type, item);
+        const auto val = run_list_callback<any_stack>(ctx, scr, value_start, value_end, input_type, item);
         if (mapped_type.empty()) mapped_type = val.type();
         if (mapped_type != val.type()) throw std::runtime_error(std::format("List map returned mixed types '{}' and '{}'", mapped_type, val.type()));
         push_any_to_list(tmp, val);
@@ -564,7 +584,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     case container::list_pipeline_kind::any: {
       bool ret = false;
       for (auto& item : list) {
-        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item)) { ret = true; break; }
+        if (run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, item)) { ret = true; break; }
       }
       ctx->stack.push(ret);
       break;
@@ -573,7 +593,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     case container::list_pipeline_kind::all: {
       bool ret = true;
       for (auto& item : list) {
-        if (!run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item)) { ret = false; break; }
+        if (!run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, item)) { ret = false; break; }
       }
       ctx->stack.push(ret);
       break;
@@ -582,7 +602,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     case container::list_pipeline_kind::none: {
       bool ret = true;
       for (auto& item : list) {
-        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item)) { ret = false; break; }
+        if (run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, item)) { ret = false; break; }
       }
       ctx->stack.push(ret);
       break;
@@ -590,14 +610,14 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
 
     case container::list_pipeline_kind::count_if: {
       double ret = 0.0;
-      for (auto& item : list) ret += double(run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, item));
+      for (auto& item : list) ret += double(run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, item));
       ctx->stack.push(ret);
       break;
     }
 
     case container::list_pipeline_kind::sum: {
       double ret = 0.0;
-      for (auto& item : list) ret += run_list_callback<double>(ctx, scr, op.value_start, op.value_end, input_type, item);
+      for (auto& item : list) ret += run_list_callback<double>(ctx, scr, value_start, value_end, input_type, item);
       ctx->stack.push(ret);
       break;
     }
@@ -610,18 +630,18 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
       double sum = 0.0;
       size_t count = 0;
       for (auto& item : list) {
-        const double val = run_list_callback<double>(ctx, scr, op.value_start, op.value_end, input_type, item);
+        const double val = run_list_callback<double>(ctx, scr, value_start, value_end, input_type, item);
         if (!found) { ret = val; found = true; }
-        else if (op.kind == container::list_pipeline_kind::min) ret = std::min(ret, val);
-        else if (op.kind == container::list_pipeline_kind::max) ret = std::max(ret, val);
+        else if (kind == container::list_pipeline_kind::min) ret = std::min(ret, val);
+        else if (kind == container::list_pipeline_kind::max) ret = std::max(ret, val);
         sum += val;
         count += 1;
       }
       if (!found) {
-        const auto def = run_default_callback(ctx, scr, op.default_start, op.default_end);
+        const auto def = run_default_callback(ctx, scr, default_start, default_end);
         ctx->stack.push(def);
       } else {
-        ctx->stack.push(op.kind == container::list_pipeline_kind::average ? sum / double(count) : ret);
+        ctx->stack.push(kind == container::list_pipeline_kind::average ? sum / double(count) : ret);
       }
       break;
     }
@@ -630,22 +650,22 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     case container::list_pipeline_kind::last: {
       int64_t found = -1;
       for (size_t i = 0; i < list.size(); ++i) {
-        if (run_list_callback<bool>(ctx, scr, op.value_start, op.value_end, input_type, list[i])) {
+        if (run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, list[i])) {
           found = int64_t(i);
-          if (op.kind == container::list_pipeline_kind::first) break;
+          if (kind == container::list_pipeline_kind::first) break;
         }
       }
       if (found >= 0) {
         ctx->stack.push(type, list[size_t(found)]);
       } else {
-        const auto def = run_default_callback(ctx, scr, op.default_start, op.default_end);
+        const auto def = run_default_callback(ctx, scr, default_start, default_end);
         ctx->stack.push(def);
       }
       break;
     }
   }
 
-  ctx->current_index = op.end - 1;
+  ctx->current_index = end - 1;
   return 0;
 }
 

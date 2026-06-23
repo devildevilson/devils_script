@@ -111,6 +111,9 @@ int64_t savectxlvalue(int64_t, context*, const script_container*);
 
 int64_t pushlist(int64_t, context*, const script_container*);
 int64_t list_pipeline(int64_t, context*, const script_container*);
+// Placeholder for the immediate-data cmd slots that follow a list_pipeline opcode (its packed
+// ranges/input-type). Never executed — list_pipeline reads them as data and skips past them.
+int64_t list_op_data(int64_t, context*, const script_container*);
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE
 }

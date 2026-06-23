@@ -38,7 +38,6 @@ void script_container::shrink_to_fit() {
   args.shrink_to_fit();
   saved.shrink_to_fit();
   lists.shrink_to_fit();
-  list_pipeline_ops.shrink_to_fit();
   string_pool.shrink_to_fit();
   command_names.shrink_to_fit();
 }
