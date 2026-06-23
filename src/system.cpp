@@ -240,6 +240,10 @@ void system::raise_error(const std::string& msg) const { error(msg); }
 void system::raise_warning(const std::string& msg) const { warning(msg); }
 uint64_t system::get_seed() const { return seed; }
 void system::reseed(const uint64_t val) { seed = val; }
+void system::set_script_resolver(script_resolver_t resolver) { script_resolver = std::move(resolver); }
+const script_container* system::resolve_script(const std::string_view& name) const {
+  return script_resolver ? script_resolver(name) : nullptr;
+}
 uint64_t system::parse_context::gen_value() { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
 
 static std::string_view command_data_ftype_name(const system::command_data::ftype t) noexcept {

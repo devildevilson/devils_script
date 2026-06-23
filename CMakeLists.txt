@@ -86,7 +86,7 @@ if (DS_BUILD_TESTS)
 
   FetchContent_MakeAvailable(doctest)
 
-  add_executable (devils_script_tests tests/main.cpp tests/basic.cpp tests/case1.cpp tests/introspection.cpp tests/disasm.cpp)
+  add_executable (devils_script_tests tests/main.cpp tests/basic.cpp tests/case1.cpp tests/introspection.cpp tests/disasm.cpp tests/execute.cpp)
   target_link_libraries(devils_script_tests devils_script devils_script_options doctest::doctest)
 
   add_executable (devils_script_benchs tests/case1_bench.cpp)

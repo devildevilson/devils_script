@@ -340,6 +340,9 @@ public:
   using argument_callback = std::function<void(parse_ctx*, container*, const size_t, const command_block&)>;
 
   using err_fn = std::function<void(const std::string &)>;
+  // Maps a script name to a pre-compiled, caller-owned sub-script for the `execute` builtin.
+  // The registry must outlive any container parsed against it. Returns nullptr when unknown.
+  using script_resolver_t = std::function<const script_container*(std::string_view)>;
   enum class safety { unsafe, safe };
   struct options { uint64_t seed; enum safety safety; err_fn error; err_fn warning; options() noexcept; };
   system(const options &opts = options()) noexcept;
@@ -353,6 +356,12 @@ public:
   uint64_t get_seed() const;
   void reseed(const uint64_t val);
   std::string dump_registered_functions() const;
+
+  // Installs the resolver used by the `execute` builtin to look up sub-scripts by name during
+  // parsing. Set this once (before parsing) on the otherwise-const registry.
+  void set_script_resolver(script_resolver_t resolver);
+  // Resolves a sub-script by name through the installed resolver (nullptr if none/unknown).
+  const script_container* resolve_script(const std::string_view& name) const;
 
   template <typename Arg>
   size_t parse_args(parse_ctx* ctx, container* scr, const command_block& block, const size_t offset, const size_t index, const std::vector<std::string>& func_args_names) const;
@@ -502,6 +511,7 @@ private:
   // function name first + scope type second, no scope == void
   std::unordered_map<std::string, std::unordered_map<std::string, command_data>> mfuncs;
   std::unordered_map<std::string, std::function<std::optional<int64_t>(std::string_view)>> enums;
+  script_resolver_t script_resolver;
 };
 
 #ifdef DEVILS_SCRIPT_INNER_NAMESPACE

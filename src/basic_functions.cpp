@@ -199,7 +199,9 @@ int64_t invd(int64_t, context* ctx, const script_container*) {
 }
 
 int64_t cmpeq2(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto &v1 = ctx->stack.get_view(id1);
   const auto &v2 = ctx->stack.get_view(id2);
   if (v1.type() != v2.type()) {
@@ -213,7 +215,9 @@ int64_t cmpeq2(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t cmplessd2(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
   ctx->stack.push(v1 < v2);
@@ -221,7 +225,9 @@ int64_t cmplessd2(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t cmplesseqd2(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
   ctx->stack.push(v1 <= v2);
@@ -229,7 +235,9 @@ int64_t cmplesseqd2(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t sumsetstack(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
   ctx->stack.set(id1, v1 + v2);
@@ -237,7 +245,9 @@ int64_t sumsetstack(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t mulsetstack(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.safe_get<double>(id1);
   const auto& v2 = ctx->stack.safe_get<double>(id2);
   ctx->stack.set(id1, v1 * v2);
@@ -290,7 +300,9 @@ int64_t invd_unsafe(int64_t, context* ctx, const script_container*) {
 }
 
 int64_t cmpeq2_unsafe(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.get_view(id1);
   const auto& v2 = ctx->stack.get_view(id2);
   if (v1.type() != v2.type()) {
@@ -304,7 +316,9 @@ int64_t cmpeq2_unsafe(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t cmplessd2_unsafe(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
   ctx->stack.push(v1 < v2);
@@ -312,7 +326,9 @@ int64_t cmplessd2_unsafe(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t cmplesseqd2_unsafe(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
   ctx->stack.push(v1 <= v2);
@@ -320,7 +336,9 @@ int64_t cmplesseqd2_unsafe(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t sumsetstack_unsafe(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
   ctx->stack.set(id1, v1 + v2);
@@ -328,7 +346,9 @@ int64_t sumsetstack_unsafe(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t mulsetstack_unsafe(int64_t arg, context* ctx, const script_container*) {
-  const auto [id1, id2] = unpack2(arg);
+  const auto [a, b] = unpack2(arg);
+  const int64_t fb = int64_t(ctx->frame_base);
+  const int64_t id1 = a + fb, id2 = b + fb;
   const auto& v1 = ctx->stack.get<double>(id1);
   const auto& v2 = ctx->stack.get<double>(id2);
   ctx->stack.set(id1, v1 * v2);
@@ -364,15 +384,17 @@ int64_t pushroot(int64_t, context* ctx, const script_container*) {
 }
 
 int64_t pushthis(int64_t arg, context* ctx, const script_container*) {
-  const auto& el = ctx->stack.element(arg);
-  const auto type = ctx->stack.type(arg);
+  const int64_t idx = arg + int64_t(ctx->frame_base);
+  const auto& el = ctx->stack.element(idx);
+  const auto type = ctx->stack.type(idx);
   ctx->stack.push(type, el);
   return 1;
 }
 
 int64_t pushprev(int64_t arg, context* ctx, const script_container*) {
-  const auto& el = ctx->stack.element(arg);
-  const auto type = ctx->stack.type(arg);
+  const int64_t idx = arg + int64_t(ctx->frame_base);
+  const auto& el = ctx->stack.element(idx);
+  const auto type = ctx->stack.type(idx);
   ctx->stack.push(type, el);
   return 1;
 }
@@ -397,7 +419,7 @@ int64_t pushinvalid(int64_t, context* ctx, const script_container*) {
 }
 
 int64_t erase(int64_t arg, context* ctx, const script_container*) {
-  ctx->stack.erase(arg);
+  ctx->stack.erase(arg + int64_t(ctx->frame_base));
   return -1;
 }
 
@@ -437,7 +459,7 @@ int64_t setargrvalue(int64_t arg, context* ctx, const script_container*) {
 
 int64_t setarglvalue(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
-  ctx->set_arg(id2, ctx->stack.get<any_stack>(id1));
+  ctx->set_arg(id2, ctx->stack.get<any_stack>(id1 + int64_t(ctx->frame_base)));
   return 0;
 }
 
@@ -453,7 +475,7 @@ int64_t savectxrvalue(int64_t arg, context* ctx, const script_container*) {
 
 int64_t savectxlvalue(int64_t arg, context* ctx, const script_container*) {
   const auto [id1, id2] = unpack2(arg);
-  ctx->set_saved(id2, ctx->stack.get<any_stack>(id1));
+  ctx->set_saved(id2, ctx->stack.get<any_stack>(id1 + int64_t(ctx->frame_base)));
   return 0;
 }
 

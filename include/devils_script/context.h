@@ -100,6 +100,11 @@ struct context {
 
   uint64_t prng_state;
   size_t current_index;
+  // Absolute index in `stack` where the currently-executing script's frame begins. Zero for a
+  // top-level script; set by the `execute` opcode so a sub-script's compiled (absolute, zero-based)
+  // stack indices — pushthis/pushprev/erase and the packed two-index ops — resolve relative to the
+  // live stack top instead of requiring the parent's stack to be copied aside.
+  size_t frame_base;
   void* userptr;
   const script_container* current_script;
   std::function<void(const std::string&)> trace;
@@ -111,7 +116,7 @@ struct context {
   // Any non-zero seed is valid; containers can override it with their own parse seed.
   inline context() noexcept
     : stack(stack_size), saved_stack(local_vars_size), args_stack(script_arguments_size),
-      prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr), current_script(nullptr),
+      prng_state(0xdeadbab1ull), current_index(0), frame_base(0), userptr(nullptr), current_script(nullptr),
       trace([](const std::string& msg) { std::cout << msg << '\n'; }) {
     // Saved values and args are indexed directly by compiled code, not pushed sequentially.
     saved_stack._size = saved_stack._data.size();
@@ -158,7 +163,7 @@ struct context {
   inline std::string_view arg_type(const int64_t index) const { return args_stack.type(index); }
   inline std::string_view saved_type(const int64_t index) const { return saved_stack.type(index); }
   inline std::string_view return_type() const { return _return_value.type(); }
-  inline void clear() { current_index = 0; stack.resize(0); }
+  inline void clear() { current_index = 0; frame_base = 0; stack.resize(0); }
   void create_lists(const script_container* scr);
 };
 

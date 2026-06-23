@@ -832,6 +832,7 @@ void system::parse_context::init(const system& sys, container& c) {
 
   return_type = scope_type_name<ret_type>();
   expected_type = return_type;
+  c.return_type = return_type;
   root_type = utils::is_void_v<root_type_t> ? std::string_view() : scope_type_name<root_type_t>();
   unlimited_func_index = 0;
   nest_level = 0;

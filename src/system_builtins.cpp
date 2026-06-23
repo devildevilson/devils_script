@@ -193,6 +193,62 @@ static int64_t debug_trace(int64_t, context* ctx, const script_container* scr) {
   ctx->trace(std::format("Script trace @ {}:{}: '{}' ({})", loc.line, loc.column, message, debug_environment(ctx, scr, 1)));
   return -1;
 }
+
+// Runs a resolved sub-script in the current context as a script-in-script call. The call frame is
+// just C++ locals plus a stack base offset: `args_stack`/`saved_stack` are flat fixed-size arrays
+// indexed directly, so we snapshot only the slots the sub-script will clobber; the main stack is
+// NOT copied — instead `ctx->frame_base` is bumped to the live stack top so the sub-script's
+// compiled (zero-based, absolute) stack indices resolve above the parent's frame. The sub-script's
+// arguments (root first when present, then named args in declared-slot order) sit on the stack top:
+// the caller pushed them, and here we move them straight into `args_stack` before the call.
+static int64_t execute_script(int64_t arg, context* ctx, const script_container* scr) {
+  const script_container* sub = scr->subscripts[size_t(arg)];
+  const size_t nargs = sub->args.size();
+
+  // Snapshot the parent frame slots the sub-script may overwrite, plus the transient runtime state.
+  std::array<stack_element, context::script_arguments_size> saved_args;
+  std::array<std::string_view, context::script_arguments_size> saved_arg_types;
+  for (size_t i = 0; i < nargs; ++i) { saved_args[i] = ctx->args_stack._data[i]; saved_arg_types[i] = ctx->args_stack._types[i]; }
+  const size_t nsaved = sub->saved.size();
+  std::array<stack_element, context::local_vars_size> saved_vals;
+  std::array<std::string_view, context::local_vars_size> saved_val_types;
+  for (size_t i = 0; i < nsaved; ++i) { saved_vals[i] = ctx->saved_stack._data[i]; saved_val_types[i] = ctx->saved_stack._types[i]; }
+  const size_t saved_index = ctx->current_index;
+  const size_t saved_base = ctx->frame_base;
+  const any_stack saved_return = ctx->_return_value;
+
+  // Move the argument values (top `nargs` of the stack, in declared-slot order) into args_stack.
+  const size_t base = ctx->stack._size - nargs;
+  for (size_t k = 0; k < nargs; ++k) {
+    ctx->args_stack._data[k] = ctx->stack._data[base + k];
+    ctx->args_stack._types[k] = ctx->stack._types[base + k];
+  }
+  ctx->stack._size = base;       // consume the arguments; sub-script runs above this point
+
+  ctx->frame_base = base;        // zero-based sub indices resolve relative to the live stack top
+  ctx->current_index = 0;
+  sub->process(ctx);             // process() saves/restores current_script itself
+
+  const any_stack result = ctx->_return_value;
+
+  // Restore the parent frame.
+  ctx->stack._size = base;
+  ctx->frame_base = saved_base;
+  for (size_t i = 0; i < nargs; ++i) { ctx->args_stack._data[i] = saved_args[i]; ctx->args_stack._types[i] = saved_arg_types[i]; }
+  for (size_t i = 0; i < nsaved; ++i) { ctx->saved_stack._data[i] = saved_vals[i]; ctx->saved_stack._types[i] = saved_val_types[i]; }
+  ctx->_return_value = saved_return;
+  ctx->current_index = saved_index;
+
+  if (!type_is_void(sub->return_type)) {
+    stack_element rel;
+    memcpy(rel.mem, result._mem, MAXIMUM_STACK_VAL_SIZE);
+    ctx->stack.push(result.type(), rel);
+    return int64_t(1) - int64_t(nargs);
+  }
+  return -int64_t(nargs);
+}
+
+static any_stack executefn() { return any_stack{}; }
 }
 
 template <auto f>
@@ -255,6 +311,108 @@ void system::init_basic_functions() {
 
     scr->cmds.emplace_back(&internal::debug_trace, INT64_C(0));
     ctx->pop();
+    return args.size();
+  });
+
+  // Script-in-script call. Syntax: `execute = { script_name, arg1 = expr, ... }` (or
+  // `execute = script_name` with no args). The script name resolves through the system's
+  // script_resolver to a pre-compiled, caller-owned sub-script. Named arguments are matched by
+  // name (and type) to the sub-script's declared `arg:get` arguments; if the sub-script has a root
+  // scope it is fed implicitly from the caller's current scope. The return type is checked against
+  // the caller's context. The matched values are emitted in declared-slot order so the runtime
+  // handler can read them straight off the stack top.
+  RFI(internal::executefn)("execute", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
+    [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+
+    size_t offset = 1;
+    auto name_block = command_block(args, offset);
+    if (name_block.name() == custom_description_constant) { offset += name_block.size(); name_block = command_block(args, offset); }
+    if (name_block.empty() || name_block.args_count() != 0 || name_block.size() != 1)
+      sys->raise_error("'execute' expects a script name as its first argument");
+    const auto script_name = name_block.name();
+    offset += name_block.size();
+
+    const script_container* sub = sys->resolve_script(script_name);
+    if (sub == nullptr) sys->raise_error(std::format("'execute' could not resolve script '{}' (is a script_resolver installed?)", script_name));
+    if (sub == static_cast<const script_container*>(scr)) sys->raise_error(std::format("'execute' cannot call the script currently being compiled ('{}')", script_name));
+    if (!sub->lists.empty()) sys->raise_error(std::format("'execute' target script '{}' uses lists, which is not supported yet", script_name));
+
+    const bool has_root = !sub->args.empty() && sub->args[0].name.count == SIZE_MAX;
+    const size_t named_base = has_root ? 1 : 0;
+
+    // The sub-script's root (slot 0) is fed implicitly from the caller's current scope: push a copy
+    // of it onto the stack here so it becomes the first argument value the opcode consumes.
+    if (has_root) {
+      if (ctx->scope_stack.empty())
+        sys->raise_error(std::format("'execute' target '{}' needs root scope '{}' but no scope is active", script_name, sub->args[0].type));
+      const auto cur_type = ctx->current_scope_type();
+      if (cur_type != sub->args[0].type)
+        sys->raise_error(std::format("'execute' target '{}' expects root scope '{}', but current scope is '{}'", script_name, sub->args[0].type, cur_type));
+      sys->push_basic_function(ctx, scr, basicf::pushthis, ctx->current_scope_index());
+      ctx->push(cur_type);
+    }
+
+    // Collect provided named-argument children: `name = <value>` pairs.
+    std::vector<std::pair<std::string_view, command_block>> provided;
+    while (offset < args.size()) {
+      auto child = command_block(args, offset);
+      offset += child.size();
+      if (child.name() == custom_description_constant) continue;
+      if (child.args_count() != 1)
+        sys->raise_error(std::format("'execute' argument '{}' must be of the form '{} = <value>'", child.name(), child.name()));
+      provided.emplace_back(child.name(), command_block(child, 1));
+    }
+
+    const size_t nargs = sub->args.size();
+    size_t matched = 0;
+    for (size_t slot = named_base; slot < nargs; ++slot) {
+      const auto arg_name = sub->get_arg_name(slot);
+      const auto expected = sub->args[slot].type;
+
+      const command_block* value = nullptr;
+      for (auto& [pname, pblock] : provided) if (pname == arg_name) { value = &pblock; break; }
+      if (value == nullptr) sys->raise_error(std::format("'execute' target '{}' is missing argument '{}'", script_name, arg_name));
+      matched += 1;
+
+      {
+        set_expected_type set(ctx, expected);
+        sys->dispatch_node(ctx, scr, *value);
+      }
+      const auto top = ctx->top();
+      if (top != expected) {
+        const bool top_num = type_is_bool(top) || type_is_fundamental(top);
+        const bool exp_num = type_is_bool(expected) || type_is_fundamental(expected);
+        if (top_num && exp_num) {
+          if (type_is_bool(expected)) {
+            if (type_is_integral(top)) sys->setup_type_conversion<int64_t, bool>(ctx, scr);
+            else if (type_is_floating_point(top)) sys->setup_type_conversion<double, bool>(ctx, scr);
+          } else if (type_is_integral(expected)) {
+            if (type_is_bool(top)) sys->setup_type_conversion<bool, int64_t>(ctx, scr);
+            else if (type_is_floating_point(top)) sys->setup_type_conversion<double, int64_t>(ctx, scr);
+          } else if (type_is_floating_point(expected)) {
+            if (type_is_bool(top)) sys->setup_type_conversion<bool, double>(ctx, scr);
+            else if (type_is_integral(top)) sys->setup_type_conversion<int64_t, double>(ctx, scr);
+          }
+        } else {
+          sys->raise_error(std::format("'execute' argument '{}' of '{}' expects type '{}', got '{}'", arg_name, script_name, expected, top));
+        }
+      }
+    }
+    if (matched != provided.size())
+      sys->raise_error(std::format("'execute' target '{}' received an unknown argument", script_name));
+
+    const auto ret = sub->return_type;
+    if (!type_is_void(ret) && type_is_void(ctx->expected_type))
+      sys->raise_error(std::format("'execute' target '{}' returns '{}' but is used in an effect context", script_name, ret));
+
+    const size_t op_index = scr->subscripts.size();
+    scr->subscripts.push_back(sub);
+    scr->cmds.emplace_back(container::command(&internal::execute_script, int64_t(op_index)));
+
+    for (size_t k = 0; k < nargs; ++k) ctx->pop();   // consume root (if any) + named arguments
+    if (!type_is_void(ret)) ctx->push(ret);
+    else ctx->push<ignore_value>();
+
     return args.size();
   });
 
