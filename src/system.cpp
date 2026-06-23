@@ -835,7 +835,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
       set_function_type sft(ctx, function_type::lvalue);
 
       std::array<rpn_conversion_ctx::block, 16 * 3+1> arr;
-      auto [local_fname, count] = ctx->rpn_ctx.convert_scope(funcname, arr.data(), arr.size());
+      auto [local_fname, count] = ctx->rpn_ctx.convert_scope(funcname, arr.data(), arr.size(), ctx->source_line, ctx->source_column);
       funcname = ctx->rpn_ctx.token_text(local_fname);
 
       if (count == 0) {

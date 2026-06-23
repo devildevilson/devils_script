@@ -8,6 +8,7 @@
 #include <string>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include "devils_script/type_traits.h"
 #include "devils_script/common.h"
 #include "devils_script/container.h"
@@ -110,7 +111,8 @@ struct context {
   // Any non-zero seed is valid; containers can override it with their own parse seed.
   inline context() noexcept
     : stack(stack_size), saved_stack(local_vars_size), args_stack(script_arguments_size),
-      prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr), current_script(nullptr) {
+      prng_state(0xdeadbab1ull), current_index(0), userptr(nullptr), current_script(nullptr),
+      trace([](const std::string& msg) { std::cout << msg << '\n'; }) {
     // Saved values and args are indexed directly by compiled code, not pushed sequentially.
     saved_stack._size = saved_stack._data.size();
     args_stack._size = args_stack._data.size();

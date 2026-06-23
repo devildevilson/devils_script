@@ -11,7 +11,7 @@ namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
 namespace DEVILS_SCRIPT_INNER_NAMESPACE {
 #endif
 
-std::tuple<system::rpn_conversion_ctx::token_ref, size_t> system::rpn_conversion_ctx::convert_scope(const std::string_view& expr, block* arr, const size_t max_size) {
+std::tuple<system::rpn_conversion_ctx::token_ref, size_t> system::rpn_conversion_ctx::convert_scope(const std::string_view& expr, block* arr, const size_t max_size, const size_t line, const size_t column) {
   using kind = block_kind;
 
   size_t counter = 0;
@@ -29,14 +29,14 @@ std::tuple<system::rpn_conversion_ctx::token_ref, size_t> system::rpn_conversion
     const size_t colon_count = utils::string::split(dot_arr[i], ":", colon_arr.data(), colon_arr.size());
     if (colon_count == SIZE_MAX) throw std::runtime_error(std::format("Could not parse expr '{}' in lvalue '{}', too many colons", dot_arr[i], expr));
 
-    arr[counter] = { store_token(colon_arr[0]), 1, kind::scope_path }; counter += 1;
+    arr[counter] = { store_token(colon_arr[0], line, column), 1, kind::scope_path }; counter += 1;
     size += 1;
     if (colon_count > 2) {
-      arr[counter] = { store_token(colon_arr[1]), 2, kind::scope_path_call }; counter += 1;
-      arr[counter] = { store_token(colon_arr[2]), 1 }; counter += 1;
+      arr[counter] = { store_token(colon_arr[1], line, column), 2, kind::scope_path_call }; counter += 1;
+      arr[counter] = { store_token(colon_arr[2], line, column), 1 }; counter += 1;
       size += 2;
     } else if (colon_count == 2) {
-      lfn = store_token(colon_arr[1]);
+      lfn = store_token(colon_arr[1], line, column);
     }
   }
 
@@ -164,6 +164,7 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
   size_t lvalue_tokens_count = 0;
 
   std::string_view lvalue;
+  size_t lvalue_line = 0, lvalue_column = 0;
   const tavl::node* rhs = row;
   bool nullable_call = false;
   if (row->type == tavl::node_type::pair) {
@@ -173,13 +174,15 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
       if (ch.size() != 2 || ch[0]->type != tavl::node_type::token)
         throw std::runtime_error(std::format("Assignment operator '{}' expects a plain function name on the left side", op));
       lvalue = node_text(ch[0], src);          // lhs is a single token (scope paths arrive whole)
+      lvalue_line = ch[0]->token.span.line;
+      lvalue_column = ch[0]->token.span.column;
       rhs = ch[1];
       nullable_call = op == "?=";
     }
   }
 
   if (!lvalue.empty()) {
-    const auto [func_name, count] = convert_scope(lvalue, arr.data(), arr.size());
+    const auto [func_name, count] = convert_scope(lvalue, arr.data(), arr.size(), lvalue_line, lvalue_column);
     lvalue_tokens_count = count;
     if (func_name.offset != SIZE_MAX) lfn = func_name;
   }

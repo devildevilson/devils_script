@@ -171,40 +171,26 @@ static ignore_value remove_from(const thisctxlist& l, const any_stack& val) {
 static double chance() { return 1; }
 static any_stack randomfn(double, const element_view&) { return any_stack{}; }
 
-static size_t line_for_command(const context* ctx, const script_container* scr) {
-  if (scr == nullptr || ctx->current_index >= scr->command_names.size()) return 0;
-  const auto name = scr->command_names[ctx->current_index];
-  if (name.count == SIZE_MAX || scr->string_pool.empty()) return 0;
-  // NOTE: `string_pool` is the compact token pool, not the raw source — it carries no newline
-  // layout, so this can no longer reconstruct true line numbers (it degrades to 1). Preserving
-  // real line/column would mean storing them per command (a deliberate memory cost).
-  size_t line = 1;
-  const size_t end = std::min(name.start, scr->string_pool.size());
-  for (size_t i = 0; i < end; ++i) line += size_t(scr->string_pool[i] == '\n');
-  return line;
-}
-
 static std::string debug_environment(const context* ctx, const script_container* scr, const size_t consumed_args) {
   const auto fn = scr != nullptr
     ? scr->get_command_name(ctx->current_index)
     : std::string_view();
   const int64_t scope_index = int64_t(ctx->stack.size()) - int64_t(consumed_args) - 1;
   const auto scope = scope_index >= 0 ? ctx->stack.type(scope_index) : std::string_view();
-  return std::format("line {}, function '{}', scope '{}'", line_for_command(ctx, scr), fn, scope);
+  return std::format("function '{}', scope '{}'", fn, scope);
 }
 
 static int64_t debug_assert(int64_t, context* ctx, const script_container* scr) {
   const auto message = ctx->stack.safe_pop<std::string_view>();
   const bool condition = ctx->stack.safe_pop<bool>();
-  if (!condition) {
-    throw std::runtime_error(std::format("Script assert failed: '{}' ({})", message, debug_environment(ctx, scr, 2)));
-  }
+  if (!condition) scr->error_at(ctx, std::format("assert failed: '{}' ({})", message, debug_environment(ctx, scr, 2)));
   return -2;
 }
 
 static int64_t debug_trace(int64_t, context* ctx, const script_container* scr) {
   const auto message = ctx->stack.safe_pop<std::string_view>();
-  if (ctx->trace) ctx->trace(std::format("Script trace: '{}' ({})", message, debug_environment(ctx, scr, 1)));
+  const auto loc = scr->loc_at(ctx);
+  ctx->trace(std::format("Script trace @ {}:{}: '{}' ({})", loc.line, loc.column, message, debug_environment(ctx, scr, 1)));
   return -1;
 }
 }

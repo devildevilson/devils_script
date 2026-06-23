@@ -267,9 +267,13 @@ std::string_view script_container::get_name() const {
   return get_string(name);
 }
 
-void script_container::error_at(const context* ctx, const std::string_view& msg) const {
+script_container::src_loc script_container::loc_at(const context* ctx) const {
   const size_t i = ctx->current_index;
-  const src_loc loc = i < locs.size() ? locs[i] : src_loc{ 0, 0 };
+  return i < locs.size() ? locs[i] : src_loc{ 0, 0 };
+}
+
+void script_container::error_at(const context* ctx, const std::string_view& msg) const {
+  const src_loc loc = loc_at(ctx);
   throw std::runtime_error(std::format("script '{}' @ {}:{}: {}", get_name(), loc.line, loc.column, msg));
 }
 

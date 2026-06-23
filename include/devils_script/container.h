@@ -112,6 +112,8 @@ struct script_container {
   std::string_view get_string(const string_ref& str) const;
   std::string_view get_name() const;
   std::string_view get_command_name(const size_t index) const;
+  // Source position of the command at ctx->current_index ({0,0} if out of range).
+  src_loc loc_at(const context* ctx) const;
   // Throws std::runtime_error prefixed with `script '<name>' @ <line>:<column>: ` using the
   // source position of the command at ctx->current_index. Used by runtime command handlers.
   [[noreturn]] void error_at(const context* ctx, const std::string_view& msg) const;

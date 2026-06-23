@@ -1281,7 +1281,7 @@ TEST_CASE("Debug assert and trace") {
     }
     {
       ds::context ctx;
-      CHECK_THROWS_WITH_AS(cont.process(&ctx), doctest::Contains("line 1"), std::runtime_error);
+      CHECK_THROWS_WITH_AS(cont.process(&ctx), doctest::Contains("@ 1:1"), std::runtime_error);
     }
   }
 
@@ -1296,7 +1296,7 @@ TEST_CASE("Debug assert and trace") {
     ctx.trace = [&](const std::string& msg) { out = msg; };
     cont.process(&ctx);
     CHECK(out.find("123 123") != std::string::npos);
-    CHECK(out.find("line 1") != std::string::npos);
+    CHECK(out.find("@ 1:1") != std::string::npos);
   }
 
   SUBCASE("trace accepts dotted static tokens and rejects script blocks") {
@@ -1312,6 +1312,76 @@ TEST_CASE("Debug assert and trace") {
     CHECK(out.find("abc.def.123") != std::string::npos);
 
     CHECK_THROWS(sys.parse<void, void>("script", "trace = { 5 + 5 }"));
+  }
+}
+
+TEST_CASE("Source locations (line/column)") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  SUBCASE("assert error carries the line and column of the assert call") {
+    // assert sits on line 2, indented by two spaces -> column 3.
+    const auto cont = sys.parse<void, void>("script",
+      "trace = \"a\"\n"
+      "  assert = { false, boom }");
+    ds::context ctx;
+    ctx.trace = [](const std::string&) {};  // silence the line-1 trace
+    std::string what;
+    try { cont.process(&ctx); }
+    catch (const std::runtime_error& e) { what = e.what(); }
+    CHECK(what.find("script 'script' @ 2:3:") != std::string::npos);
+    CHECK(what.find("boom") != std::string::npos);
+  }
+
+  SUBCASE("trace message embeds the line and column of the trace call") {
+    // blank line 1, then trace indented by three spaces on line 2 -> column 4.
+    const auto cont = sys.parse<void, void>("script", "\n   trace = \"hello\"");
+    ds::context ctx;
+    std::string out;
+    ctx.trace = [&](const std::string& msg) { out = msg; };
+    cont.process(&ctx);
+    CHECK(out.find("@ 2:4:") != std::string::npos);
+    CHECK(out.find("hello") != std::string::npos);
+  }
+
+  SUBCASE("locs is 1:1 with cmds and every command has a populated position") {
+    const auto cont = sys.parse<void, void>("script",
+      "assert = { false, boom }\n"
+      "trace = \"hi\"");
+    REQUIRE(cont.locs.size() == cont.cmds.size());
+    for (const auto& loc : cont.locs) {
+      CHECK(loc.line >= 1);     // never the degraded 0 placeholder
+      CHECK(loc.column >= 1);
+    }
+  }
+
+  SUBCASE("each command's loc points at its own source position") {
+    // false literal on line 1 col 12; assert call on line 1 col 1; trace on line 2 col 1.
+    const auto cont = sys.parse<void, void>("script",
+      "assert = { false, boom }\n"
+      "trace = \"hi\"");
+
+    bool saw_false = false, saw_assert = false, saw_trace = false;
+    for (size_t i = 0; i < cont.cmds.size(); ++i) {
+      const auto name = cont.get_command_name(i);
+      if (name == "pushbool") {
+        saw_false = true;
+        CHECK(cont.locs[i].line == 1);
+        CHECK(cont.locs[i].column == 12);
+      } else if (name == "assert") {
+        saw_assert = true;
+        CHECK(cont.locs[i].line == 1);
+        CHECK(cont.locs[i].column == 1);
+      } else if (name == "trace") {
+        saw_trace = true;
+        CHECK(cont.locs[i].line == 2);
+        CHECK(cont.locs[i].column == 1);
+      }
+    }
+    CHECK(saw_false);
+    CHECK(saw_assert);
+    CHECK(saw_trace);
   }
 }
 
@@ -1678,6 +1748,113 @@ TEST_CASE("Using arguments + save to context + lists") {
     sys.init_math();
     sys.register_function<&func7>("func7");
     CHECK_THROWS(sys.parse<double, void>("script", "{ ctx_set = { first = 7 }, ctx:arg:first = { func7 } }"));
+  }
+}
+
+// clear() must restore a clean slate so one context can run a sequence of DIFFERENT
+// scripts back-to-back: no leftover stack, return value, saved slots, or list storage
+// must contaminate the next run (arguments/lists are re-supplied by the caller per run).
+TEST_CASE("context::clear allows reusing one context across different scripts") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  SUBCASE("different arithmetic scripts, same context") {
+    const auto a = sys.parse<double, void>("a", "5 + 5");    // 10
+    const auto b = sys.parse<double, void>("b", "35 * 2");   // 70
+
+    ds::context ctx;
+    a.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 10.0);
+
+    ctx.clear();
+    b.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 70.0);
+
+    // and back to the first: clear must work in both directions, not just once.
+    ctx.clear();
+    a.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 10.0);
+  }
+
+  SUBCASE("return type changes between runs") {
+    const auto num = sys.parse<double, void>("num", "5 + 5");  // double 10
+    const auto cmp = sys.parse<bool, void>("cmp", "5 > 3");    // bool true
+
+    ds::context ctx;
+    num.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 10.0);
+
+    ctx.clear();
+    cmp.process(&ctx);
+    REQUIRE(ctx.is_return<bool>());           // latest return wins, not the stale double
+    CHECK(ctx.is_return<double>() == false);
+    CHECK(ctx.get_return<bool>() == true);
+  }
+
+  SUBCASE("arguments are re-supplied per run") {
+    const auto a = sys.parse<double, void>("a", "{ ctx:arg:first, ctx:arg:second }");  // first + second
+    const auto b = sys.parse<double, void>("b", "{ ctx:arg:x }");                       // x
+
+    ds::context ctx;
+    ctx.set_arg(a.find_arg("first"), 5.0);
+    ctx.set_arg(a.find_arg("second"), 5.0);
+    a.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 10.0);
+
+    ctx.clear();
+    ctx.set_arg(b.find_arg("x"), 42.0);
+    b.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 42.0);
+  }
+
+  SUBCASE("saved/local values do not leak between scripts") {
+    // each script writes its own saved slot before reading it; clear() between runs
+    // must not let the first script's saved value affect the second.
+    const auto a = sys.parse<double, void>("a",
+      "{ ctx_save = { number = 5 }, ctx:saved:number, ctx:saved:number }");  // 10
+    const auto b = sys.parse<double, void>("b",
+      "{ ctx_save = { number = 3 }, ctx:saved:number }");                    // 3
+
+    ds::context ctx;
+    a.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 10.0);
+
+    ctx.clear();
+    b.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 3.0);
+  }
+}
+
+// Repeatedly running a list-using script on one context must give the same result
+// every time: create_lists() has to rebuild list storage so elements don't accumulate.
+TEST_CASE("context list storage is rebuilt per run via create_lists") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_function<&func7>("func7");
+  sys.register_function_iter<&every_on_list>("every_on_list", { "value" });
+
+  // adds the root scope twice, then sums func7 (==5) over the list -> 10.
+  const auto cont = sys.parse<double, scope2>("script",
+    "{ ctx:list:baby_list = { add_to = outer, add_to = outer, every_on_list = { value = { func7 } } } }");
+
+  ds::context ctx;
+  for (int run = 0; run < 3; ++run) {
+    ctx.clear();
+    ctx.create_lists(&cont);
+    ctx.set_arg(cont.find_arg("root"), scope2{});
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 10.0);  // not 20/30: the list did not accumulate across runs
   }
 }
 

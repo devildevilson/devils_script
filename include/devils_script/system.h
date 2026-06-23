@@ -90,7 +90,7 @@ public:
     std::vector<block> output;
     std::string token_storage;
 
-    std::tuple<token_ref, size_t> convert_scope(const std::string_view& expr, block* arr, const size_t max_size);
+    std::tuple<token_ref, size_t> convert_scope(const std::string_view& expr, block* arr, const size_t max_size, size_t line = 0, size_t column = 0);
     std::string_view token_text(const token_ref& token) const noexcept;
     token_ref store_token(std::string_view text, size_t line = 0, size_t column = 0);
 
