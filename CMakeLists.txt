@@ -86,9 +86,23 @@ if (DS_BUILD_TESTS)
 
   FetchContent_MakeAvailable(doctest)
 
-  add_executable (devils_script_tests tests/main.cpp tests/basic.cpp tests/case1.cpp tests/introspection.cpp tests/disasm.cpp tests/execute.cpp)
+  add_executable (devils_script_tests
+    tests/main.cpp
+    tests/basics.cpp
+    tests/statements.cpp
+    tests/typecheck.cpp
+    tests/description.cpp
+    tests/context_lists.cpp
+    tests/builtins.cpp
+    tests/case1.cpp
+    tests/introspection.cpp
+    tests/disasm.cpp
+    tests/execute.cpp)
   target_link_libraries(devils_script_tests devils_script devils_script_options doctest::doctest)
 
   add_executable (devils_script_benchs tests/case1_bench.cpp)
   target_link_libraries(devils_script_benchs devils_script devils_script_options)
+
+  add_executable (devils_script_execute_bench tests/execute_bench.cpp)
+  target_link_libraries(devils_script_execute_bench devils_script devils_script_options)
 endif()
