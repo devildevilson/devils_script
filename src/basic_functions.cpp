@@ -534,6 +534,17 @@ int64_t push_command_name(int64_t arg, context* ctx, const script_container* scr
   return 1;
 }
 
+namespace detail {
+// Reads the command name pushed on the stack top ahead of an effect call and removes it, leaving the
+// function's arguments back on top. Called at the start of every on_effect branch so the name reaches
+// the callback as an ordinary stack value (no command_names side table).
+std::string_view take_command_name(context* ctx) {
+  const auto name = ctx->stack.safe_get<std::string_view>(-1);
+  ctx->stack.erase();
+  return name;
+}
+}
+
 int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
   // Metadata lives inline in the instruction stream, not a side table: the opcode arg packs
   // (kind, list_index); the three following cmd slots carry, as immediates read here, the callback

@@ -126,18 +126,11 @@ struct context {
   // parse-time `script_container::max_stack` / `max_saved` (or a nesting-class bucket). The argument
   // stack stays at the fixed `script_arguments_size`. Any non-zero seed is valid; containers can
   // override it with their own parse seed.
-  inline context(const size_t stack_capacity, const size_t saved_capacity) noexcept
-    : stack(stack_capacity), saved_stack(saved_capacity), args_stack(script_arguments_size),
-      prng_state(0xdeadbab1ull), current_index(0), frame_base(0), arg_base(0), saved_base(0), list_base(0), userptr(nullptr), current_script(nullptr),
-      trace([](const std::string& msg) { std::cout << msg << '\n'; }) {
-    // Saved values and args are indexed directly by compiled code, not pushed sequentially.
-    saved_stack._size = saved_stack._data.size();
-    args_stack._size = args_stack._data.size();
-  }
+  context(const size_t stack_capacity, const size_t saved_capacity) noexcept;
 
   // Default sizes (DEVILS_SCRIPT_DEFAULT_STACK_SIZE / local_vars_size); the parse-time stack/saved
   // limits in parse_context default to these too, so a default script fits a default context.
-  inline context() noexcept : context(stack_size, local_vars_size) {}
+  context() noexcept;
 
   template <typename T> requires(valid_stack_type<T>)
   bool is_arg(const size_t index) const;
@@ -175,15 +168,13 @@ struct context {
   template <typename T> requires(valid_stack_type<T>)
   void set_return(const T& val);
 
-  inline void set_return(const std::string_view& type, const stack_element& el) { _return_value = any_stack(el.mem, type); }
-  inline std::string_view arg_type(const int64_t index) const { return args_stack.type(index); }
-  inline std::string_view saved_type(const int64_t index) const { return saved_stack.type(index); }
-  inline std::string_view return_type() const { return _return_value.type(); }
-  inline void clear() { current_index = 0; frame_base = 0; arg_base = 0; saved_base = 0; list_base = 0; stack.resize(0); }
+  void set_return(const std::string_view& type, const stack_element& el);
+  std::string_view arg_type(const int64_t index) const;
+  std::string_view saved_type(const int64_t index) const;
+  std::string_view return_type() const;
+  void clear();
   void create_lists(const script_container* scr);
 };
-
-inline context::stack_t::stack_t(const size_t max) noexcept : _size(0) { _data.resize(max); _types.resize(max); }
 
 template <typename T> requires(valid_stack_type<T>)
 bool context::stack_t::is() const {
@@ -291,68 +282,6 @@ auto context::stack_t::safe_pop() -> final_stack_el_t<T> {
   if constexpr (is_typeless_v<basic_T>) {
     return basic_T(_data[_size].mem, _types[_size]);
   } else return _data[_size].template get<basic_T>();
-}
-
-inline auto context::stack_t::get_view() const -> stack_element::view {
-  if (_size == 0) return stack_element::view();
-  return stack_element::view(_data[_size-1].mem, _types[_size-1]);
-}
-
-inline auto context::stack_t::get_view(const int64_t index) const -> stack_element::view {
-  const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  if (final_index >= int64_t(_size)) return stack_element::view();
-  return stack_element::view(_data[final_index].mem, _types[final_index]);
-}
-
-inline void context::stack_t::erase() {
-  _size = _size > 0 ? _size-1 : _size;
-}
-
-inline void context::stack_t::erase(const int64_t index) {
-  const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  if (final_index == int64_t(_size)-1) erase();
-  else if (final_index < int64_t(_size)-1) {
-    memmove(&_data[final_index], &_data[final_index+1], sizeof(char) * MAXIMUM_STACK_VAL_SIZE);
-    memmove(&_types[final_index], &_types[final_index+1], sizeof(char) * MAXIMUM_STACK_VAL_SIZE);
-    _size -= 1;
-  }
-}
-
-inline void context::stack_t::resize(const size_t size) {
-  if (size > _data.size()) throw std::runtime_error("Stack overflow");
-  _size = size;
-}
-
-inline stack_element context::stack_t::element() const {
-  return _size > 0 ? _data[_size - 1] : stack_element();
-}
-
-inline stack_element context::stack_t::element(const int64_t index) const {
-  const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < int64_t(_size) ? _data[final_index] : stack_element();
-}
-
-inline std::string_view context::stack_t::type() const {
-  return _size > 0 ? _types[_size - 1] : std::string_view();
-}
-
-inline std::string_view context::stack_t::type(const int64_t index) const {
-  const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < int64_t(_size) ? _types[final_index] : std::string_view();
-}
-
-inline size_t context::stack_t::size() const { return _size; }
-
-inline void context::stack_t::push(const std::string_view& type, const stack_element& el) {
-  if (_size >= _data.size()) throw std::runtime_error("Stack overflow");
-  _data[_size] = el;
-  _types[_size] = type;
-  _size += 1;
-}
-
-inline bool context::stack_t::invalid(const int64_t index) const {
-  const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < int64_t(_size) ? _data[final_index].invalid() : true;
 }
 
 template <typename T> requires(valid_stack_type<T>)

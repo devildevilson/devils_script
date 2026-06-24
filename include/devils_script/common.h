@@ -116,7 +116,7 @@ using script_stack_el_t = std::conditional_t<
   final_stack_el_t<T>
 >;
 
-inline size_t compute_count1() { return 0; }
+size_t compute_count1();
 template <typename T>
 inline size_t compute_count2(T) { return 0; }
 template <typename F>
@@ -170,10 +170,10 @@ using is_valid_t = decltype(&is_valid<T>);
 struct context;
 struct script_container;
 struct container;
-inline int64_t default_command_f(int64_t, context*, const script_container*) { return 0; }
+int64_t default_command_f(int64_t, context*, const script_container*);
 using function_t = decltype(&default_command_f);
 
-inline void assert_msg_fn(context*, const script_container*, const std::string_view&, const size_t) {}
+void assert_msg_fn(context*, const script_container*, const std::string_view&, const size_t);
 using assert_fn_t = decltype(&assert_msg_fn);
 
 constexpr std::string_view custom_description_constant = "custom_description";

@@ -1211,6 +1211,12 @@ void system::configure_parser(tavl::parser& p) const {
   }
 }
 
+void system::emit_command_name(parse_ctx* ctx, container* scr, const std::string_view& name) const {
+  const auto ref = store_string(scr, name);
+  scr->cmds.push_back(container::command(&push_command_name, packstrid(uint32_t(ref.start), uint32_t(ref.count))));
+  ctx->push<std::string_view>();
+}
+
 void system::finalize_resource_usage(parse_context& ctx, container& c) const {
   // Own-frame peak is whatever push() observed; the saved frame is this script's declared slots plus
   // the deepest saved frame any executed sub-script needs stacked on top (see container::max_saved).

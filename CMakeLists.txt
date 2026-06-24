@@ -55,6 +55,8 @@ set(HDR_LIST
 )
 
 set(SRC_LIST
+  src/common.cpp
+  src/context.cpp
   src/container.cpp
   src/script_ast.cpp
   src/system_ast.cpp

@@ -369,12 +369,6 @@ void system::emit_call_instruction(parse_ctx*, container* scr, function_t safe, 
   scr->cmds.push_back(container::command(safety() ? safe : unsafe, scope_index));
 }
 
-inline void system::emit_command_name(parse_ctx* ctx, container* scr, const std::string_view& name) const {
-  const auto ref = store_string(scr, name);
-  scr->cmds.push_back(container::command(&push_command_name, packstrid(uint32_t(ref.start), uint32_t(ref.count))));
-  ctx->push<std::string_view>();
-}
-
 template <typename RetT>
 void system::apply_call_stack_effect(parse_ctx* ctx, const size_t pops) const {
   for (size_t i = 0; i < pops; ++i) ctx->pop();

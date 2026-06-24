@@ -218,11 +218,7 @@ int64_t invoke_mathfunc(int64_t val, context* ctx, const script_container* scr, 
 // Reads the command name pushed on the stack top ahead of an effect call and removes it, leaving the
 // function's arguments back on top. Called at the start of every on_effect branch so the name reaches
 // the callback as an ordinary stack value (no command_names side table).
-inline std::string_view take_command_name(context* ctx) {
-  const auto name = ctx->stack.safe_get<std::string_view>(-1);
-  ctx->stack.erase();
-  return name;
-}
+std::string_view take_command_name(context* ctx);
 
 template <size_t OFF, size_t COUNT, auto f, on_effect_t<decltype(f), scope_t<decltype(f)>> eff, size_t... I>
 int64_t invoke_userfunc(context* ctx, [[maybe_unused]] const script_container* scr, std::index_sequence<I...>) {
