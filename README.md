@@ -25,6 +25,21 @@ cmake --build build-release --target devils_script_tests devils_script_benchs de
 
 For a debug build, use `-DCMAKE_BUILD_TYPE=Debug` and a separate build directory.
 
+### Build options
+
+The library's own compile flags (ISA, warnings, RTTI, LTO, MSVC runtime) are applied **privately** and
+do not leak onto a consumer that links `devils_script` — only the C++20 requirement propagates.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `DS_ARCH` | `AVX` | ISA baseline for devils_script's own sources: `OFF`, `AVX`, `AVX2`, `NATIVE`. No SIMD intrinsics live in the headers, so this has no ABI impact and consumers pick their own arch. |
+| `DS_BUILD_TESTS` | `ON` | Build the doctest test suite. |
+| `DS_BUILD_EXAMPLES` | `ON` | Build the examples. |
+
+In release configs the static archive is built **fat** (GCC `-ffat-lto-objects`, MSVC `/GL` + `/LTCG`),
+so it links into a consumer whether or not that consumer enables LTO. The MSVC C runtime defaults to the
+DLL runtime via `CMAKE_MSVC_RUNTIME_LIBRARY`; set that variable to override (e.g. for the static runtime).
+
 ## Basic Usage
 
 Register C++ functions in a `devils_script::system`, parse a script into a `container`,

@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-06-24
+
+### Changed
+- Build flags no longer leak onto consumers: `devils_script_options` is now linked `PRIVATE` to the
+  library (arch, warnings, RTTI, LTO, MSVC runtime stay internal); only the C++20 requirement and
+  `tavl` propagate via `PUBLIC`.
+- Replaced the hand-written `/MD` / `/MDd` flags with a guarded `CMAKE_MSVC_RUNTIME_LIBRARY` default
+  (DLL runtime), so an embedding project can choose the static runtime instead.
+- Release archives are now built fat so they link with or without consumer LTO: GCC
+  `-ffat-lto-objects`, MSVC `/GL` at compile paired with `/LTCG` at archive and link time.
+
+### Added
+- `DS_ARCH` cache variable (`OFF` / `AVX` / `AVX2` / `NATIVE`, default `AVX`) selecting the ISA
+  baseline for devils_script's own sources, mapped to the right GCC/Clang/MSVC flags. Applied
+  PRIVATE — no ABI impact, consumers pick their own arch.
+
 ## [1.1.0] - 2026-06-24
 
 ### Added
