@@ -850,6 +850,7 @@ void system::parse_context::init(const system& sys, container& c) {
   // caller can tighten them on a freshly-constructed parse_context before parsing).
   max_stack_depth = 0;
   max_child_saved = 0;
+  max_child_lists = 0;
   ftype = function_type::lvalue;
   prng_s = prng::xoshiro256starstar::init(sys.get_seed());
   c.prng_state = gen_value();

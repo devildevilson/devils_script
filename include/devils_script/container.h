@@ -104,6 +104,11 @@ struct script_container {
   // against parse_context::max_stack_limit / max_saved_limit.
   size_t max_stack = 0;
   size_t max_saved = 0;
+  // Peak `context::lists` size this script (and everything it executes) reaches: this script's own
+  // lists plus the deepest nested `execute` list-frame chain. `create_lists` reserves exactly this so
+  // `list_frame_enter` never reallocates ctx->lists — otherwise a list-pipeline callback that runs a
+  // list-using sub-script would invalidate the `list&` reference the pipeline holds across the call.
+  size_t max_lists = 0;
 
   script_container() noexcept;
   void process(context* ctx) const;

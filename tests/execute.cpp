@@ -657,3 +657,99 @@ TEST_CASE("execute: parse-time stack/saved usage") {
       "j=0.0,k=0.0,l=0.0,m=0.0,n=0.0,o=0.0,p=0.0,q=0.0 }, ctx:saved:a }"));
   }
 }
+
+// List-pipeline callbacks that call execute: the heavily-mixed case (stack + args + lists). Before the
+// max_lists reserve, a callback running a list-using sub grew ctx->lists and reallocated it, dangling
+// the `list&` the running pipeline holds — crashing map/filter write-back. And binding the very list
+// being iterated is rejected at parse so a sub can't mutate it mid-iteration.
+TEST_CASE("execute: inside list-pipeline callbacks") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // Sub that builds its OWN 2-element scratch list and returns its count (== 2). Uses a list, so
+  // executing it grows ctx->lists.
+  const auto countsub = sys.parse<double, void>(
+    "countsub", "{ ctx:list:nums = { add_to = ctx:arg:a + 0.0, add_to = ctx:arg:b + 0.0 }, ctx:list:nums = { count } }");
+  // Bool sub that also allocates a list (frame growth) and returns a > 0.5.
+  const auto bigsub = sys.parse<bool, void>(
+    "bigsub", "{ ctx:list:t = { add_to = ctx:arg:a + 0.0 }, ctx:arg:a + 0.0 > 0.5 }");
+  // Counts a bound (in/out) list `nums`.
+  const auto counter = sys.parse<double, void>("counter", "ctx:list:nums = { count }");
+
+  registry reg;
+  reg.add("countsub", countsub);
+  reg.add("bigsub", bigsub);
+  reg.add("counter", counter);
+  reg.install(sys);
+
+  SUBCASE("max_lists accounts for a list-using sub stacked above the caller's lists") {
+    CHECK(countsub.max_lists == 1);
+    const auto cont = sys.parse<double, void>(
+      "caller", "{ ctx:list:xs = { add_to = 1.0 }, ctx:list:xs = { sum = { execute = { countsub, a = 1.0, b = 2.0 } } } }");
+    CHECK(cont.max_lists == 2);  // 1 own list (xs) + countsub's 1
+  }
+
+  SUBCASE("map callback runs a list-using sub (no realloc crash)") {
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:xs = { add_to = 1.0, add_to = 2.0, add_to = 3.0 }, "
+      "ctx:list:xs = { map = { execute = { countsub, a = 1.0, b = 2.0 } } }, ctx:list:xs = { sum = this } }");
+    ds::context ctx; ctx.clear(); ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(6.0));  // 3 elements each mapped to 2
+  }
+
+  SUBCASE("filter callback runs a list-using sub (write-back stays valid)") {
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:xs = { add_to = 1.0, add_to = 2.0, add_to = 3.0 }, "
+      "ctx:list:xs = { filter = { execute = { bigsub, a = 2.0 } } }, ctx:list:xs = { count } }");
+    ds::context ctx; ctx.clear(); ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(3.0));  // predicate true for all -> keep all 3
+  }
+
+  SUBCASE("reducer callback runs a list-using sub") {
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:xs = { add_to = 1.0, add_to = 2.0, add_to = 3.0 }, "
+      "ctx:list:xs = { sum = { execute = { countsub, a = 1.0, b = 2.0 } } } }");
+    ds::context ctx; ctx.clear(); ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(6.0));  // 3 elements summing 2 each
+  }
+
+  SUBCASE("a callback may read another list (comparing two lists)") {
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:ys = { add_to = 7.0, add_to = 8.0 }, ctx:list:xs = { add_to = 1.0, add_to = 2.0, add_to = 3.0 }, "
+      "ctx:list:xs = { sum = { ctx:list:ys = { count } } } }");
+    ds::context ctx; ctx.clear(); ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(6.0));  // each of 3 xs adds ys.count (2)
+  }
+
+  SUBCASE("binding the list currently being iterated is a parse error") {
+    CHECK_THROWS(sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:nums = { add_to = 1.0, add_to = 2.0 }, ctx:list:nums = { sum = { execute = { counter, nums } } } }"));
+  }
+
+  SUBCASE("binding a DIFFERENT list inside a callback is allowed") {
+    // The callback iterates xs but binds the caller's `nums` (the sub's list parameter) — a distinct
+    // list from the one being iterated, so there is no conflict.
+    const auto cont = sys.parse<double, void>(
+      "caller",
+      "{ ctx:list:nums = { add_to = 5.0, add_to = 6.0 }, ctx:list:xs = { add_to = 1.0, add_to = 2.0 }, "
+      "ctx:list:xs = { sum = { execute = { counter, nums } } } }");
+    ds::context ctx; ctx.clear(); ctx.create_lists(&cont);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == doctest::Approx(4.0));  // 2 xs elements each add nums.count (2)
+  }
+}

@@ -170,6 +170,7 @@ public:
     // max_saved among all executed sub-scripts; container::max_saved = saved.size() + max_child_saved.
     size_t max_stack_depth;
     size_t max_child_saved;
+    size_t max_child_lists;   // deepest max_lists among executed sub-scripts; see container::max_lists
     // Upper bounds enforced at parse end (default to the context's stack/local-vars sizes). A script
     // whose computed max_stack/max_saved exceeds these is rejected so it can never overrun the runtime
     // stacks. Set before parsing to carve scripts into nesting classes with smaller budgets.

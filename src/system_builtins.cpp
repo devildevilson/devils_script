@@ -452,6 +452,11 @@ void system::init_basic_functions() {
           sys->raise_error(std::format("'execute' list '{}' type mismatch: caller holds '{}', target '{}' expects '{}'",
             lname, scr->lists[caller_idx].type, script_name, sub->lists[sub_slot].type));
         }
+        // Forbid binding the list this script is currently iterating (we are inside its pipeline
+        // callback): the sub would mutate the live list mid-iteration, and the running pipeline holds
+        // a reference/iterators into it. list_index_upvalue is SIZE_MAX outside a callback.
+        if (caller_idx == ctx->list_index_upvalue)
+          sys->raise_error(std::format("'execute' target '{}' cannot bind list '{}' while it is being iterated", script_name, lname));
         list_bindings.push_back({ sub_slot, caller_idx });
         continue;
       }
@@ -559,6 +564,7 @@ void system::init_basic_functions() {
     const size_t exec_base = ctx->stack_types.size() - nargs;
     if (exec_base + sub->max_stack > ctx->max_stack_depth) ctx->max_stack_depth = exec_base + sub->max_stack;
     if (sub->max_saved > ctx->max_child_saved) ctx->max_child_saved = sub->max_saved;
+    if (sub->max_lists > ctx->max_child_lists) ctx->max_child_lists = sub->max_lists;
 
     for (size_t k = 0; k < nargs; ++k) ctx->pop();   // consume root (if any) + named arguments
     if (!type_is_void(ret)) ctx->push(ret);
@@ -1296,6 +1302,9 @@ void system::init_basic_functions() {
         ctx->push(input_type);
         ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
         {
+          // Mark this list as "being iterated" for the duration of the per-element callback, so an
+          // `execute` inside it can't bind the same list in/out (it would mutate the live list under us).
+          push_list_index_upvalue pliu(ctx, index);
           set_expected_type set(ctx, expected);
           sys->dispatch_node(ctx, scr, body);
         }

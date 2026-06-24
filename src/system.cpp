@@ -53,6 +53,10 @@ stack_element::view any_stack::view() const { return stack_element::view(_mem, t
 
 void context::create_lists(const script_container* scr) {
   lists.clear();
+  // Reserve the script's whole-subtree peak so nested `execute` list-frames (list_frame_enter) never
+  // reallocate ctx->lists mid-run — a list-pipeline callback holds a reference into this vector across
+  // any sub-script call, so a reallocation there would dangle it (crash on map/filter write-back).
+  lists.reserve(std::max(scr->max_lists, scr->lists.size()));
   lists.resize(scr->lists.size());
 }
 
@@ -1212,6 +1216,8 @@ void system::finalize_resource_usage(parse_context& ctx, container& c) const {
   // the deepest saved frame any executed sub-script needs stacked on top (see container::max_saved).
   c.max_stack = ctx.max_stack_depth;
   c.max_saved = c.saved.size() + ctx.max_child_saved;
+  // Peak ctx->lists size = own lists + deepest nested execute list-frame; create_lists reserves it.
+  c.max_lists = c.lists.size() + ctx.max_child_lists;
   if (c.max_stack > ctx.max_stack_limit)
     raise_error(std::format("Script '{}' needs a stack of {}, exceeding the limit of {}", c.get_name(), c.max_stack, ctx.max_stack_limit));
   if (c.max_saved > ctx.max_saved_limit)
@@ -1308,7 +1314,7 @@ std::tuple<int32_t, int32_t, system::command_data::associativity, system::comman
 
 system::parse_context::parse_context() noexcept :
   ftype(function_type::lvalue), nest_level(0), source_line(0), source_column(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0),
-  max_stack_depth(0), max_child_saved(0), max_stack_limit(context::stack_size), max_saved_limit(context::local_vars_size), initialized(false)
+  max_stack_depth(0), max_child_saved(0), max_child_lists(0), max_stack_limit(context::stack_size), max_saved_limit(context::local_vars_size), initialized(false)
 {}
 
 bool system::parse_context::is_func_subblock() const {
