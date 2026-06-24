@@ -118,7 +118,7 @@ using script_stack_el_t = std::conditional_t<
 
 size_t compute_count1();
 template <typename T>
-inline size_t compute_count2(T) { return 0; }
+size_t compute_count2(T) { return 0; }
 template <typename F>
 using compute_count_t = std::conditional_t<utils::is_function_v<utils::function_argument_type<F, 0>>, decltype(&compute_count1), decltype(&compute_count2<utils::function_argument_type<utils::function_argument_type<F, 1>, 0>>)>;
 
@@ -148,18 +148,18 @@ concept has_operator_bool_func = requires {
 };
 
 template <typename T> requires(has_valid_member_func<T>)
-inline bool is_valid_detail(const T& arg) { return arg.valid(); }
+bool is_valid_detail(const T& arg) { return arg.valid(); }
 template <typename T> requires(has_is_valid_member_func<T>)
-inline bool is_valid_detail(const T& arg) { return arg.is_valid(); }
+bool is_valid_detail(const T& arg) { return arg.is_valid(); }
 template <typename T> requires(has_not_valid_member_func<T>)
-inline bool is_valid_detail(const T& arg) { return !arg.not_valid(); }
+bool is_valid_detail(const T& arg) { return !arg.not_valid(); }
 template <typename T> requires(has_invalid_member_func<T>)
-inline bool is_valid_detail(const T& arg) { return !arg.invalid(); }
+bool is_valid_detail(const T& arg) { return !arg.invalid(); }
 template <typename T> requires(has_operator_bool_func<T>)
-inline bool is_valid_detail(const T& arg) { return bool(arg); }
+bool is_valid_detail(const T& arg) { return bool(arg); }
 
 template <typename T> requires (std::same_as<std::remove_cvref_t<T>, void> || std::same_as<std::remove_cvref_t<T>, utils::void_t>)
-inline bool is_valid() { return true; }
+bool is_valid() { return true; }
 
 template <typename T> requires (!std::same_as<std::remove_cvref_t<T>, void> && !std::same_as<std::remove_cvref_t<T>, utils::void_t>)
 bool is_valid(const T& arg);
@@ -359,9 +359,9 @@ using args_t = std::conditional_t<
   >>;
 
 template <typename T, typename Tuple>
-inline void on_effect1(void*, const std::string_view&, const T&, const Tuple&) {}
+void on_effect1(void*, const std::string_view&, const T&, const Tuple&) {}
 template <typename Tuple>
-inline void on_effect2(void*, const std::string_view&, const Tuple&) {}
+void on_effect2(void*, const std::string_view&, const Tuple&) {}
 
 template <typename T, typename Tuple>
 using on_effect1_t = void(*)(void*, const std::string_view&, const T&, const Tuple&);

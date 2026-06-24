@@ -22,9 +22,22 @@ target_compile_options(devils_script_options INTERFACE
   $<$<CONFIG:RelWithDebInfo>:$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX /MDd /ZI /Wall /wd5045 /wd4820 /O2 /GR- /permissive- /Zc:preprocessor>>
 
   $<$<CONFIG:Debug>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -g -Wall -Wextra -fno-rtti -fno-inline>>
-  $<$<CONFIG:Release>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -Wall -Wextra -fno-rtti -pipe -flto>>
-  $<$<CONFIG:MinSizeRel>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -Wall -Wextra -fno-rtti -pipe -flto -s>>
-  $<$<CONFIG:RelWithDebInfo>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -g -Wall -Wextra -fno-rtti -pipe -flto>>
+  # LTO needs a value: GCC wants -flto=auto (parallel jobs), Clang wants -flto=thin (ThinLTO).
+  $<$<CONFIG:Release>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -Wall -Wextra -fno-rtti -pipe>>
+  $<$<CONFIG:Release>:$<$<CXX_COMPILER_ID:GNU>:-flto=auto>>
+  $<$<CONFIG:Release>:$<$<CXX_COMPILER_ID:Clang>:-flto=thin>>
+  $<$<CONFIG:MinSizeRel>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -Wall -Wextra -fno-rtti -pipe -s>>
+  $<$<CONFIG:MinSizeRel>:$<$<CXX_COMPILER_ID:GNU>:-flto=auto>>
+  $<$<CONFIG:MinSizeRel>:$<$<CXX_COMPILER_ID:Clang>:-flto=thin>>
+  $<$<CONFIG:RelWithDebInfo>:$<$<CXX_COMPILER_ID:GNU,Clang>:-mavx -O3 -g -Wall -Wextra -fno-rtti -pipe>>
+  $<$<CONFIG:RelWithDebInfo>:$<$<CXX_COMPILER_ID:GNU>:-flto=auto>>
+  $<$<CONFIG:RelWithDebInfo>:$<$<CXX_COMPILER_ID:Clang>:-flto=thin>>
+)
+# LTO must also be passed at link time (where the actual whole-program optimization runs), with the
+# same value as at compile time so GCC/Clang don't warn about a mismatch.
+target_link_options(devils_script_options INTERFACE
+  $<$<CONFIG:Release,MinSizeRel,RelWithDebInfo>:$<$<CXX_COMPILER_ID:GNU>:-flto=auto>>
+  $<$<CONFIG:Release,MinSizeRel,RelWithDebInfo>:$<$<CXX_COMPILER_ID:Clang>:-flto=thin>>
 )
 target_compile_definitions(devils_script_options INTERFACE
   $<$<CONFIG:Debug>:>

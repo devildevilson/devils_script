@@ -1,0 +1,9 @@
+# Normalize all text files to LF in the repository and check them out with LF
+# on every platform (Linux-style endings are the project default).
+* text=auto eol=lf
+
+# Common binary types: never normalize.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
