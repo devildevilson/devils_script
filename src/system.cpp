@@ -7,6 +7,7 @@
 #include <optional>
 #include <cstring>
 #include <vector>
+#include "devils_script/context.h"
 #include "devils_script/string-utils.hpp"
 
 namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
@@ -1206,6 +1207,17 @@ void system::configure_parser(tavl::parser& p) const {
   }
 }
 
+void system::finalize_resource_usage(parse_context& ctx, container& c) const {
+  // Own-frame peak is whatever push() observed; the saved frame is this script's declared slots plus
+  // the deepest saved frame any executed sub-script needs stacked on top (see container::max_saved).
+  c.max_stack = ctx.max_stack_depth;
+  c.max_saved = c.saved.size() + ctx.max_child_saved;
+  if (c.max_stack > ctx.max_stack_limit)
+    raise_error(std::format("Script '{}' needs a stack of {}, exceeding the limit of {}", c.get_name(), c.max_stack, ctx.max_stack_limit));
+  if (c.max_saved > ctx.max_saved_limit)
+    raise_error(std::format("Script '{}' needs {} saved-value slots, exceeding the limit of {}", c.get_name(), c.max_saved, ctx.max_saved_limit));
+}
+
 std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::parser& p, parse_context& ctx, container& c) const {
   if (!ctx.initialized) raise_error("parse_context is not initialized");
   if (c.name.count == 0 && c.name.start == 0) c.name = store_string(&c, name);
@@ -1261,6 +1273,8 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
     }
 
     if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
+
+    finalize_resource_usage(ctx, c);
   } catch (const std::exception&) {
     ctx.rpn_ctx.clear();
     ctx.script_ast_nodes.clear();
@@ -1293,7 +1307,8 @@ std::tuple<int32_t, int32_t, system::command_data::associativity, system::comman
 }
 
 system::parse_context::parse_context() noexcept :
-  ftype(function_type::lvalue), nest_level(0), source_line(0), source_column(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0), initialized(false)
+  ftype(function_type::lvalue), nest_level(0), source_line(0), source_column(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0),
+  max_stack_depth(0), max_child_saved(0), max_stack_limit(context::stack_size), max_saved_limit(context::local_vars_size), initialized(false)
 {}
 
 bool system::parse_context::is_func_subblock() const {
@@ -1329,6 +1344,7 @@ bool system::parse_context::is_object() const { return type_is_object(top()); }
 bool system::parse_context::pop_while_ignore() { if (!stack_types.empty() && is_ignore()) { pop(); return true; } return false; }
 void system::parse_context::push(const std::string_view& type) {
   stack_types.push_back(type);
+  if (stack_types.size() > max_stack_depth) max_stack_depth = stack_types.size();
 }
 void system::parse_context::pop() {
   if (stack_types.empty()) throw std::runtime_error(std::format("Trying to remove value from empty stack, current function '{}'", function_names.back()));

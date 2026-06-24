@@ -25,6 +25,23 @@ void check_script_arg_type(const int64_t arg, const context* ctx, const script_c
   }
 }
 
+// Saved-value analogue of check_script_arg_type: validates the runtime type of saved slot `arg`
+// (within the current frame) against the type the parser recorded for it. Catches a saved slot read
+// before being written (e.g. a ctx_save inside an untaken branch) — its runtime type is empty and so
+// mismatches the declared one. Skips typeless slots (the same any_type slots the arg check skips, e.g.
+// an in/out ctx:save of a bare arg recorded as a 'view').
+void check_script_saved_type(const int64_t arg, const context* ctx, const script_container* scr) {
+  if (scr == nullptr || arg < 0 || static_cast<size_t>(arg) >= scr->saved.size()) return;
+
+  const auto expected = scr->saved[static_cast<size_t>(arg)].type;
+  if (expected.empty() || type_is_any_type(expected)) return;
+
+  const auto actual = ctx->saved_type(arg + int64_t(ctx->saved_base));
+  if (actual != expected) {
+    throw std::runtime_error(std::format("Saved value #{} has type '{}', expected '{}'", arg, actual, expected));
+  }
+}
+
 }
 
 static constexpr int64_t make_mask(const size_t count) {
@@ -463,7 +480,8 @@ int64_t setarglvalue(int64_t arg, context* ctx, const script_container*) {
   return 0;
 }
 
-int64_t pushctxvalue(int64_t arg, context* ctx, const script_container*) {
+int64_t pushctxvalue(int64_t arg, context* ctx, const script_container* scr) {
+  check_script_saved_type(arg, ctx, scr);
   ctx->stack.push(ctx->get_saved<any_stack>(arg + int64_t(ctx->saved_base)));
   return 1;
 }

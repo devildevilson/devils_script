@@ -122,15 +122,22 @@ struct context {
 
   std::vector<std::vector<stack_element>> lists;
 
-  // Any non-zero seed is valid; containers can override it with their own parse seed.
-  inline context() noexcept
-    : stack(stack_size), saved_stack(local_vars_size), args_stack(script_arguments_size),
+  // Sizes the operand stack and the saved-value stack explicitly. Pick these from a script's
+  // parse-time `script_container::max_stack` / `max_saved` (or a nesting-class bucket). The argument
+  // stack stays at the fixed `script_arguments_size`. Any non-zero seed is valid; containers can
+  // override it with their own parse seed.
+  inline context(const size_t stack_capacity, const size_t saved_capacity) noexcept
+    : stack(stack_capacity), saved_stack(saved_capacity), args_stack(script_arguments_size),
       prng_state(0xdeadbab1ull), current_index(0), frame_base(0), arg_base(0), saved_base(0), list_base(0), userptr(nullptr), current_script(nullptr),
       trace([](const std::string& msg) { std::cout << msg << '\n'; }) {
     // Saved values and args are indexed directly by compiled code, not pushed sequentially.
     saved_stack._size = saved_stack._data.size();
     args_stack._size = args_stack._data.size();
   }
+
+  // Default sizes (DEVILS_SCRIPT_DEFAULT_STACK_SIZE / local_vars_size); the parse-time stack/saved
+  // limits in parse_context default to these too, so a default script fits a default context.
+  inline context() noexcept : context(stack_size, local_vars_size) {}
 
   template <typename T> requires(valid_stack_type<T>)
   bool is_arg(const size_t index) const;

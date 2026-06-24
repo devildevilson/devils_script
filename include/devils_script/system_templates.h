@@ -846,6 +846,10 @@ void system::parse_context::init(const system& sys, container& c) {
   root_type = utils::is_void_v<root_type_t> ? std::string_view() : scope_type_name<root_type_t>();
   unlimited_func_index = 0;
   nest_level = 0;
+  // Per-parse peak trackers (the limits in max_stack_limit / max_saved_limit are NOT reset here so a
+  // caller can tighten them on a freshly-constructed parse_context before parsing).
+  max_stack_depth = 0;
+  max_child_saved = 0;
   ftype = function_type::lvalue;
   prng_s = prng::xoshiro256starstar::init(sys.get_seed());
   c.prng_state = gen_value();
@@ -919,6 +923,8 @@ container system::parse(std::string_view name, std::string_view text) const {
   }
 
   if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
+
+  finalize_resource_usage(ctx, scr);
 
   scr.build_description_index();
   compact_source_storage(&scr);

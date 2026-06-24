@@ -598,3 +598,62 @@ TEST_CASE("execute: parse-time errors") {
   }
 }
 
+
+// max_stack / max_saved: parse-time peak resource usage, accounting for `execute` nesting (the VM
+// stack and the saved-value frame are reused, so a sub-script's frame stacks on top of the caller's).
+TEST_CASE("execute: parse-time stack/saved usage") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // Leaf sub-scripts with no nested execute: usage is fully local.
+  const auto addup = sys.parse<double, void>("addup", "ctx:arg:base + ctx:arg:bonus");
+  // 1 own saved slot, no nested execute -> max_saved == 1.
+  const auto savesub = sys.parse<double, void>(
+    "savesub", "{ ctx_save = { number = ctx:arg:n + 0.0 }, ctx:saved:number + ctx:saved:number }");
+
+  registry reg;
+  reg.add("addup", addup);
+  reg.add("savesub", savesub);
+  reg.install(sys);
+
+  SUBCASE("leaf script has zero saved usage") {
+    CHECK(addup.max_saved == 0);
+    CHECK(addup.max_stack > 0);
+  }
+
+  SUBCASE("leaf script counts its own saved slots") {
+    CHECK(savesub.saved.size() == 1);
+    CHECK(savesub.max_saved == 1);
+  }
+
+  SUBCASE("a caller's stack peak covers the sub-script stacked above its frame") {
+    // At the execute site the sub runs above the caller's frame, so the caller's peak is at least
+    // the sub's own peak (and at least the argument-pushing depth).
+    const auto caller = sys.parse<double, void>("caller", "execute = { addup, base = 10, bonus = 5 }");
+    CHECK(caller.max_stack >= addup.max_stack);
+  }
+
+  SUBCASE("saved frame accumulates with nesting depth") {
+    reg.install(sys);
+    // outer: 1 own saved slot + executes savesub (1) -> 2.
+    const auto outer = sys.parse<double, void>(
+      "outer", "{ ctx_save = { mid = 50 }, execute = { savesub, n = ctx:arg:m + 0.0 }, ctx:saved:mid }");
+    reg.add("outer", outer);
+    reg.install(sys);
+    CHECK(outer.max_saved == 2);
+
+    // top: 1 own saved slot + executes outer (2) -> 3.
+    const auto top = sys.parse<double, void>(
+      "top", "{ ctx_save = { keep = 100 }, execute = { outer, m = 4 }, ctx:saved:keep }");
+    CHECK(top.max_saved == 3);
+  }
+
+  SUBCASE("a script exceeding the saved-value limit is rejected at parse time") {
+    // 17 saved slots > context::local_vars_size (16, the default max_saved_limit).
+    CHECK_THROWS(sys.parse<double, void>(
+      "toomany",
+      "{ ctx_save = { a=0.0,b=0.0,c=0.0,d=0.0,e=0.0,f=0.0,g=0.0,h=0.0,i=0.0,"
+      "j=0.0,k=0.0,l=0.0,m=0.0,n=0.0,o=0.0,p=0.0,q=0.0 }, ctx:saved:a }"));
+  }
+}

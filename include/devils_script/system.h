@@ -164,6 +164,18 @@ public:
     size_t prev_chaining;
     size_t description_placeholder_depth;
 
+    // Peak parse-time operand-stack depth reached so far (max of stack_types.size() plus, at each
+    // `execute` site, the sub-script's own peak stacked above the caller's frame). Reset per parse in
+    // init(); stored into container::max_stack at parse end. `max_child_saved` is the deepest
+    // max_saved among all executed sub-scripts; container::max_saved = saved.size() + max_child_saved.
+    size_t max_stack_depth;
+    size_t max_child_saved;
+    // Upper bounds enforced at parse end (default to the context's stack/local-vars sizes). A script
+    // whose computed max_stack/max_saved exceeds these is rejected so it can never overrun the runtime
+    // stacks. Set before parsing to carve scripts into nesting classes with smaller budgets.
+    size_t max_stack_limit;
+    size_t max_saved_limit;
+
     std::vector<std::string_view> function_names;
     std::vector<int64_t> scope_stack;
     std::vector<std::string_view> stack_types;
@@ -405,6 +417,10 @@ public:
   // Applies a call's declared stack effect: consume `pops` argument slots, push the result type.
   template <typename RetT>
   void apply_call_stack_effect(parse_ctx* ctx, const size_t pops) const;
+
+  // Stores the parse-time peak stack / saved-frame usage onto the container and rejects a script that
+  // exceeds parse_context::max_stack_limit / max_saved_limit. Called once at the end of each parse.
+  void finalize_resource_usage(parse_ctx& ctx, container& c) const;
 
   // Emits a push_command_name opcode (carrying `name` as a packed string-pool ref) and tracks the
   // extra string_view on the parse stack. Used right before an effect call so its on_effect callback

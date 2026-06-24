@@ -23,6 +23,14 @@ script_container::script_container() noexcept : prng_state(0x9e3779b97f4a7c15ULL
 container::container() noexcept = default;
 
 void script_container::process(context* ctx) const {
+  // Fail early (and with a clear message) when the context is too small for this script's parse-time
+  // peak usage, instead of overflowing mid-run with a bare "Stack overflow". The frame bases are zero
+  // at top level and bumped by `execute` for sub-scripts, so this also validates each nested frame.
+  if (ctx->frame_base + max_stack > ctx->stack._data.size())
+    error_at(ctx, std::format("context operand stack too small: needs {} slots at frame base {}, but the context provides only {}", max_stack, ctx->frame_base, ctx->stack._data.size()));
+  if (ctx->saved_base + max_saved > ctx->saved_stack._data.size())
+    error_at(ctx, std::format("context saved-value stack too small: needs {} slots at base {}, but the context provides only {}", max_saved, ctx->saved_base, ctx->saved_stack._data.size()));
+
   const script_container* prev_script = ctx->current_script;
   ctx->current_script = this;
   for (; ctx->current_index < cmds.size(); ++ctx->current_index) {

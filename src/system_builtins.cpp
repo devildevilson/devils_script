@@ -263,8 +263,10 @@ static int64_t execute_script(int64_t arg, context* ctx, const script_container*
   const size_t nsaved = sub->saved.size();
   // Saved values are frame-local: the sub-script's saved frame sits ABOVE the caller's.
   const size_t new_saved_base = ctx->saved_base + scr->saved.size();
-  if (new_saved_base + nsaved > context::local_vars_size)
-    scr->error_at(ctx, std::format("script-in-script saved-value frame overflow: '{}' needs {} saved slots at base {}, only {} available", sub->get_name(), nsaved, new_saved_base, context::local_vars_size));
+  // Bound against the context's ACTUAL saved-stack size (runtime-configurable via context's ctor),
+  // not the constexpr default — a larger context legitimately holds deeper saved frames.
+  if (new_saved_base + nsaved > ctx->saved_stack.size())
+    scr->error_at(ctx, std::format("script-in-script saved-value frame overflow: '{}' needs {} saved slots at base {}, only {} available", sub->get_name(), nsaved, new_saved_base, ctx->saved_stack.size()));
   // Lists are frame-local: the sub's list frame is the top `nlists` slots of ctx->lists, already
   // appended by the preceding list_frame_enter opcode (and dropped by list_frame_exit afterwards).
   const size_t nlists = sub->lists.size();
@@ -550,6 +552,13 @@ void system::init_basic_functions() {
         pack2(int32_t(b.sub_slot), int32_t(b.caller_idx))));
     for (const auto& b : list_bindings) scr->cmds.emplace_back(container::command(&internal::swap_bound_list, swap_arg(b)));
     if (nlists > 0) scr->cmds.emplace_back(container::command(&internal::list_frame_exit, int64_t(nlists)));
+
+    // Account for the sub-script's transient usage stacked above this frame. At runtime the sub runs
+    // with frame_base = stack_top - nargs, so its peak operand depth is that base plus sub->max_stack;
+    // its saved frame stacks on top of every caller's, tracked as the deepest child for max_saved.
+    const size_t exec_base = ctx->stack_types.size() - nargs;
+    if (exec_base + sub->max_stack > ctx->max_stack_depth) ctx->max_stack_depth = exec_base + sub->max_stack;
+    if (sub->max_saved > ctx->max_child_saved) ctx->max_child_saved = sub->max_saved;
 
     for (size_t k = 0; k < nargs; ++k) ctx->pop();   // consume root (if any) + named arguments
     if (!type_is_void(ret)) ctx->push(ret);

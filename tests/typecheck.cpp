@@ -157,6 +157,11 @@ TEST_CASE("error branches are rejected at parse") {
     CHECK_THROWS(parse_void_d("{ ctx:saved:never_saved }"));
   }
 
+  SUBCASE("reading a saved value at a mismatched type") {
+    // 'b' is saved as bool; the script's double return type can't accept it -> parse error.
+    CHECK_THROWS(parse_void_d("{ ctx_save = { b = true }, ctx:saved:b }"));
+  }
+
   SUBCASE("'this' without a scope") {
     CHECK_THROWS(parse_void_d("{ this }"));
   }

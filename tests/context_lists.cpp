@@ -434,3 +434,64 @@ TEST_CASE("context list storage is rebuilt per run via create_lists") {
     CHECK(ctx.get_return<double>() == 10.0);  // not 20/30: the list did not accumulate across runs
   }
 }
+
+// A context can be sized explicitly from a script's parse-time max_stack / max_saved (or a
+// nesting-class bucket); the argument stack stays at the fixed script_arguments_size.
+TEST_CASE("explicitly sized context") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  const auto cont = sys.parse<double, void>(
+    "sized", "{ ctx_save = { number = 5 }, ctx:saved:number, ctx:saved:number }");  // 10, 1 saved slot
+
+  SUBCASE("a context sized to the script's own peaks runs it") {
+    REQUIRE(cont.max_saved >= 1);
+    ds::context ctx(cont.max_stack, cont.max_saved);
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 10.0);
+  }
+
+  SUBCASE("an undersized operand stack is rejected up front by process") {
+    ds::context ctx(1, cont.max_saved);
+    std::string msg;
+    try { cont.process(&ctx); } catch (const std::exception& e) { msg = e.what(); }
+    CHECK(msg.find("operand stack too small") != std::string::npos);
+  }
+
+  SUBCASE("an undersized saved stack is rejected up front by process") {
+    ds::context ctx(cont.max_stack, 0);
+    std::string msg;
+    try { cont.process(&ctx); } catch (const std::exception& e) { msg = e.what(); }
+    CHECK(msg.find("saved-value stack too small") != std::string::npos);
+  }
+}
+
+// Saved-value reads are runtime-checked (like ctx:arg): reading a slot that was declared at parse
+// time but never written at runtime (a ctx_save inside an untaken branch) throws instead of pushing
+// a stale/empty value.
+TEST_CASE("ctx:saved runtime type check") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  SUBCASE("a conditionally-unwritten saved slot throws when read") {
+    // value_or skips the untaken branch's effects: condition false -> the ctx_save branch is not
+    // run, so the slot stays empty and reading ctx:saved:x throws instead of pushing a stale value.
+    const auto cont = sys.parse<double, void>(
+      "cond", "{ value_or = { false, { ctx_save = { x = 5 }, 1.0 }, 2.0 }, ctx:saved:x }");
+    ds::context ctx;
+    CHECK_THROWS(cont.process(&ctx));
+  }
+
+  SUBCASE("the same slot read after it is actually written succeeds") {
+    // condition true -> the ctx_save branch runs (x = 5), so the later read is valid (1.0 + 5).
+    const auto cont = sys.parse<double, void>(
+      "cond", "{ value_or = { true, { ctx_save = { x = 5 }, 1.0 }, 2.0 }, ctx:saved:x }");
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<double>());
+    CHECK(ctx.get_return<double>() == 6.0);
+  }
+}

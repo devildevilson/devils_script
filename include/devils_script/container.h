@@ -95,6 +95,16 @@ struct script_container {
   // Used by `execute` to type-check a sub-script's return against the caller's expected type.
   std::string_view return_type;
 
+  // Peak resource usage computed at parse time, accounting for `execute` nesting (the VM stack and
+  // the saved-value/list bases are reused across nested calls, so a sub-script's frame stacks on top
+  // of the caller's). `max_stack` is the deepest operand-stack depth any execution path through this
+  // script (and everything it executes) can reach; `max_saved` likewise for the saved-value frame.
+  // Both are conservative upper bounds (parse-time `ignore` placeholders may inflate `max_stack` by a
+  // small constant). Enable per-script stack sizing / nesting-class bucketing; checked at parse end
+  // against parse_context::max_stack_limit / max_saved_limit.
+  size_t max_stack = 0;
+  size_t max_saved = 0;
+
   script_container() noexcept;
   void process(context* ctx) const;
   void shrink_to_fit();
