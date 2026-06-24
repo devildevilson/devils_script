@@ -86,8 +86,9 @@ can also provide a custom validity predicate.
 - Script arguments through `ctx:arg:name`, `ctx_set`, and `ctx_set_as`.
 - Context lists with add/filter/map/first/count/min/max style pipelines.
 - Static string tokens, quoted strings, enum literal parsing, and typed literal checks.
-- Script-in-script calls with `execute = { script_name, arg = value, ... }`; sub-scripts are
-  resolved by name through a user-installed resolver (see *Script-in-script calls* below).
+- Script-in-script calls with `execute = { script_name, arg = value, ... }`, including in/out scalar
+  arguments and in/out list bindings; sub-scripts are resolved by name through a user-installed
+  resolver (see *Script-in-script calls* below).
 - Debug helpers `assert` and `trace`; runtime errors report `script '<name>' @ line:column`.
 - Deterministic PRNG (`chance`, `random`, `rndmix`) seeded per `system` and per `context`.
 - Safe and unsafe opcode variants; `system::toggle_safety()` disables stack safety checks
@@ -116,8 +117,14 @@ the caller's current scope, type-checked against the caller. The return type is 
 caller's context. At runtime the call frame is just C++ locals plus a stack-base offset
 (`context::frame_base`), so no stack copy is made and nesting composes.
 
-Current `execute` limitations: sub-scripts that use lists are rejected at parse (list storage is
-sized per top-level script), and `describe()` does not special-case an `execute` node.
+A sub-script may use its own lists (their frame is stacked above the caller's) and may bind the
+caller's lists in/out by name (`execute = { sub, mylist }`, matched to the sub's `ctx:list:mylist`).
+A scalar/object argument is passed in/out — the sub's final value is written back into the caller's
+slot — when the call site gives it a bare `ctx:saved:x` / `ctx:arg:x` lvalue; a computed expression
+is by-value. A list-pipeline callback (`filter`/`map`/`sum`/…) may itself `execute` a list-using
+sub-script, with one rule: it cannot bind the very list it is currently iterating (rejected at parse).
+
+Current `execute` limitation: `describe()` does not yet special-case an `execute` node.
 
 ## Memory model and deployment
 
@@ -131,6 +138,10 @@ parallel description tree for tooling. For deployment you can drop the descripti
   the backing storage.
 - `system::reserve_from_hint(container*, block_count, token_bytes)` pre-reserves the command and
   string buffers before codegen — useful when parsing many small scripts.
+- `script_container::max_stack` / `max_saved` / `max_lists` record the peak operand-stack,
+  saved-value, and list depth a script needs (accounting for `execute` nesting). Size a
+  `context(stack_capacity, saved_capacity)` from them — or bucket scripts into nesting classes — and
+  `process()` rejects an undersized context up front instead of overflowing mid-run.
 
 This split is why most runtime-facing signatures take `const script_container*`: the engine runs
 the stripped form, while `container` is only needed where descriptions are produced or consumed.
@@ -172,7 +183,8 @@ distinct C++ type per script-domain type so safe mode can enforce the distinctio
 ## Current Gaps
 
 - More real-world examples would help document intended patterns.
-- `execute` does not yet support sub-scripts that use lists, or describe-aware `execute` nodes.
+- `describe()` does not special-case `execute` nodes (script-in-script is otherwise fully supported,
+  including in/out arguments and lists).
 - Debugging/editor tooling is mostly exposed through primitives, not a finished tool.
 
 ## License
