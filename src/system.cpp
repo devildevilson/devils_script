@@ -1302,12 +1302,36 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
   auto end = e.make_label();   // every short-circuit / cond jump in this block resolves to the block end
 
   size_t current_stack_size = ctx->stack_types.size();
+  bool conditional_arithmetic = false;
+  if (curid == basicf::ADD || curid == basicf::MUL) {
+    size_t scan_offset = 1;
+    while (scan_offset < block.size() && !conditional_arithmetic) {
+      const auto child = command_block(block, scan_offset);
+      scan_offset += child.size();
+      conditional_arithmetic = !text::is_in_ignore_list(child.name()) && !child.find("condition").empty();
+    }
+  }
 
-  size_t counter = 0;
+  if (conditional_arithmetic) {
+    const auto exp_t = ctx->expected_type;
+    const int64_t identity = curid == basicf::MUL ? INT64_C(1) : INT64_C(0);
+    if (type_is_integral(exp_t)) {
+      push_basic_function(ctx, scr, basicf::pushint, identity);
+    } else {
+      push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(double(identity)));
+      if (!type_is_floating_point(exp_t) && can_convert_implicitly(ctx->top(), exp_t)) {
+        setup_type_conversion(ctx, scr, ctx->top(), exp_t);
+      }
+    }
+  }
+
+  size_t counter = conditional_arithmetic ? 1 : 0;
   size_t offset = 1;
   while (offset < block.size()) {
     const auto child = command_block(block, offset);
     offset += child.size();
+    auto skip_child = e.make_label();
+    bool skip_child_used = false;
 
     if (curid == basicf::effect_block || curid == basicf::string_subblock || curid == basicf::object_subblock) {
       if (const auto cond_block = child.find("condition"); !cond_block.empty()) {
@@ -1319,10 +1343,24 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
     if (text::is_in_ignore_list(child.name())) continue;
 
+    if (conditional_arithmetic) {
+      if (const auto cond_block = child.find("condition"); !cond_block.empty()) {
+        dispatch_node(ctx, scr, cond_block, "AND");
+        if (!ctx->is<bool>()) raise_error(std::format("Arithmetic block condition '{}' must return bool, got '{}'", cond_block.name(), ctx->top()));
+        e.jump_to(basicf::condjump, skip_child);
+        skip_child_used = true;
+      }
+    }
+
+    const size_t before_child = ctx->stack_types.size();
     dispatch_node(ctx, scr, child);
     if (curid == basicf::effect_block) continue;
-    if (current_stack_size >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value", child.name()));
-    if (ctx->is<ignore_value>()) { ctx->pop(); continue; }
+    if (before_child >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value", child.name()));
+    if (ctx->is<ignore_value>()) {
+      ctx->pop();
+      if (skip_child_used) e.bind(skip_child);
+      continue;
+    }
     if (child.nullable() && (curid == basicf::string_block || curid == basicf::string_subblock || curid == basicf::object_subblock)) {
       auto skip_invalid = e.make_label();
       scr->cmds.push_back(container::command(&jumpinvalid, INT64_C(0)));
@@ -1354,6 +1392,7 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     // stack effect (pops 2, pushes bool/double) + description + the cmds/descs consistency check.
     const size_t op_index = e.emit(opcode, 0);
     if (boolean_and_block || boolean_or_block) e.mark(end, op_index); // andjump / orjump is itself a short-circuit site
+    if (skip_child_used) e.bind(skip_child);
   }
 
   e.bind(end);

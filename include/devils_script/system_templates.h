@@ -502,15 +502,86 @@ void system::register_function(std::string name, std::vector<std::string> func_a
         const size_t prev_index = ctx->unlimited_func_index;
         ctx->unlimited_func_index = ctx->function_names.size() - 1;
 
-        // command_block b(args, 1) is first argument
-        sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
-          if (index == 0) return;
+        bool conditional_arithmetic_fold = false;
+        if (func_args_names.empty() && (curfname == "ADD" || curfname == "MUL")) {
+          const auto is_ignored_argument = [](const std::string_view name) {
+            return name == "condition" || name == custom_description_constant || name == "value" || name == "weight";
+          };
+          size_t scan_offset = 1;
+          while (scan_offset < args.size() && !conditional_arithmetic_fold) {
+            const command_block child(args, scan_offset);
+            scan_offset += child.size();
+            conditional_arithmetic_fold = !is_ignored_argument(child.name()) && !child.find("condition").empty();
+          }
+        }
 
-          // For an effect, push its name on top of the two fold operands so on_effect can read it.
-          if constexpr (eff != nullptr) sys->emit_command_name(ctx, scr, curfname);
-          sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
-          sys->apply_call_stack_effect<ret_type>(ctx, eff != nullptr ? 3 : 2);
-        });
+        if (conditional_arithmetic_fold) {
+          constexpr auto arg_type_name = utils::type_name<first_argument>();
+          constexpr bool arg_is_int64 = std::is_same_v<first_argument, int64_t>;
+          constexpr bool arg_is_double = std::is_same_v<first_argument, double>;
+          const int64_t identity = curfname == "MUL" ? INT64_C(1) : INT64_C(0);
+          if constexpr (arg_is_int64) {
+            sys->push_basic_function(ctx, scr, basicf::pushint, identity);
+          } else {
+            sys->push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(double(identity)));
+            if constexpr (!arg_is_double) {
+              if (sys->can_convert_implicitly(ctx->top(), arg_type_name)) {
+                sys->setup_type_conversion(ctx, scr, ctx->top(), arg_type_name);
+              } else {
+                sys->raise_error(std::format("Function '{}' conditional fold identity cannot be converted from '{}' to '{}'", curfname, ctx->top(), arg_type_name));
+              }
+            }
+          }
+
+          size_t index = 0;
+          size_t offset = 1;
+          const auto is_ignored_argument = [](const std::string_view name) {
+            return name == "condition" || name == custom_description_constant || name == "value" || name == "weight";
+          };
+          while (offset < args.size()) {
+            const command_block child(args, offset);
+            offset += child.size();
+            if (is_ignored_argument(child.name())) continue;
+
+            auto skip_child = e.make_label();
+            bool skip_child_used = false;
+            if (const auto cond_block = child.find("condition"); !cond_block.empty()) {
+              sys->dispatch_node(ctx, scr, cond_block, "AND");
+              if (!ctx->is<bool>()) sys->raise_error(std::format("Function '{}' argument condition '{}' must return bool, got '{}'", curfname, cond_block.name(), ctx->top()));
+              e.jump_to(basicf::condjump, skip_child);
+              skip_child_used = true;
+            }
+
+            const size_t next_size = sys->parse_arg<first_argument>(ctx, scr, child, index, std::string_view(), std::string_view(), std::string(), nullptr);
+            if (next_size == 0) {
+              if (skip_child_used) e.bind(skip_child);
+              continue;
+            }
+
+            if (ctx->is_ignore()) {
+              while (ctx->pop_while_ignore()) {}
+              if (skip_child_used) e.bind(skip_child);
+              continue;
+            }
+
+            // For an effect, push its name on top of the two fold operands so on_effect can read it.
+            if constexpr (eff != nullptr) sys->emit_command_name(ctx, scr, curfname);
+            sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
+            sys->apply_call_stack_effect<ret_type>(ctx, eff != nullptr ? 3 : 2);
+            if (skip_child_used) e.bind(skip_child);
+            ++index;
+          }
+        } else {
+          // command_block b(args, 1) is first argument
+          sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
+            if (index == 0) return;
+
+            // For an effect, push its name on top of the two fold operands so on_effect can read it.
+            if constexpr (eff != nullptr) sys->emit_command_name(ctx, scr, curfname);
+            sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
+            sys->apply_call_stack_effect<ret_type>(ctx, eff != nullptr ? 3 : 2);
+          });
+        }
 
         ctx->unlimited_func_index = prev_index;
       } else {

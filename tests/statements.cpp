@@ -108,6 +108,68 @@ TEST_CASE("Main lang statements") {
     REQUIRE(ctx.get_return<double>() == 15.0);
   }
 
+  SUBCASE("arithmetic block conditions skip children without changing MUL identity") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+
+    { // Default arithmetic block uses ADD and must skip false conditional children.
+      const auto cont = sys.parse<double, void>("script", "{ 2, { condition = false, 100 }, 3 }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 5.0);
+    }
+
+    { // Explicit ADD keeps its neutral value 0 when a conditional child is skipped.
+      const auto cont = sys.parse<double, void>("script", "{ ADD = { { condition = false, 100 }, 3 } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 3.0);
+    }
+
+    {
+      const auto cont = sys.parse<double, void>("script", "{ ADD = { 2, { condition = false, 100 }, 3 } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 5.0);
+    }
+
+    { // Explicit MUL keeps its neutral value 1, so a skipped child cannot zero the fold.
+      const auto cont = sys.parse<double, void>("script", "{ MUL = { 2, { condition = false, 100 }, 3 } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 6.0);
+    }
+
+    {
+      const auto cont = sys.parse<double, void>("script", "{ MUL = { { condition = false, 100 }, 3 } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 3.0);
+    }
+
+    {
+      const auto cont = sys.parse<double, void>("script", "{ MUL = { { condition = false, 100 } } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 1.0);
+    }
+
+    { // int64_t arithmetic follows the same conditional fold rules.
+      const auto cont = sys.parse<int64_t, void>("script", "{ MUL = { { condition = false, 100 }, 3 } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<int64_t>());
+      CHECK(ctx.get_return<int64_t>() == 3);
+    }
+  }
+
   SUBCASE("chance") {
     { // context seed 1
       ds::system sys;
