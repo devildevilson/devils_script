@@ -46,24 +46,24 @@ Register C++ functions in a `devils_script::system`, parse a script into a `cont
 then execute that container with a `context`.
 
 ```cpp
-int func1(int a, int b) { return a + b; }
+int32_t func1(int32_t a, int32_t b) { return a + b; }
 
 struct character {
-  int strength;
+  int32_t strength;
   character* liege;
 };
 
 template <typename T>
 struct handle {
   T* ptr;
-  size_t type;
+  std::size_t type;
 
   T& operator*() const { return *ptr; }
   bool valid() const { return ptr != nullptr; }
 };
 
 handle<character> liege(handle<character> cur) { return handle<character>{cur.ptr->liege, cur.type}; }
-int character_strength(handle<character> cur) { return cur.ptr->strength; }
+int32_t character_strength(handle<character> cur) { return cur.ptr->strength; }
 
 devils_script::system sys;
 sys.init_basic_functions();
@@ -87,6 +87,90 @@ checks use common forms such as `valid()`, `is_valid()`, and `operator bool`; re
 can also provide a custom validity predicate.
 
 `devils_script` intentionally ignores pointer constness when matching function signatures.
+
+## Arithmetic Types
+
+`init_math()` registers the default arithmetic model for `int64_t` and `double`. The parser keeps
+those types distinct, resolves overloaded functions by signature, and may use implicit conversions
+only along edges registered in the `system`. The built-in default conversion is `int64_t -> double`;
+custom value types do not get casts automatically.
+
+To make a custom value participate in arithmetic:
+
+1. Mark it as a script arithmetic value type with `is_script_arithmetic_type<T>`.
+2. Register the arithmetic block reducer with `register_arithmetic_type<T>(block_name, priority)`.
+3. Register explicit implicit conversions, for example `double -> vec4`.
+4. Register the overloads the language may call: `ADD`/`MUL` block reducers, named functions, and
+   symbolic operators such as `+`, `-`, `*`, `/`.
+
+```cpp
+struct vec4 {
+  float x;
+  float y;
+  float z;
+  float w;
+
+  explicit vec4(double v) : x(float(v)), y(float(v)), z(float(v)), w(float(v)) {}
+};
+
+namespace devils_script {
+template <>
+struct is_script_arithmetic_type<::vec4> : std::true_type {};
+}
+
+vec4 vec_add(vec4 a, vec4 b);
+vec4 vec_sub(vec4 a, vec4 b);
+vec4 vec_mul(vec4 a, vec4 b);
+vec4 vec_div(vec4 a, vec4 b);
+vec4 vec_mul_scalar(vec4 a, double b);
+vec4 scalar_mul_vec(double a, vec4 b);
+
+devils_script::system sys;
+sys.init_basic_functions();
+sys.init_math();
+
+sys.register_arithmetic_type<vec4>("ADD", 30);
+sys.register_implicit_conversion<double, vec4>();
+
+sys.register_function<&vec_add, void>("ADD");
+sys.register_function<&vec_mul, void>("MUL");
+
+const devils_script::system::operator_props mul_props{
+  12,
+  devils_script::system::command_data::math_ftype::binary,
+  devils_script::system::command_data::associativity::left
+};
+const devils_script::system::operator_props add_props{
+  11,
+  devils_script::system::command_data::math_ftype::binary,
+  devils_script::system::command_data::associativity::left
+};
+
+sys.register_operator<&vec_mul, void>("*", mul_props);
+sys.register_operator<&vec_div, void>("/", mul_props);
+sys.register_operator<&vec_add, void>("+", add_props);
+sys.register_operator<&vec_sub, void>("-", add_props);
+sys.register_operator<&vec_mul_scalar, void>("*", mul_props);
+sys.register_operator<&scalar_mul_vec, void>("*", mul_props);
+
+auto script = sys.parse<vec4, void>("script", "a + scalar_b * c");
+```
+
+`HT=void` is intentional for free functions whose first argument is a value such as `vec4`; otherwise
+the registration logic may treat the first argument as a scope type. The resolver does not invent
+commutativity: if both `vec4 * double` and `double * vec4` are valid, register both overloads.
+
+`register_arithmetic_type<T>("ADD", priority)` does not create the `ADD` function. It tells
+`parse<T>()` and arithmetic blocks which reducer name to use when a block of values must collapse
+to `T`, so that function must also be registered. `MUL` is registered separately because explicit
+`MUL = { ... }` blocks and `*` operators use their own overloads.
+
+Conditional arithmetic children are skipped without changing the fold identity: `ADD` uses `0`,
+`MUL` uses `1`. For a custom arithmetic type this means a conditional `MUL` with no active value
+requires an implicit conversion from the numeric identity to that type, usually `double -> T`.
+
+See [examples/arithmetic_types.cpp](examples/arithmetic_types.cpp) for a complete standalone example
+with scalar/vector overloads and explicit conversion rules.
 
 ## Script Features
 
