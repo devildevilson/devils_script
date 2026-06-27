@@ -119,6 +119,9 @@ target_include_directories(devils_script PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc
 if (DS_BUILD_EXAMPLES)
   add_executable (devils_script_example_desc examples/desc.cpp)
   target_link_libraries(devils_script_example_desc devils_script devils_script_options)
+
+  add_executable (devils_script_example_arithmetic_types examples/arithmetic_types.cpp)
+  target_link_libraries(devils_script_example_arithmetic_types devils_script devils_script_options)
 endif()
 
 if (DS_BUILD_TESTS)
