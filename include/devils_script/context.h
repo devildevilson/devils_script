@@ -25,10 +25,7 @@
 // and trusted. List storage is created from `container::lists` before execution through
 // `create_lists()`.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 #ifndef DEVILS_SCRIPT_DEFAULT_STACK_SIZE
 #define DEVILS_SCRIPT_DEFAULT_STACK_SIZE 256
@@ -374,7 +371,4 @@ R script_function<R(Arg)>::operator()(Arg in) const {
   }
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

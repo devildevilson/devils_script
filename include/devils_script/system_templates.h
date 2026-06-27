@@ -10,10 +10,49 @@
 // emitting commands. That lets the compiler validate script blocks before execution and lets
 // safe/unsafe runtime opcodes share the same generated command stream.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
+
+template <typename T>
+  requires(valid_stack_el_type_v<T>)
+void system::register_arithmetic_type(std::string block_name, const int32_t priority) {
+  using type = final_stack_el_t<T>;
+  const auto name = std::string(utils::type_name<type>());
+  arithmetic_types[name] = arithmetic_type_data{ utils::type_name<type>(), std::move(block_name), priority };
+}
+
+template <typename FROM, typename TO>
+  requires(valid_stack_el_type_v<FROM> && valid_stack_el_type_v<TO>)
+void system::register_implicit_conversion(const int32_t cost) {
+  using from_t = final_stack_el_t<FROM>;
+  using to_t = final_stack_el_t<TO>;
+  conversion_data data{
+    utils::type_name<from_t>(),
+    utils::type_name<to_t>(),
+    cost,
+    &convert<from_t, to_t>,
+    &convert_unsafe<from_t, to_t>
+  };
+  implicit_conversions[std::string(data.from)].push_back(data);
+}
+
+namespace detail {
+template <typename F>
+std::vector<std::string_view> make_argument_type_list() {
+  std::vector<std::string_view> out;
+  constexpr bool is_not_member_func = is_not_member_function<F>;
+  using scope_type = scope_t<F>;
+  constexpr bool requires_scope = !utils::is_void_v<scope_type>;
+  constexpr size_t sig_args_count = utils::function_arguments_count<F>;
+  constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
+  out.reserve(sig_args_count - first_argument_index);
+  utils::static_for<sig_args_count - first_argument_index>([&](auto index) {
+    constexpr size_t arg_index = first_argument_index + index;
+    using arg_type = final_stack_el_t<utils::function_argument_type<F, arg_index>>;
+    if constexpr (!utils::is_void_v<arg_type>) out.push_back(utils::type_name<arg_type>());
+  });
+  return out;
+}
+}
 
 template <typename Arg>
 size_t system::parse_args(
@@ -196,6 +235,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       else if constexpr (std::is_same_v<std::string_view, cur_arg_type>) override_lvalue = "__string_block";
       else override_lvalue = "__object_block";
     }
+    if (const auto block_name = arithmetic_block_for(cur_arg_type_name); !block_name.empty()) override_lvalue = block_name;
   }
 
   if (!override_func.empty()) override_lvalue = override_func;
@@ -237,6 +277,10 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       if (ctx->is_integral()) setup_type_conversion<int64_t, cur_arg_type>(ctx, scr);
       if (ctx->is_number()) setup_type_conversion<double, cur_arg_type>(ctx, scr);
     }
+  }
+
+  if (!ctx->is_ignore() && ctx->top() != cur_arg_type_name && can_convert_implicitly(ctx->top(), cur_arg_type_name)) {
+    setup_type_conversion(ctx, scr, ctx->top(), cur_arg_type_name);
   }
 
   if constexpr (std::is_enum_v<cur_arg_type>) {
@@ -296,6 +340,7 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
       else if constexpr (std::is_same_v<std::string_view, cur_arg_type>) local_override_block_behaviour = basicf::string_block;
       else local_override_block_behaviour = basicf::object_block;
     }
+    if (const auto block_name = arithmetic_block_for(cur_arg_type_name); block_name == "ADD") local_override_block_behaviour = basicf::ADD;
   }
 
   if (override_block_behaviour != basicf::invalid) local_override_block_behaviour = override_block_behaviour;
@@ -339,6 +384,10 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
     }
   }
 
+  if (!ctx->is_ignore() && ctx->top() != cur_arg_type_name && can_convert_implicitly(ctx->top(), cur_arg_type_name)) {
+    setup_type_conversion(ctx, scr, ctx->top(), cur_arg_type_name);
+  }
+
   if constexpr (std::is_enum_v<cur_arg_type>) {
     if (!ctx->is_ignore() && !ctx->is<int64_t>())
       raise_error(std::format("Could not parse argument {} for function '{}': function expects enum '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
@@ -354,13 +403,23 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
 template <typename FROM, typename TO>
 void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
   if (std::is_same_v<FROM, TO>) return;
-  if (!std::is_fundamental_v<FROM> || !std::is_fundamental_v<TO>) raise_error(std::format("Could not convert from '{}' to '{}'", utils::type_name<FROM>(), utils::type_name<TO>()));
+  constexpr auto from_name = utils::type_name<final_stack_el_t<FROM>>();
+  constexpr auto to_name = utils::type_name<final_stack_el_t<TO>>();
+  if constexpr (!std::is_same_v<final_stack_el_t<FROM>, bool> && !std::is_same_v<final_stack_el_t<TO>, bool>) {
+    if (can_convert_implicitly(from_name, to_name)) {
+      setup_type_conversion(ctx, scr, from_name, to_name);
+      return;
+    }
+  }
+  if (!std::is_fundamental_v<FROM> && !std::is_same_v<final_stack_el_t<FROM>, bool>) raise_error(std::format("Could not convert from '{}' to '{}'", from_name, to_name));
+  if (!std::is_fundamental_v<TO> && !std::is_same_v<final_stack_el_t<TO>, bool>) raise_error(std::format("Could not convert from '{}' to '{}'", from_name, to_name));
 
   const function_t fs[] = { &convert_unsafe<FROM, TO>, &convert<FROM, TO> };
   scr->cmds.push_back(container::command(fs[size_t(safety())], INT64_C(0)));
 
-  if (!ctx->is<FROM>()) raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", ctx->stack_types.back(), utils::type_name<std::remove_cvref_t<FROM>>()));
-  ctx->stack_types.back() = utils::type_name<final_stack_el_t<TO>>();
+  if (!ctx->is<FROM>()) raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", ctx->stack_types.back(), from_name));
+  ctx->stack_types.back() = to_name;
+  ctx->conversion_cost += 1;
 }
 
 template <auto f, typename HT, is_valid_t<HT> vf>
@@ -536,7 +595,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
   constexpr auto stn = scope_type_name<scope_type>();
 
   command_data mcd{
-    name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(),
+    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F>(), utils::make_function_sig_string<F>(),
     15, unlimited_args ? INT32_MAX : int32_t(args_count), command_data::associativity::right, parse_ftype,
     std::move(func),
     utils::is_void_v<ret_type> ? container::description_node_kind::effect : container::description_node_kind::function
@@ -561,9 +620,9 @@ void system::register_operator(std::string name, const std::string_view& propert
   if (itr->second.empty()) raise_error(std::format("Could not find function '{}'", properties_as));
 
   operator_props ps;
-  ps.priority = itr->second.begin()->second.priority;
-  ps.assoc = itr->second.begin()->second.assoc;
-  ps.mtype = static_cast<decltype(ps.mtype)>(itr->second.begin()->second.arg_count);
+  ps.priority = itr->second.front().priority;
+  ps.assoc = itr->second.front().assoc;
+  ps.mtype = static_cast<decltype(ps.mtype)>(itr->second.front().arg_count);
 
   register_operator<f, HT, vf>(std::move(name), ps, std::move(init_f));
 }
@@ -600,7 +659,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
   static_assert(!utils::is_void_v<ret_type> && !std::is_same_v<ret_type, ignore_value>, "Operators must have a proper return value");
 
   command_data mcd{
-    name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
+    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
     [init_f = std::move(init_f)](emitter& e, const command_block& args) -> size_t {
       [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
       constexpr auto stn = scope_type_name<scope_type>();
@@ -683,7 +742,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
   constexpr auto stn = scope_type_name<scope_type>();
 
   command_data cd{
-    name, stn, utils::type_name<ret_type>(), utils::make_function_sig_string<F>(), 15, 50, command_data::associativity::right, parse_ftype,
+    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F>(), utils::make_function_sig_string<F>(), 15, 50, command_data::associativity::right, parse_ftype,
     [func_args_names = std::move(func_args_names), init_f = std::move(init_f)]
       (emitter& e, const command_block& args)
     {
@@ -830,11 +889,12 @@ void system::parse_context::init(const system& sys, container& c) {
 
        if constexpr (utils::is_void_v<ret_type>)                 root_block_name = "__effect_block";
   else if constexpr (std::is_same_v<bool, ret_type>)             root_block_name = "AND";
-  else if constexpr (std::is_fundamental_v<ret_type>)            root_block_name = "ADD";
+  else if constexpr (std::is_fundamental_v<ret_type> || is_script_arithmetic_type_v<ret_type>) root_block_name = "ADD";
   else if constexpr (std::is_same_v<std::string_view, ret_type>) root_block_name = "__string_block";
   else                                                           root_block_name = "__object_block";
 
   return_type = scope_type_name<ret_type>();
+  if (const auto block_name = sys.arithmetic_block_for(return_type); !block_name.empty()) root_block_name = block_name;
   expected_type = return_type;
   c.return_type = return_type;
   root_type = utils::is_void_v<root_type_t> ? std::string_view() : scope_type_name<root_type_t>();
@@ -845,6 +905,7 @@ void system::parse_context::init(const system& sys, container& c) {
   max_stack_depth = 0;
   max_child_saved = 0;
   max_child_lists = 0;
+  conversion_cost = 0;
   ftype = function_type::lvalue;
   prng_s = prng::xoshiro256starstar::init(sys.get_seed());
   c.prng_state = gen_value();
@@ -913,6 +974,9 @@ container system::parse(std::string_view name, std::string_view text) const {
   }
 
   if constexpr (!utils::is_void_v<ret_type>) {
+    if (!ctx.stack_types.empty() && ctx.stack_types.back() != ctx.return_type && can_convert_implicitly(ctx.stack_types.back(), ctx.return_type)) {
+      setup_type_conversion(&ctx, &scr, ctx.stack_types.back(), ctx.return_type);
+    }
     if (!ctx.is<ret_type>()) raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", ctx.stack_types.back(), scope_type_name<ret_type>(), ctx.stack_types.size()));
     push_basic_function(&ctx, &scr, basicf::pushreturn, 0);
   }
@@ -953,12 +1017,12 @@ constexpr system::user_function_type system::get_user_function_type() {
   if constexpr (is_iterator_func) {
     if constexpr (utils::is_void_v<ret_type>) t = user_function_type::iterator_effect;
     else if constexpr (std::is_same_v<bool, ret_type>) t = user_function_type::iterator_condition;
-    else if constexpr (std::is_fundamental_v<ret_type>) t = user_function_type::iterator_arithmetic;
+    else if constexpr (std::is_fundamental_v<ret_type> || is_script_arithmetic_type_v<ret_type>) t = user_function_type::iterator_arithmetic;
     else raise_error(std::format("Iterator that returns '{}' is not supported", utils::type_name<ret_type>()));
   } else {
     if constexpr (utils::is_void_v<ret_type>) t = user_function_type::effect;
     else if constexpr (std::is_same_v<bool, ret_type>) t = user_function_type::condition;
-    else if constexpr (std::is_fundamental_v<ret_type>) t = user_function_type::arithmetic;
+    else if constexpr (std::is_fundamental_v<ret_type> || is_script_arithmetic_type_v<ret_type>) t = user_function_type::arithmetic;
     else if constexpr (std::is_same_v<std::string_view, ret_type>) t = user_function_type::string;
     else t = user_function_type::object;
   }
@@ -979,7 +1043,4 @@ constexpr std::string_view system::get_user_function_type_name(const user_functi
   return std::string_view();
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

@@ -6,10 +6,7 @@
 #include "devils_script/container.h"
 #include "devils_script/prng.h"
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 namespace {
 
@@ -706,8 +703,5 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
   return 0;
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }
 

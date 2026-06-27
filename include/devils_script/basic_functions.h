@@ -17,10 +17,7 @@
 // The pack/unpack helpers below define that ABI and are shared by code generation,
 // execution, and disassembly.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 struct context;
 struct script_container;
@@ -118,7 +115,4 @@ int64_t list_op_data(int64_t, context*, const script_container*);
 // on_effect callback can read the name as a normal stack value (no command_names side table).
 int64_t push_command_name(int64_t, context*, const script_container*);
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

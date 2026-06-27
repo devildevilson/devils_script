@@ -7,14 +7,15 @@
 #include <format>
 #include <optional>
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 #define EPSILON 0.000001
 
 namespace internal {
+static int64_t rawaddi(const int64_t val1, const int64_t val2) noexcept { return val1 + val2; }
+static int64_t rawmuli(const int64_t val1, const int64_t val2) noexcept { return val1 * val2; }
+static int64_t rawsubi(const int64_t val1, const int64_t val2) noexcept { return val1 - val2; }
+static int64_t rawdivi(const int64_t val1, const int64_t val2) noexcept { return val1 / val2; }
 static double rawadd(const double val1, const double val2) noexcept { return val1 + val2; }
 static double rawmul(const double val1, const double val2) noexcept { return val1 * val2; }
 static double rawsub(const double val1, const double val2) noexcept { return val1 - val2; }
@@ -84,9 +85,13 @@ void system::init_math() {
   ROI(internal::rawnot)("not", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawinc)("++", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawdec)("--", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
+  ROI(internal::rawmuli)("*", { 12, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawdivi)("/", { 12, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmul)("*", { 12, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawdiv)("/", { 12, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmod)("%", { 12, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawaddi)("+", { 11, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawsubi)("-", { 11, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawadd)("+", { 11, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawsub)("-", { 11, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmoreeq)(">=", { 8, command_data::math_ftype::binary, command_data::associativity::left });
@@ -346,6 +351,8 @@ void system::init_basic_functions() {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     return sys->fold_block(ctx, scr, args, basicf::NOR);
   });
+  RFI(internal::rawaddi)("ADD");
+  RFI(internal::rawmuli)("MUL");
   RFI(internal::rawadd)("ADD");
   RFI(internal::rawmul)("MUL");
 
@@ -1460,7 +1467,4 @@ void system::init_basic_functions() {
 
 #undef EPSILON
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

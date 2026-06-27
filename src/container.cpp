@@ -8,10 +8,7 @@
 #include <iostream>
 #include <utility>
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 script_container::command::command() noexcept : fp(nullptr), arg(0) {}
 script_container::command::command(function_t fp, bool arg) noexcept : fp(fp), arg(arg) {}
@@ -408,7 +405,4 @@ bool node_view::traverse(const container* scr, const fn_t& fn) {
   return ret;
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

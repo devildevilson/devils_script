@@ -16,10 +16,7 @@
 // conversion helpers are ASCII-oriented unless they explicitly use the wide-character
 // locale functions below.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 namespace utils {
 namespace string {
@@ -225,7 +222,4 @@ constexpr bool parse_dice(const std::string_view& str, size_t& count, size_t& up
 
 }
 }
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

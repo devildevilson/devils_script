@@ -18,10 +18,7 @@
 // assignment. Storage is expressed explicitly through builtins such as `ctx_save` and
 // `ctx_set`.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 // Builds the devils_script AST over tavl's event stream and returns ONE flat tavl::node tree
 // (prefix order: nodes[0] = root, descendants flat after it; node.child_count = footprint).
@@ -50,7 +47,4 @@ std::tuple<tavl::event, tavl::error> make_script_ast(tavl::parser& p, script_ast
 // Whole-string helper kept for non-streaming callers.
 std::vector<tavl::node> make_script_ast(tavl::parser& p, std::string_view src);
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

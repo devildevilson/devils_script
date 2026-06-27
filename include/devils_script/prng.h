@@ -12,10 +12,7 @@
 //
 // Algorithms are based on the public-domain generators from http://prng.di.unimi.it/.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 namespace prng {
 
 double prng_normalize(const uint64_t value) noexcept;
@@ -51,7 +48,4 @@ struct xoshiro256starstar {
 };
 
 }
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

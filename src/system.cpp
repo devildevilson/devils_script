@@ -10,10 +10,7 @@
 #include "devils_script/context.h"
 #include "devils_script/string-utils.hpp"
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 bool type_is_ignore(const std::string_view& type) noexcept { return type == utils::type_name<ignore_value>(); }
 bool type_is_void(const std::string_view& type) noexcept { return type == utils::type_name<void>() || type == utils::type_name<utils::void_t>(); }
@@ -122,6 +119,12 @@ bool as_bool(const std::string_view& str) noexcept {
 }
 
 bool is_number(const std::string_view& str, double& val) noexcept {
+  const auto last = str.data() + str.size();
+  const auto [ptr, ec] = std::from_chars(str.data(), last, val);
+  return ec == std::errc() && ptr == last;
+}
+
+bool is_integer(const std::string_view& str, int64_t& val) noexcept {
   const auto last = str.data() + str.size();
   const auto [ptr, ec] = std::from_chars(str.data(), last, val);
   return ec == std::errc() && ptr == last;
@@ -237,7 +240,11 @@ system::description_placeholder::~description_placeholder() noexcept { ctx->desc
 
 using p_t = prng::xoshiro256starstar;
 system::options::options() noexcept : seed(1), safety(safety::safe), error([](const std::string& msg) { throw std::runtime_error(msg); }), warning([](const std::string& msg) { std::cout << "WARN: " << msg << "\n"; }) {}
-system::system(const options& opts) noexcept : seed(opts.seed), safet(opts.safety), error(opts.error), warning(opts.warning) {}
+system::system(const options& opts) noexcept : seed(opts.seed), safet(opts.safety), error(opts.error), warning(opts.warning) {
+  register_arithmetic_type<int64_t>("ADD", 10);
+  register_arithmetic_type<double>("ADD", 20);
+  register_implicit_conversion<int64_t, double>(1);
+}
 
 void system::toggle_safety() { this->safet = static_cast<enum safety>(!static_cast<bool>(this->safet)); }
 bool system::safety() const { return static_cast<bool>(this->safet); }
@@ -293,10 +300,7 @@ std::string system::dump_registered_functions() const {
   std::vector<const command_data*> entries;
   for (const auto& [name, overloads] : mfuncs) {
     (void)name;
-    for (const auto& [scope, data] : overloads) {
-      (void)scope;
-      entries.push_back(&data);
-    }
+    for (const auto& data : overloads) entries.push_back(&data);
   }
 
   std::sort(entries.begin(), entries.end(), [](const command_data* lhs, const command_data* rhs) {
@@ -326,6 +330,180 @@ std::string system::dump_registered_functions() const {
   return out;
 }
 
+bool system::is_arithmetic_type(const std::string_view& type) const noexcept {
+  return arithmetic_types.find(std::string(type)) != arithmetic_types.end();
+}
+
+std::string_view system::arithmetic_block_for(const std::string_view& type) const noexcept {
+  const auto itr = arithmetic_types.find(std::string(type));
+  if (itr == arithmetic_types.end()) return std::string_view();
+  return itr->second.block_name;
+}
+
+std::optional<int32_t> system::implicit_conversion_cost(const std::string_view& from, const std::string_view& to) const {
+  if (from == to) return 0;
+
+  struct node {
+    std::string_view type;
+    int32_t cost;
+  };
+
+  std::vector<node> open;
+  std::unordered_map<std::string, int32_t> best;
+  open.push_back({ from, 0 });
+  best.emplace(std::string(from), 0);
+
+  while (!open.empty()) {
+    const node cur = open.back();
+    open.pop_back();
+    const auto best_cur = best.find(std::string(cur.type));
+    if (best_cur != best.end() && cur.cost > best_cur->second) continue;
+    if (cur.type == to) return cur.cost;
+
+    const auto conv_itr = implicit_conversions.find(std::string(cur.type));
+    if (conv_itr == implicit_conversions.end()) continue;
+
+    for (const auto& conv : conv_itr->second) {
+      const int32_t next_cost = cur.cost + conv.cost;
+      auto [it, inserted] = best.emplace(std::string(conv.to), next_cost);
+      if (!inserted && it->second <= next_cost) continue;
+      it->second = next_cost;
+      open.push_back({ conv.to, next_cost });
+    }
+  }
+
+  return std::nullopt;
+}
+
+bool system::can_convert_implicitly(const std::string_view& from, const std::string_view& to) const {
+  return implicit_conversion_cost(from, to).has_value();
+}
+
+void system::setup_type_conversion(parse_ctx* ctx, container* scr, const std::string_view& from, const std::string_view& to) const {
+  if (from == to) return;
+
+  const auto conv_itr = implicit_conversions.find(std::string(from));
+  if (conv_itr == implicit_conversions.end())
+    raise_error(std::format("Could not convert from '{}' to '{}'", from, to));
+
+  const conversion_data* direct = nullptr;
+  for (const auto& conv : conv_itr->second) {
+    if (conv.to == to) {
+      direct = &conv;
+      break;
+    }
+  }
+
+  if (direct == nullptr) {
+    std::optional<int32_t> best_cost;
+    const conversion_data* first_step = nullptr;
+    for (const auto& conv : conv_itr->second) {
+      const auto tail_cost = implicit_conversion_cost(conv.to, to);
+      if (!tail_cost.has_value()) continue;
+      const int32_t total = conv.cost + *tail_cost;
+      if (!best_cost.has_value() || total < *best_cost) {
+        best_cost = total;
+        first_step = &conv;
+      }
+    }
+    if (first_step == nullptr) raise_error(std::format("Could not convert from '{}' to '{}'", from, to));
+    setup_type_conversion(ctx, scr, from, first_step->to);
+    setup_type_conversion(ctx, scr, first_step->to, to);
+    return;
+  }
+
+  if (ctx->stack_types.empty() || ctx->stack_types.back() != from)
+    raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", from, ctx->stack_types.empty() ? std::string_view("empty stack") : ctx->stack_types.back()));
+
+  scr->cmds.push_back(container::command(safety() ? direct->safe : direct->unsafe, INT64_C(0)));
+  ctx->stack_types.back() = direct->to;
+  ctx->conversion_cost += direct->cost;
+}
+
+const system::command_data* system::resolve_function(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& name) const {
+  const auto itr = mfuncs.find(std::string(name));
+  if (itr == mfuncs.end()) raise_error(std::format("Could not find function '{}'", name));
+
+  const auto current_scope = ctx->current_scope_type();
+  const auto void_scope = scope_type_name<void>();
+  bool has_exact_scope = false;
+  for (const auto& data : itr->second) {
+    if (data.expected_scope == current_scope) {
+      has_exact_scope = true;
+      break;
+    }
+  }
+
+  struct candidate_result {
+    const command_data* data = nullptr;
+    parse_ctx ctx;
+    container scr;
+    int32_t cost = 0;
+    int32_t rank = 0;
+    size_t count = 0;
+  };
+
+  std::optional<candidate_result> best;
+  bool ambiguous = false;
+  std::vector<std::string> errors;
+
+  for (const auto& data : itr->second) {
+    if (has_exact_scope) {
+      if (data.expected_scope != current_scope) continue;
+    } else if (data.expected_scope != void_scope) {
+      continue;
+    }
+
+    parse_ctx test_ctx = *ctx;
+    container test_scr = *scr;
+    test_ctx.conversion_cost = 0;
+    emitter e{ this, &test_ctx, &test_scr };
+
+    try {
+      const size_t count = std::invoke(data.init, e, block);
+      int32_t cost = test_ctx.conversion_cost;
+      const bool boolean_block = data.name == "AND" || data.name == "OR" || data.name == "NAND" || data.name == "NOR";
+      const bool return_is_scalar = !boolean_block && (type_is_bool(data.return_type) || type_is_fundamental(data.return_type) || is_arithmetic_type(data.return_type) || type_is_string(data.return_type));
+      if (return_is_scalar && !type_is_void(ctx->expected_type) && !type_is_any_type(ctx->expected_type) && !type_is_element_view(ctx->expected_type)) {
+        if (data.return_type != ctx->expected_type) {
+          const auto ret_cost = implicit_conversion_cost(data.return_type, ctx->expected_type);
+          if (!ret_cost.has_value()) continue;
+          cost += *ret_cost;
+        }
+      }
+      int32_t rank = 0;
+      for (const auto arg_type : data.argument_types) {
+        const auto arith = arithmetic_types.find(std::string(arg_type));
+        rank += arith == arithmetic_types.end() ? 1000 : arith->second.priority;
+      }
+      if (!best.has_value() || cost < best->cost || (cost == best->cost && rank < best->rank)) {
+        best = candidate_result{ &data, std::move(test_ctx), std::move(test_scr), cost, rank, count };
+        ambiguous = false;
+      } else if (cost == best->cost && rank == best->rank) {
+        ambiguous = true;
+      }
+    } catch (const std::exception& ex) {
+      errors.push_back(ex.what());
+    }
+  }
+
+  if (!best.has_value()) {
+    if (errors.empty()) raise_error(std::format("Could not find function '{}' for scope type '{}'", name, current_scope));
+    raise_error(std::format("Could not resolve function '{}' for scope type '{}': {}", name, current_scope, errors.front()));
+  }
+
+  if (ambiguous) {
+    raise_error(std::format("Ambiguous overload for function '{}' in scope type '{}'", name, current_scope));
+  }
+
+  best->ctx.rpn_ctx = ctx->rpn_ctx;
+  best->ctx.script_ast_ctx = ctx->script_ast_ctx;
+  best->ctx.script_ast_nodes = ctx->script_ast_nodes;
+  *ctx = std::move(best->ctx);
+  *scr = std::move(best->scr);
+  return best->data;
+}
+
 
 void system::scope_exit(parse_ctx* ctx, container* scr, const size_t count) const {
   for (size_t i = 0; i < count; ++i) {
@@ -347,16 +525,15 @@ void system::register_function(command_data data) {
       raise_error(std::format("Do not mix math operator symbols and common function name"));
   }
 
-  using cont_t = std::unordered_map<std::string, command_data>;
   auto itr = mfuncs.find(data.name);
   if (itr == mfuncs.end()) {
-    itr = mfuncs.emplace(std::make_pair(data.name, cont_t{})).first;
+    itr = mfuncs.emplace(std::make_pair(data.name, std::vector<command_data>{})).first;
   } else {
     if (itr->second.empty()) raise_error(std::format("'{}' empty?", data.name));
-    if (data.type != itr->second.begin()->second.type) 
+    if (data.type != itr->second.front().type) 
       raise_error(std::format("Cannot register several functions '{}' with defferent types", data.name));
     if (data.type == command_data::ftype::operator_t) {
-      const auto& another = itr->second.begin()->second;
+      const auto& another = itr->second.front();
       const bool invalid_state = 
         data.priority != another.priority || 
         data.arg_count != another.arg_count ||
@@ -367,10 +544,13 @@ void system::register_function(command_data data) {
     }
   }
 
-  const auto scope_itr = itr->second.find(std::string(data.expected_scope));
-  if (scope_itr != itr->second.end()) raise_error(std::format("'{}' is already registered for scope '{}'", data.name, data.expected_scope));
+  for (const auto& overload : itr->second) {
+    if (overload.expected_scope == data.expected_scope && overload.argument_types == data.argument_types) {
+      raise_error(std::format("'{}' is already registered for scope '{}' and signature '{}'", data.name, data.expected_scope, data.function_signature));
+    }
+  }
 
-  itr->second[std::string(data.expected_scope)] = std::move(data);
+  itr->second.push_back(std::move(data));
 }
 
 void system::reserve_from_hint(container* scr, const size_t block_count, const size_t token_bytes) const {
@@ -442,11 +622,14 @@ void system::setup_block_description(
     } else {
       const auto func = mfuncs.find(std::string(token));
       if (func != mfuncs.end()) {
-        auto scope = func->second.find(std::string(ctx->current_scope_type()));
-        if (scope == func->second.end()) scope = func->second.find(std::string(scope_type_name<void>()));
-        if (scope != func->second.end()) {
-          kind = scope->second.description_kind;
-          effect = type_is_void(scope->second.return_type);
+        const command_data* found = nullptr;
+        for (const auto& data : func->second) {
+          if (data.expected_scope == ctx->current_scope_type()) { found = &data; break; }
+          if (found == nullptr && data.expected_scope == scope_type_name<void>()) found = &data;
+        }
+        if (found != nullptr) {
+          kind = found->description_kind;
+          effect = type_is_void(found->return_type);
         }
       } else if (!token.empty()) {
         kind = container::description_node_kind::literal;
@@ -802,7 +985,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   const auto exp_t = ctx->expected_type;
   const bool any_type_expected = type_is_any_type(exp_t);
 
-  if (override_lvalue.empty()) {
+  if (override_lvalue.empty() && !type_is_integral(exp_t)) {
     if (auto v = try_eval_const(block)) {
       set_function_type sft(ctx, function_type::rvalue);
       if (v->type == const_value::kind::boolean) {
@@ -829,6 +1012,13 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
     if (text::is_bool(funcname)) {
       set_function_type sft(ctx, function_type::rvalue);
       push_basic_function(ctx, scr, basicf::pushbool, text::as_bool(funcname));
+      setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
+      return 1;
+    }
+
+    if (int64_t val; type_is_integral(exp_t) && text::is_integer(funcname, val)) {
+      set_function_type sft(ctx, function_type::rvalue);
+      push_basic_function(ctx, scr, basicf::pushint, val);
       setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
       return 1;
     }
@@ -874,13 +1064,10 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
         set_function_type sft(ctx, function_type::rvalue);
         function_name_changer fnc(ctx, block.name());
 
-        auto scope_itr = itr->second.find(std::string(ctx->current_scope_type()));
-        if (scope_itr == itr->second.end()) { scope_itr = itr->second.find(std::string(scope_type_name<void>())); }
-        if (scope_itr == itr->second.end()) raise_error(std::format("Could not find function '{}' for scope type '{}'", block.name(), ctx->current_scope_type()));
-
         const size_t cmd_start = scr->cmds.size();
-        emitter e{this, ctx, scr};
-        const size_t count = std::invoke(scope_itr->second.init, e, block);
+        const command_data* data = resolve_function(ctx, scr, block, block.name());
+        (void)data;
+        const size_t count = block.size();
         setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size(), cmd_start);
         return count;
       }
@@ -926,7 +1113,7 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   if (is_subblock) {
     auto curid = basicf::object_block;
     if (type_is_bool(exp_t)) curid = basicf::AND;
-    else if (type_is_fundamental(exp_t)) curid = basicf::ADD;
+    else if (type_is_fundamental(exp_t) || is_arithmetic_type(exp_t)) curid = basicf::ADD;
     else if (type_is_string(exp_t)) curid = basicf::string_block;
     else if (type_is_void(exp_t)) curid = basicf::effect_block;
 
@@ -957,20 +1144,16 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
 
   const size_t desc_start = scr->block_descs.size();
   const size_t cmd_start = scr->cmds.size();
+  const std::string desc_name(prevname);
+  const auto cd_before_resolve = block.find(custom_description_constant);
+  const std::string custom_desc_before_resolve(static_string_arg(cd_before_resolve, custom_description_constant));
 
   function_name_changer fnc(ctx, prevname);
   set_function_type sft(ctx, function_type::lvalue);
-  const auto& itr = mfuncs.find(std::string(funcname));
-  if (itr == mfuncs.end()) raise_error(std::format("Could not find function '{}'", funcname));
-  auto scope_itr = itr->second.find(std::string(ctx->current_scope_type()));
-  if (scope_itr == itr->second.end()) { scope_itr = itr->second.find(std::string(scope_type_name<void>())); }
-  if (scope_itr == itr->second.end()) raise_error(std::format("Could not find function '{}' for scope type '{}'", block.name(), ctx->current_scope_type()));
-
-  { emitter e{this, ctx, scr}; std::invoke(scope_itr->second.init, e, block); }
+  resolve_function(ctx, scr, block, funcname);
 
   if (is_subblock || is_condition || is_not_overriden) {
-    const auto cd = block.find(custom_description_constant);
-    setup_block_description(ctx, scr, prevname, static_string_arg(cd, custom_description_constant), desc_start, cmd_start);
+    setup_block_description(ctx, scr, desc_name, custom_desc_before_resolve, desc_start, cmd_start);
   }
 
   return block.size();
@@ -996,7 +1179,7 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     const auto exp_t = ctx->expected_type;
     if (type_is_void(exp_t)) curid = basicf::effect_block;
     else if (type_is_bool(exp_t)) curid = basicf::AND;
-    else if (type_is_fundamental(exp_t)) curid = basicf::ADD;
+    else if (type_is_fundamental(exp_t) || is_arithmetic_type(exp_t)) curid = basicf::ADD;
     else if (type_is_string(exp_t)) curid = basicf::string_block;
     else curid = basicf::object_block;
   }
@@ -1186,9 +1369,9 @@ void system::configure_parser(tavl::parser& p) const {
   p.add_operator("=",  tavl::op_fixity::binary, 1, tavl::op_assoc::right);
   p.add_operator("?=", tavl::op_fixity::binary, 1, tavl::op_assoc::right);
 
-  for (const auto& [name, scopes] : mfuncs) {
-    if (scopes.empty()) continue;
-    const auto& cd = scopes.begin()->second;        // operators don't vary by scope
+  for (const auto& [name, overloads] : mfuncs) {
+    if (overloads.empty()) continue;
+    const auto& cd = overloads.front();        // operator syntax metadata is shared by all overloads
     if (cd.type != command_data::ftype::operator_t) continue;
 
     // `unary_plus`/`unary_minus` are rpn-only aliases (see convert()); the source symbol is +/-,
@@ -1277,6 +1460,9 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
     }
 
     if (!type_is_void(ctx.return_type)) {
+      if (!ctx.stack_types.empty() && ctx.stack_types.back() != ctx.return_type && can_convert_implicitly(ctx.stack_types.back(), ctx.return_type)) {
+        setup_type_conversion(&ctx, &c, ctx.stack_types.back(), ctx.return_type);
+      }
       if (ctx.stack_types.empty() || ctx.stack_types.back() != ctx.return_type) {
         const auto actual = ctx.stack_types.empty() ? std::string_view("empty stack") : ctx.stack_types.back();
         raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", actual, ctx.return_type, ctx.stack_types.size()));
@@ -1301,7 +1487,7 @@ system::command_data::ftype system::get_token_type(const std::string_view& name)
   const auto itr = mfuncs.find(std::string(name));
   if (itr == mfuncs.end()) return command_data::ftype::invalid;
   if (itr->second.empty()) return command_data::ftype::invalid;
-  return itr->second.begin()->second.type;
+  return itr->second.front().type;
 }
 
 std::tuple<int32_t, int32_t, system::command_data::associativity, system::command_data::ftype> system::get_token_caps(const std::string_view& name) const {
@@ -1311,16 +1497,16 @@ std::tuple<int32_t, int32_t, system::command_data::associativity, system::comman
 
   int32_t args_count = 0;
   for (auto it = itr->second.begin(); it != itr->second.end(); ++it) {
-    args_count = std::max(args_count, it->second.arg_count);
+    args_count = std::max(args_count, it->arg_count);
   }
 
   auto it = itr->second.begin();
-  return std::make_tuple(it->second.priority, args_count, it->second.assoc, it->second.type);
+  return std::make_tuple(it->priority, args_count, it->assoc, it->type);
 }
 
 system::parse_context::parse_context() noexcept :
   ftype(function_type::lvalue), nest_level(0), source_line(0), source_column(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0),
-  max_stack_depth(0), max_child_saved(0), max_child_lists(0), max_stack_limit(context::stack_size), max_saved_limit(context::local_vars_size), initialized(false)
+  max_stack_depth(0), max_child_saved(0), max_child_lists(0), max_stack_limit(context::stack_size), max_saved_limit(context::local_vars_size), conversion_cost(0), initialized(false)
 {}
 
 bool system::parse_context::is_func_subblock() const {
@@ -1370,7 +1556,4 @@ void system::parse_context::erase(const size_t index) {
 
 std::string_view system::parse_context::top() const { return stack_types.back(); }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

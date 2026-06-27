@@ -25,11 +25,7 @@ struct person {
 
 static uint16_t person_age(handle<person> p) { return (*p).age; }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
-#else
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
-#endif
+namespace ds = devils_script;
 
 // A name -> compiled sub-script registry wired into the system's script resolver.
 struct registry {

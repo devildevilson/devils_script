@@ -23,10 +23,7 @@
 // commands themselves, which lets tooling reconstruct the script structure without changing
 // the compact execution layout.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 struct container;
 
@@ -257,7 +254,4 @@ struct script_function<R(Arg)> {
 // golden tests that pin the output of the compilation step (see tests/disasm.cpp).
 std::string disassemble(const container& scr);
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

@@ -6,10 +6,7 @@
 #include "devils_script/string-utils.hpp"
 #include "tavl/detail.h"
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 std::tuple<system::rpn_conversion_ctx::token_ref, size_t> system::rpn_conversion_ctx::convert_scope(const std::string_view& expr, block* arr, const size_t max_size, const size_t line, const size_t column) {
   using kind = block_kind;
@@ -328,7 +325,4 @@ bool system::command_block::braced_args() const {
 }
 bool system::command_block::empty() const { return data.empty(); }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

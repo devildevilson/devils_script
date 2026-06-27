@@ -27,10 +27,7 @@
 // Pointer constness is normalized for script type matching: script scope/value identity is
 // based on the pointed-to type category rather than the exact cv-qualified pointer spelling.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 template <typename Signature>
 struct script_function;
@@ -750,7 +747,4 @@ constexpr void static_for(F&& function) {
   detail::static_for(std::forward<F>(function), std::make_index_sequence<iterations>());
 }
 }
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

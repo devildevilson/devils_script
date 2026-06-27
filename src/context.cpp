@@ -4,10 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 context::context(const size_t stack_capacity, const size_t saved_capacity) noexcept
   : stack(stack_capacity), saved_stack(saved_capacity), args_stack(script_arguments_size),
@@ -90,7 +87,4 @@ bool context::stack_t::invalid(const int64_t index) const {
   return final_index < int64_t(_size) ? _data[final_index].invalid() : true;
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

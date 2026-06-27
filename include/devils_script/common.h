@@ -20,10 +20,7 @@
 // and the small type-erased value wrappers used for `ctx:saved`, `ctx:arg`, iterators, and
 // description callbacks.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 constexpr int devils_script_version_major = 1;
 constexpr int devils_script_version_minor = 1;
@@ -286,6 +283,12 @@ template <typename T>
 constexpr bool is_typeless_v = is_el_view_v<T> || is_object_view_v<T> || is_any_stack_v<T> || is_any_object_v<T>;
 
 template <typename T>
+struct is_script_arithmetic_type : std::false_type {};
+
+template <typename T>
+constexpr bool is_script_arithmetic_type_v = is_script_arithmetic_type<std::remove_cvref_t<T>>::value;
+
+template <typename T>
 constexpr bool valid_stack_type_v = valid_stack_el_type_v<T> || is_typeless_v<std::remove_cvref_t<T>>;
 
 template<typename T>
@@ -298,7 +301,7 @@ template <typename T>
 constexpr bool is_valid_return_type_v = valid_stack_type_v<T> || std::is_same_v<any_stack, std::remove_cvref_t<T>> || std::is_same_v<any_object, std::remove_cvref_t<T>> || utils::is_void_v<T>;
 
 template <typename T>
-constexpr bool is_not_fundamental = !std::is_fundamental_v<T> && !std::is_same_v<std::string_view, T>;
+constexpr bool is_not_fundamental = !std::is_fundamental_v<T> && !is_script_arithmetic_type_v<T> && !std::is_same_v<std::string_view, T>;
 
 template <typename F>
 constexpr bool is_not_member_function = utils::is_void_v<utils::function_member_of<F>>;
@@ -319,7 +322,7 @@ template <typename F>
 constexpr bool is_predicate_function_v = utils::is_function_v<F> && std::is_same_v<std::remove_cvref_t<utils::function_result_type<F>>, bool> && utils::function_arguments_count<F> == 1;
 
 template <typename F>
-constexpr bool is_numeric_function_v = utils::is_function_v<F> && std::is_fundamental_v<std::remove_cvref_t<utils::function_result_type<F>>> && !std::is_same_v<std::remove_cvref_t<utils::function_result_type<F>>, bool> && utils::function_arguments_count<F> == 1;
+constexpr bool is_numeric_function_v = utils::is_function_v<F> && (std::is_fundamental_v<std::remove_cvref_t<utils::function_result_type<F>>> || is_script_arithmetic_type_v<utils::function_result_type<F>>) && !std::is_same_v<std::remove_cvref_t<utils::function_result_type<F>>, bool> && utils::function_arguments_count<F> == 1;
 
 template <typename F>
 constexpr bool is_effect_function_v = utils::is_function_v<F> && utils::is_void_v<std::remove_cvref_t<utils::function_result_type<F>>> && utils::function_arguments_count<F> == 1;
@@ -538,7 +541,4 @@ auto any_stack::get() const -> final_stack_el_t<T> {
   } else return *reinterpret_cast<const basic_T*>(&_mem[0]);
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

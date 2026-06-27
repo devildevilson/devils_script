@@ -18,10 +18,7 @@
 // `script_function` views. Those wrappers share the caller's `context`, so iterator bodies
 // must restore the stack to the expected shape before returning.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 namespace detail {
 template <typename T>
@@ -1035,7 +1032,4 @@ int64_t compute_count_and_mul(int64_t arg, context* ctx, const script_container*
   return 0;
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

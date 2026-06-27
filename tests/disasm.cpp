@@ -3,11 +3,7 @@
 #include "devils_script/system.h"
 #include "devils_script/container.h"
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
-#else
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
-#endif
+namespace ds = devils_script;
 
 // Golden disassembly tests for the compilation step. These PIN the current emitted command
 // array (opcodes + args + branch targets) for small scripts. A small, targeted alternative

@@ -104,10 +104,6 @@ set(SRC_LIST
   src/prng.cpp
 )
 
-#add_compile_definitions(DEVILS_SCRIPT_OUTER_NAMESPACE=devils_engine)
-#add_compile_definitions(DEVILS_SCRIPT_INNER_NAMESPACE=script)
-add_compile_definitions(DEVILS_SCRIPT_OUTER_NAMESPACE=devils_script)
-
 add_library(devils_script STATIC ${SRC_LIST} ${HDR_LIST})
 # Options are PRIVATE so the build flags (arch, warnings, RTTI, LTO, MSVC runtime) stay internal and
 # don't leak onto consumers. Only the C++20 requirement and tavl propagate via PUBLIC.

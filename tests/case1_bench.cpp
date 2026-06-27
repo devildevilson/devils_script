@@ -97,11 +97,7 @@ const std::string scripts[] = {
   "{ ctx_save = { cur_player = this }, this:living_in = { each_notable_person = { filter = this != ctx:saved:cur_player, value = age } } }",
 };
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
-#else
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
-#endif
+namespace ds = devils_script;
 
 
 // keep the optimizer from discarding the measured work

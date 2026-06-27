@@ -86,11 +86,7 @@ static double each_notable_person(city* c, const std::function<bool(handle<perso
   return val;
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
-#else
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
-#endif
+namespace ds = devils_script;
 
 // Formats a single description node exactly like examples/desc.cpp prints it.
 static bool collect(std::string& out, const std::string_view& name, const size_t nest, const ds::any_stack& value, const ds::any_stack& scope) {

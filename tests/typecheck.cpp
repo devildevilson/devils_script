@@ -124,6 +124,235 @@ TEST_CASE("Type checking and valid argument checks") {
     }
   }
 }
+
+TEST_CASE("Arithmetic type registry and overload resolution") {
+  SUBCASE("integer literals prefer int64 overload and floating literals prefer double overload") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&numeric_overload_i64>("pick");
+    sys.register_function<&numeric_overload_double>("pick");
+
+    {
+      const auto cont = sys.parse<int64_t, void>("script", "pick = { 7 }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<int64_t>());
+      CHECK(ctx.get_return<int64_t>() == 10);
+    }
+
+    {
+      const auto cont = sys.parse<int64_t, void>("script", "pick = { 7.5 }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<int64_t>());
+      CHECK(ctx.get_return<int64_t>() == 20);
+    }
+  }
+
+  SUBCASE("custom arithmetic type uses explicit implicit conversion chain") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_arithmetic_type<vec4>("ADD", 30);
+    sys.register_implicit_conversion<double, vec4>();
+    sys.register_function<&numeric_overload_i64>("pick");
+    sys.register_function<&numeric_overload_double>("pick");
+    sys.register_function<&numeric_overload_vec4, void>("pick");
+    sys.register_function<&vec4_x, void>("vec4_x");
+    sys.register_function<&vec4_passthrough, void>("as_vec4");
+
+    {
+      const auto cont = sys.parse<int64_t, void>("script", "pick = { as_vec4 = { 2 } }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<int64_t>());
+      CHECK(ctx.get_return<int64_t>() == 30);
+    }
+
+    {
+      const auto cont = sys.parse<double, void>("script", "vec4_x = { 9 }");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 9.0);
+    }
+  }
+
+  SUBCASE("custom arithmetic type does not convert back without a registered rule") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_arithmetic_type<vec4>("ADD", 30);
+    sys.register_implicit_conversion<double, vec4>();
+    sys.register_function<&make_vec4, void>("make_vec4");
+    sys.register_function<&double_passthrough>("as_double");
+
+    CHECK_THROWS(sys.parse<double, void>("script", "as_double = { make_vec4 = { 3 } }"));
+  }
+}
+
+TEST_CASE("Arithmetic operators for registered numeric-like types") {
+  // This test documents the intended workflow for arithmetic extensions:
+  // 1. Register a stack value type as arithmetic, so parse<type>() uses arithmetic block semantics.
+  // 2. Register implicit conversions separately; type registration alone never creates casts.
+  // 3. Register every operator overload the script language is allowed to use.
+  //    For custom value types whose first C++ argument is not a scope, pass HT=void explicitly.
+  const ds::system::operator_props mul_props{ 12, ds::system::command_data::math_ftype::binary, ds::system::command_data::associativity::left };
+  const ds::system::operator_props add_props{ 11, ds::system::command_data::math_ftype::binary, ds::system::command_data::associativity::left };
+
+  SUBCASE("same-type expression uses that type's registered operators") {
+    {
+      ds::system sys;
+      sys.init_basic_functions();
+      sys.init_math();
+      sys.register_function<&i64_a>("a");
+      sys.register_function<&i64_b>("b");
+      sys.register_function<&i64_c>("c");
+      sys.register_function<&i64_d>("d");
+      sys.register_function<&i64_e>("e");
+
+      const auto cont = sys.parse<int64_t, void>("script", "a + b * c - d / e");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<int64_t>());
+      CHECK(ctx.get_return<int64_t>() == 152);
+    }
+
+    {
+      ds::system sys;
+      sys.init_basic_functions();
+      sys.init_math();
+      sys.register_function<&double_a>("a");
+      sys.register_function<&double_b>("b");
+      sys.register_function<&double_c>("c");
+      sys.register_function<&double_d>("d");
+      sys.register_function<&double_e>("e");
+
+      const auto cont = sys.parse<double, void>("script", "a + b * c - d / e");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<double>());
+      CHECK(ctx.get_return<double>() == 152.0);
+    }
+
+    {
+      ds::system sys;
+      sys.init_basic_functions();
+      sys.init_math();
+      sys.register_arithmetic_type<vec4>("ADD", 30);
+      sys.register_function<&vec4_a, void>("a");
+      sys.register_function<&vec4_b, void>("b");
+      sys.register_function<&vec4_c, void>("c");
+      sys.register_function<&vec4_d, void>("d");
+      sys.register_function<&vec4_e, void>("e");
+      sys.register_operator<&vec4_mul, void>("*", mul_props);
+      sys.register_operator<&vec4_div, void>("/", mul_props);
+      sys.register_operator<&vec4_add, void>("+", add_props);
+      sys.register_operator<&vec4_sub, void>("-", add_props);
+      sys.register_function<&vec4_add, void>("ADD");
+      sys.register_function<&vec4_mul, void>("MUL");
+
+      const auto cont = sys.parse<vec4, void>("script", "a + b * c - d / e");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<vec4>());
+      CHECK(ctx.get_return<vec4>() == vec4(152.0));
+    }
+
+    {
+      ds::system sys;
+      sys.init_basic_functions();
+      sys.init_math();
+      sys.register_arithmetic_type<vec2>("ADD", 30);
+      sys.register_function<&vec2_a, void>("a");
+      sys.register_function<&vec2_b, void>("b");
+      sys.register_function<&vec2_c, void>("c");
+      sys.register_function<&vec2_d, void>("d");
+      sys.register_function<&vec2_e, void>("e");
+      sys.register_operator<&vec2_mul, void>("*", mul_props);
+      sys.register_operator<&vec2_div, void>("/", mul_props);
+      sys.register_operator<&vec2_add, void>("+", add_props);
+      sys.register_operator<&vec2_sub, void>("-", add_props);
+      sys.register_function<&vec2_add, void>("ADD");
+      sys.register_function<&vec2_mul, void>("MUL");
+
+      const auto cont = sys.parse<vec2, void>("script", "a + b * c - d / e");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<vec2>());
+      CHECK(ctx.get_return<vec2>() == vec2(152.0));
+    }
+
+    {
+      ds::system sys;
+      sys.init_basic_functions();
+      sys.init_math();
+      sys.register_arithmetic_type<custom_type>("ADD", 40);
+      sys.register_function<&custom_a, void>("a");
+      sys.register_function<&custom_b, void>("b");
+      sys.register_function<&custom_c, void>("c");
+      sys.register_function<&custom_d, void>("d");
+      sys.register_function<&custom_e, void>("e");
+      sys.register_operator<&custom_mul, void>("*", mul_props);
+      sys.register_operator<&custom_div, void>("/", mul_props);
+      sys.register_operator<&custom_add, void>("+", add_props);
+      sys.register_operator<&custom_sub, void>("-", add_props);
+      sys.register_function<&custom_add, void>("ADD");
+      sys.register_function<&custom_mul, void>("MUL");
+
+      const auto cont = sys.parse<custom_type, void>("script", "a + b * c - d / e");
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<custom_type>());
+      CHECK(ctx.get_return<custom_type>() == custom_type(INT64_C(152)));
+    }
+  }
+
+  SUBCASE("mixed scalar/vector expressions require mixed operator overloads") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_arithmetic_type<vec4>("ADD", 30);
+    sys.register_implicit_conversion<double, vec4>();
+    sys.register_function<&vec4_a, void>("a");
+    sys.register_function<&double_b>("b");
+    sys.register_function<&vec4_c, void>("c");
+
+    // Register both operand orders for normal scalar-vector arithmetic. The resolver does not
+    // invent commutativity: if scripts may write both `vec4 * double` and `double * vec4`, register
+    // both signatures.
+    sys.register_operator<&vec4_add_scalar, void>("+", add_props);
+    sys.register_operator<&scalar_add_vec4, void>("+", add_props);
+    sys.register_operator<&vec4_add, void>("+", add_props);
+    sys.register_operator<&vec4_mul_scalar, void>("*", mul_props);
+    sys.register_operator<&scalar_mul_vec4, void>("*", mul_props);
+    sys.register_function<&vec4_add, void>("ADD");
+    sys.register_function<&vec4_mul, void>("MUL");
+
+    const auto cont = sys.parse<vec4, void>("script", "a + b * c");
+    ds::context ctx;
+    cont.process(&ctx);
+    REQUIRE(ctx.is_return<vec4>());
+    CHECK(ctx.get_return<vec4>() == vec4(160.0));
+  }
+
+  SUBCASE("type registration does not make unsupported mixed operators legal") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_arithmetic_type<vec4>("ADD", 30);
+    sys.register_function<&vec4_a, void>("a");
+    sys.register_function<&double_b>("b");
+    sys.register_function<&vec4_c, void>("c");
+    sys.register_operator<&vec4_add, void>("+", add_props);
+    sys.register_operator<&vec4_mul, void>("*", mul_props);
+    sys.register_function<&vec4_add, void>("ADD");
+    sys.register_function<&vec4_mul, void>("MUL");
+
+    CHECK_THROWS(sys.parse<vec4, void>("script", "a + b * c"));
+  }
+}
 // Locks in the diagnostic (raise_error) branches: malformed scripts must be rejected
 // at parse time rather than miscompiling.
 TEST_CASE("error branches are rejected at parse") {

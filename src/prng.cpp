@@ -2,10 +2,7 @@
 
 #include "devils_script/type_traits.h"
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 namespace prng {
 
 static inline uint64_t rotl(const uint64_t x, int k) {
@@ -100,7 +97,4 @@ uint64_t xoshiro256starstar::value(const state& s) noexcept {
 
 
 }
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

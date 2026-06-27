@@ -3,11 +3,7 @@
 #include <string>
 #include "devils_script/system.h"
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE::DEVILS_SCRIPT_INNER_NAMESPACE;
-#else
-namespace ds = DEVILS_SCRIPT_OUTER_NAMESPACE;
-#endif
+namespace ds = devils_script;
 
 namespace {
 

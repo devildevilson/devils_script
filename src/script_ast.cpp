@@ -7,10 +7,7 @@
 //     carrying its op token; a juxtaposed call `f(...)` / `f{...}` is a pair with an EMPTY op token.
 // Each parse_* returns a subtree in PREFIX order, so a parent's child_count == sum of child sizes.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 namespace {
 
@@ -204,7 +201,4 @@ std::vector<tavl::node> make_script_ast(tavl::parser& p, std::string_view src) {
   return nodes;
 }
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }

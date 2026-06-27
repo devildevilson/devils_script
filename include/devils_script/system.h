@@ -12,6 +12,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <deque>
+#include <vector>
 #include "devils_script/common.h"
 #include "devils_script/type_traits.h"
 #include "devils_script/container.h"
@@ -39,10 +40,7 @@
 // the produced scope type into `parse_ctx::scope_stack`, compiles the nested block, and emits
 // nullable guards for `?=` calls when the return type supports validity checks.
 
-namespace DEVILS_SCRIPT_OUTER_NAMESPACE {
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-namespace DEVILS_SCRIPT_INNER_NAMESPACE {
-#endif
+namespace devils_script {
 
 
 class system {
@@ -176,6 +174,7 @@ public:
     // stacks. Set before parsing to carve scripts into nesting classes with smaller budgets.
     size_t max_stack_limit;
     size_t max_saved_limit;
+    int32_t conversion_cost;
 
     std::vector<std::string_view> function_names;
     std::vector<int64_t> scope_stack;
@@ -274,6 +273,7 @@ public:
     std::string name;
     std::string_view expected_scope;
     std::string_view return_type;
+    std::vector<std::string_view> argument_types;
     std::string function_signature;
     int32_t priority;
     int32_t arg_count; // or math_ftype
@@ -286,6 +286,20 @@ public:
   using custom_init_fn_t = std::function<void(emitter&, const command_block&, const std::vector<std::string> &)>;
 
   struct operator_props { int32_t priority; command_data::math_ftype mtype; command_data::associativity assoc; };
+
+  struct arithmetic_type_data {
+    std::string_view type;
+    std::string block_name;
+    int32_t priority;
+  };
+
+  struct conversion_data {
+    std::string_view from;
+    std::string_view to;
+    int32_t cost;
+    function_t safe;
+    function_t unsafe;
+  };
 
   class nest_level_changer {
   public:
@@ -361,6 +375,20 @@ public:
   system(const options &opts = options()) noexcept;
   void init_math();
   void init_basic_functions();
+
+  template <typename T>
+    requires(valid_stack_el_type_v<T>)
+  void register_arithmetic_type(std::string block_name = "ADD", int32_t priority = 0);
+
+  template <typename FROM, typename TO>
+    requires(valid_stack_el_type_v<FROM> && valid_stack_el_type_v<TO>)
+  void register_implicit_conversion(int32_t cost = 1);
+
+  bool is_arithmetic_type(const std::string_view& type) const noexcept;
+  std::string_view arithmetic_block_for(const std::string_view& type) const noexcept;
+  std::optional<int32_t> implicit_conversion_cost(const std::string_view& from, const std::string_view& to) const;
+  bool can_convert_implicitly(const std::string_view& from, const std::string_view& to) const;
+  void setup_type_conversion(parse_ctx* ctx, container* scr, const std::string_view& from, const std::string_view& to) const;
 
   void toggle_safety();
   bool safety() const;
@@ -526,19 +554,20 @@ public:
   void configure_parser(tavl::parser& p) const;
   void scope_exit(parse_ctx* ctx, container* scr, const size_t count) const;
 private:
+  const command_data* resolve_function(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& name) const;
+
   uint64_t seed;
   enum safety safet;
   err_fn error;
   err_fn warning;
-  // function name first + scope type second, no scope == void
-  std::unordered_map<std::string, std::unordered_map<std::string, command_data>> mfuncs;
+  // function name first; overloads are resolved by scope, argument types and conversion cost
+  std::unordered_map<std::string, std::vector<command_data>> mfuncs;
+  std::unordered_map<std::string, arithmetic_type_data> arithmetic_types;
+  std::unordered_map<std::string, std::vector<conversion_data>> implicit_conversions;
   std::unordered_map<std::string, std::function<std::optional<int64_t>(std::string_view)>> enums;
   script_resolver_t script_resolver;
 };
 
-#ifdef DEVILS_SCRIPT_INNER_NAMESPACE
-}
-#endif
 }
 
 #include "devils_script/system_templates.h"
