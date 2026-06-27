@@ -23,15 +23,15 @@
 namespace devils_script {
 
 constexpr int devils_script_version_major = 1;
-constexpr int devils_script_version_minor = 1;
+constexpr int devils_script_version_minor = 2;
 constexpr int devils_script_version_patch = 0;
-constexpr std::string_view devils_script_version = "1.1.0";
+constexpr std::string_view devils_script_version = "1.2.0";
 
 #ifndef DEVILS_SCRIPT_VERSION_MAJOR
 #define DEVILS_SCRIPT_VERSION_MAJOR 1
 #endif
 #ifndef DEVILS_SCRIPT_VERSION_MINOR
-#define DEVILS_SCRIPT_VERSION_MINOR 1
+#define DEVILS_SCRIPT_VERSION_MINOR 2
 #endif
 #ifndef DEVILS_SCRIPT_VERSION_PATCH
 #define DEVILS_SCRIPT_VERSION_PATCH 0
