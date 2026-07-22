@@ -201,6 +201,39 @@ TEST_CASE("Arithmetic operators for registered numeric-like types") {
   const ds::system::operator_props mul_props{ 12, ds::system::command_data::math_ftype::binary, ds::system::command_data::associativity::left };
   const ds::system::operator_props add_props{ 11, ds::system::command_data::math_ftype::binary, ds::system::command_data::associativity::left };
 
+  SUBCASE("unary plus and minus support literals, calls and standard precedence") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&i64_a>("a");
+    sys.register_function<&i64_b>("b");
+    sys.register_function<&i64_identity>("fn1");
+
+    const std::pair<std::string_view, int64_t> cases[] = {
+      { "-1",             -1 },
+      { "+1",              1 },
+      { "fn1 = +2",        2 },
+      { "fn1 = -2",       -2 },
+      { "fn1 = + 2",       2 },
+      { "fn1 = - 2",      -2 },
+      { "fn1(-1)",        -1 },
+      { "fn1(+1)",         1 },
+      { "-2 * 3",         -6 },
+      { "-2 * 3 + 10",     4 },
+      { "+2 * 3 + 10",    16 },
+      { "-a + +b",       -80 },
+    };
+
+    for (const auto& [script, expected] : cases) {
+      CAPTURE(script);
+      const auto cont = sys.parse<int64_t, void>("script", script);
+      ds::context ctx;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<int64_t>());
+      CHECK(ctx.get_return<int64_t>() == expected);
+    }
+  }
+
   SUBCASE("same-type expression uses that type's registered operators") {
     {
       ds::system sys;

@@ -100,6 +100,20 @@ TEST_CASE("Iterators example") {
       CHECK(g_any_child_value_calls == 2);
     }
   }
+
+  SUBCASE("void callback accepts ordinary effects") {
+    ds::system sys;
+    sys.init_basic_functions();
+    sys.init_math();
+    sys.register_function<&emit_target>("emit_target");
+    sys.register_function_iter<&each_target>("each_target", { "value" });
+
+    const auto cont = sys.parse<void, void>("script", "each_target = { value = { emit_target } }");
+    ds::context ctx;
+    emitted_target_sum = 0;
+    cont.process(&ctx);
+    CHECK(emitted_target_sum == 5);
+  }
 }
 // Exercises the `*_unsafe` opcode variants: with safety toggled off, the emitter
 // selects the unsafe function pointers (sum_unsafe, mul_unsafe, andjump_unsafe,

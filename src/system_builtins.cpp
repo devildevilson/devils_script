@@ -16,6 +16,8 @@ static int64_t rawaddi(const int64_t val1, const int64_t val2) noexcept { return
 static int64_t rawmuli(const int64_t val1, const int64_t val2) noexcept { return val1 * val2; }
 static int64_t rawsubi(const int64_t val1, const int64_t val2) noexcept { return val1 - val2; }
 static int64_t rawdivi(const int64_t val1, const int64_t val2) noexcept { return val1 / val2; }
+static int64_t rawposi(const int64_t val1) noexcept { return +val1; }
+static int64_t rawnegi(const int64_t val1) noexcept { return -val1; }
 static double rawadd(const double val1, const double val2) noexcept { return val1 + val2; }
 static double rawmul(const double val1, const double val2) noexcept { return val1 * val2; }
 static double rawsub(const double val1, const double val2) noexcept { return val1 - val2; }
@@ -80,6 +82,8 @@ static double rawrndmix(const double v1, const double v2) noexcept { return prng
 #define ROI(func) register_operator<&func>
 
 void system::init_math() {
+  ROI(internal::rawposi)("unary_plus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
+  ROI(internal::rawnegi)("unary_minus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawpos)("unary_plus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawneg)("unary_minus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawnot)("not", { 14, command_data::math_ftype::prefix, command_data::associativity::right });

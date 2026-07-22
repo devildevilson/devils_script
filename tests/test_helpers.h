@@ -85,6 +85,7 @@ inline int64_t i64_b() { return 20; }
 inline int64_t i64_c() { return 3; }
 inline int64_t i64_d() { return 40; }
 inline int64_t i64_e() { return 5; }
+inline int64_t i64_identity(int64_t value) { return value; }
 inline double double_a() { return 100.0; }
 inline double double_b() { return 20.0; }
 inline double double_c() { return 3.0; }
@@ -144,6 +145,12 @@ inline bool object_id_is(object_ref cur, int64_t id) { return cur.id == id; }
 inline bool object_arg_id_is(std::string_view, object_ref cur, int64_t id) { return cur.id == id; }
 inline scope2 wrong_object(object_ref) { return scope2{}; }
 inline void object_effect(object_ref) {}
+inline int64_t emitted_target_sum = 0;
+inline void emit_target(object_ref target) { emitted_target_sum += target.id; }
+inline void each_target(ds::script_function<void(object_ref)> value) {
+  value(object_ref{ 2 });
+  value(object_ref{ 3 });
+}
 inline double runtime_num() { return 3.0; }
 inline int g_short_circuit_calls = 0;
 inline bool runtime_true() { return true; }

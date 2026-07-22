@@ -225,12 +225,14 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   if (!arg_name.empty()) {
     if constexpr (is_optional) {
       using opt_t = std::remove_cvref_t<utils::optional_value_t<cur_arg_type>>;
-      if constexpr (std::is_same_v<bool, opt_t>) override_lvalue = "AND";
+      if constexpr (utils::is_void_v<opt_t>) override_lvalue = "__effect_block";
+      else if constexpr (std::is_same_v<bool, opt_t>) override_lvalue = "AND";
       else if constexpr (std::is_fundamental_v<opt_t>) override_lvalue = "ADD";
       else if constexpr (std::is_same_v<std::string_view, opt_t>) override_lvalue = "__string_block";
       else override_lvalue = "__object_block";
     } else {
-      if constexpr (std::is_same_v<bool, cur_arg_type>) override_lvalue = "AND";
+      if constexpr (utils::is_void_v<cur_arg_type>) override_lvalue = "__effect_block";
+      else if constexpr (std::is_same_v<bool, cur_arg_type>) override_lvalue = "AND";
       else if constexpr (std::is_fundamental_v<cur_arg_type>) override_lvalue = "ADD";
       else if constexpr (std::is_same_v<std::string_view, cur_arg_type>) override_lvalue = "__string_block";
       else override_lvalue = "__object_block";
@@ -330,12 +332,14 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   if (!arg_name.empty()) {
     if constexpr (is_optional) {
       using opt_t = std::remove_cvref_t<utils::optional_value_t<cur_arg_type>>;
-      if constexpr (std::is_same_v<bool, opt_t>) local_override_block_behaviour = basicf::AND;
+      if constexpr (utils::is_void_v<opt_t>) local_override_block_behaviour = basicf::effect_block;
+      else if constexpr (std::is_same_v<bool, opt_t>) local_override_block_behaviour = basicf::AND;
       else if constexpr (std::is_fundamental_v<opt_t>) local_override_block_behaviour = basicf::ADD;
       else if constexpr (std::is_same_v<std::string_view, opt_t>) local_override_block_behaviour = basicf::string_block;
       else local_override_block_behaviour = basicf::object_block;
     } else {
-      if constexpr (std::is_same_v<bool, cur_arg_type>) local_override_block_behaviour = basicf::AND;
+      if constexpr (utils::is_void_v<cur_arg_type>) local_override_block_behaviour = basicf::effect_block;
+      else if constexpr (std::is_same_v<bool, cur_arg_type>) local_override_block_behaviour = basicf::AND;
       else if constexpr (std::is_fundamental_v<cur_arg_type>) local_override_block_behaviour = basicf::ADD;
       else if constexpr (std::is_same_v<std::string_view, cur_arg_type>) local_override_block_behaviour = basicf::string_block;
       else local_override_block_behaviour = basicf::object_block;
@@ -476,7 +480,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
     constexpr auto stn = scope_type_name<scope_type>();
     const auto curfname = ctx->function_names.back();
 
-    const bool expected_void = ctx->expected_type == utils::type_name<void>();
+    const bool expected_void = type_is_void(ctx->expected_type);
     if (uftype == user_function_type::effect && !expected_void) sys->raise_error(std::format("Function effect '{}' called in not effect context", curfname));
     if (!utils::is_void_v<scope_type> && !ctx->is_scope<scope_type>())
       sys->raise_error(std::format("Trying to call function '{}' in wrong scope context: {} != {}", curfname, ctx->current_scope_type(), stn));
@@ -736,7 +740,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
       constexpr auto stn = scope_type_name<scope_type>();
       const auto curfname = ctx->function_names.back();
 
-      const bool expected_void = ctx->expected_type == utils::type_name<void>();
+      const bool expected_void = type_is_void(ctx->expected_type);
       if (expected_void) sys->raise_error(std::format("Operator '{}' called in effect context", curfname));
 
       if (!init_f) {
@@ -889,7 +893,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
           section_start = scr->cmds.size();
         });
 
-        ctx->push<ret_type>();
+        if constexpr (!utils::is_void_v<ret_type>) ctx->push<ret_type>();
       }
 
       return args.size();
@@ -904,7 +908,12 @@ template <auto f>
   requires(utils::is_function_v<decltype(f)>)
 void system::register_function_iter(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
   using F = decltype(f);
-  using scope_type = scope_t<F>;
+  using first_argument = std::remove_cvref_t<utils::function_argument_type<F, 0>>;
+  using scope_type = std::conditional_t<
+    is_not_member_function<F> && is_valid_argument_function_v<first_argument>,
+    utils::void_t,
+    scope_t<F>
+  >;
   register_function_iter<f, scope_type, &is_valid<scope_type>>(std::move(name), std::move(func_args_names), std::move(init_f));
 }
 
