@@ -6,7 +6,7 @@ if (POLICY CMP0141)
   set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
-project(devils_script VERSION 1.1.1)
+project(devils_script VERSION 1.2.0)
 
 enable_language(CXX)
 
@@ -14,7 +14,7 @@ option(DS_BUILD_TESTS "Build tests for devils_script" ON)
 option(DS_BUILD_EXAMPLES "Build examples for devils_script" ON)
 # ISA for auto-vectorizing devils_script's own sources. Applied PRIVATE; not forced on
 # consumers (they pick their own arch). No SIMD intrinsics in headers, so no ABI impact.
-set(DS_ARCH "AVX" CACHE STRING "ISA baseline for devils_script sources: OFF, AVX, AVX2, NATIVE")
+include(cmake/Architecture.cmake)
 
 # MSVC runtime: default to the DLL runtime (replaces the hand-written /MD /MDd). Guarded so a
 # consumer embedding devils_script can pick the static runtime instead.
@@ -74,7 +74,7 @@ target_compile_definitions(devils_script_options INTERFACE
 FetchContent_Declare(
   tavl
   GIT_REPOSITORY https://github.com/devildevilson/tavl.git
-  GIT_TAG        v1.0.2
+  GIT_TAG        v1.0.3
 )
 
 FetchContent_MakeAvailable(tavl)
@@ -100,6 +100,7 @@ set(SRC_LIST
   src/system_ast.cpp
   src/system_builtins.cpp
   src/system.cpp
+  src/optimizer.cpp
   src/basic_functions.cpp
   src/prng.cpp
 )
@@ -125,6 +126,7 @@ if (DS_BUILD_EXAMPLES)
 endif()
 
 if (DS_BUILD_TESTS)
+  enable_testing()
   FetchContent_Declare(
     doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git
@@ -134,6 +136,8 @@ if (DS_BUILD_TESTS)
   FetchContent_MakeAvailable(doctest)
 
   add_executable (devils_script_tests
+    tests/audit.cpp
+    tests/optimizer.cpp
     tests/main.cpp
     tests/basics.cpp
     tests/statements.cpp
@@ -146,10 +150,26 @@ if (DS_BUILD_TESTS)
     tests/disasm.cpp
     tests/execute.cpp)
   target_link_libraries(devils_script_tests devils_script devils_script_options doctest::doctest)
+  add_test(NAME devils_script_tests COMMAND devils_script_tests)
+  FetchContent_GetProperties(reflect)
+  add_test(NAME devils_script_compile_fail COMMAND ${CMAKE_COMMAND}
+    -S ${CMAKE_CURRENT_SOURCE_DIR}/tests/compile_fail
+    -B ${CMAKE_CURRENT_BINARY_DIR}/compile_fail
+    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+    -DDS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+    -DTAVL_SOURCE_DIR=${tavl_SOURCE_DIR}
+    -DREFLECT_SOURCE_DIR=${reflect_SOURCE_DIR})
+  add_test(NAME devils_script_architecture COMMAND ${CMAKE_COMMAND}
+    -DDS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/architecture.cmake)
+
 
   add_executable (devils_script_benchs tests/case1_bench.cpp)
   target_link_libraries(devils_script_benchs devils_script devils_script_options)
 
   add_executable (devils_script_execute_bench tests/execute_bench.cpp)
   target_link_libraries(devils_script_execute_bench devils_script devils_script_options)
+
+  add_executable(devils_script_process_bench tests/process_bench.cpp)
+  target_link_libraries(devils_script_process_bench devils_script devils_script_options)
 endif()

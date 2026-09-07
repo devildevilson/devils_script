@@ -81,7 +81,20 @@ static double rawrndmix(const double v1, const double v2) noexcept { return prng
 #define RFI(func) register_function<&func>
 #define ROI(func) register_operator<&func>
 
+namespace {
+// Marks everything registered inside init_math() / init_basic_functions() as built-in, so constant
+// folding can tell those registrations apart from a consumer's own overloads. Restores the previous
+// value on scope exit, including when a registration raises.
+struct builtin_registration_scope {
+  bool* flag;
+  bool prev;
+  explicit builtin_registration_scope(bool& f) noexcept : flag(&f), prev(f) { f = true; }
+  ~builtin_registration_scope() noexcept { *flag = prev; }
+};
+}
+
 void system::init_math() {
+  builtin_registration_scope builtins(registering_builtins);
   ROI(internal::rawposi)("unary_plus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawnegi)("unary_minus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawpos)("unary_plus", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
@@ -262,6 +275,15 @@ static int64_t writeback_arg_to_arg(int64_t arg, context* ctx, const script_cont
 // List-frame append/shrink and in/out swaps/write-backs are handled by the surrounding opcodes.
 static int64_t execute_script(int64_t arg, context* ctx, const script_container* scr) {
   const auto* sub = reinterpret_cast<const script_container*>(static_cast<intptr_t>(arg));
+  if (ctx->describing) throw context::description_unavailable{};
+  const auto old_index = ctx->current_index;
+  const auto old_frame = ctx->frame_base;
+  const auto old_arg = ctx->arg_base;
+  const auto old_saved = ctx->saved_base;
+  const auto old_list = ctx->list_base;
+  const auto old_return = ctx->_return_value;
+  const auto old_size = ctx->stack.size();
+  try {
   const size_t nargs = sub->args.size();
 
   // Arguments are frame-local: the sub's arg frame sits above the caller's, so the caller's slots are
@@ -325,6 +347,26 @@ static int64_t execute_script(int64_t arg, context* ctx, const script_container*
     return int64_t(1) - int64_t(nargs);
   }
   return -int64_t(nargs);
+  } catch (...) {
+    ctx->current_index = old_index;
+    ctx->frame_base = old_frame;
+    ctx->arg_base = old_arg;
+    ctx->saved_base = old_saved;
+    ctx->list_base = old_list;
+    ctx->_return_value = old_return;
+    ctx->stack._size = old_size - sub->args.size();
+    // The compiler emits scalar writebacks, list swaps, then list_frame_exit immediately
+    // after execute. Unwind that list frame even if entry validation or the callee failed.
+    // Completed list mutations are retained; scalar writebacks only happen on success.
+    for (size_t i = old_index + 1; i < scr->cmds.size(); ++i) {
+      const auto& cmd = scr->cmds[i];
+      if (cmd.fp == &writeback_arg_to_saved || cmd.fp == &writeback_arg_to_arg) continue;
+      if (cmd.fp == &swap_bound_list) { swap_bound_list(cmd.arg, ctx, scr); continue; }
+      if (cmd.fp == &list_frame_exit) list_frame_exit(cmd.arg, ctx, scr);
+      break;
+    }
+    throw;
+  }
 }
 
 static any_stack executefn() { return any_stack{}; }
@@ -339,6 +381,7 @@ static void add_cmd(const system* sys, container* scr) {
 #define ADD_CMD(fn) add_cmd<fn>
 
 void system::init_basic_functions() {
+  builtin_registration_scope builtins(registering_builtins);
   RFI(internal::operator_and)("AND", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
     return sys->fold_block(ctx, scr, args, basicf::AND);
@@ -1034,12 +1077,42 @@ void system::init_basic_functions() {
 
   RFI(internal::ctx)("ctx", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    const size_t ctx_cmd = scr->cmds.size();
     sys->push_basic_function(ctx, scr, basicf::context, 0);
     if (args.size() == 1) return args.size();
     
-    ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
+    const int64_t ctx_slot = int64_t(ctx->stack_types.size()) - 1;
+    ctx->scope_stack.push_back(size_t(ctx_slot));
     sys->fold_block(ctx, scr, args, basicf::invalid);
     sys->scope_exit(ctx, scr, 1);
+
+    // `ctx:saved:x`, `ctx:arg:x` and `ctx:list:x` compile to a single read that takes the context
+    // from `context*` directly, so the object this block pushed is never read and neither it nor its
+    // unwind has to run. Hand the shape to the peephole rather than skipping the push here: the
+    // stream stays executable as emitted, which is what the optimizer is tested against.
+    const size_t unwind = scr->cmds.size() - 1;
+    if (unwind > ctx_cmd + 1 && find_basicf_by_fp(scr->cmds[unwind].fp) == basicf::erase) {
+      size_t reads = 0;
+      bool only_reads_and_fallthrough = true;
+      for (size_t i = ctx_cmd + 1; i < unwind && only_reads_and_fallthrough; ++i) {
+        switch (find_basicf_by_fp(scr->cmds[i].fp)) {
+          case basicf::pushctxvalue:
+          case basicf::pushargvalue:
+          case basicf::pushlist:
+            ++reads;
+            break;
+          // A description placeholder can leave a jump onto the next command between the read and
+          // the unwind; it touches no stack slot, so it does not keep the pushed context alive.
+          case basicf::jump:
+            only_reads_and_fallthrough = size_t(scr->cmds[i].arg) == i + 1;
+            break;
+          default:
+            only_reads_and_fallthrough = false;
+            break;
+        }
+      }
+      if (only_reads_and_fallthrough && reads == 1) sys->record_dead_context_push(ctx, ctx_cmd, unwind, ctx_slot);
+    }
 
     return args.size();
   });
@@ -1395,6 +1468,7 @@ void system::init_basic_functions() {
         scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+1] value range
         scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+2] default_start + end
         scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+3] input_type string ref
+        sys->record_data_slots(ctx, op_cmd + 1, 3);
         size_t value_start = 0, value_end = 0, default_start = 0;  // absolute cmd indices; 0 == section absent
 
         if (kind == container::list_pipeline_kind::add_to) {
@@ -1423,6 +1497,12 @@ void system::init_basic_functions() {
         const size_t end_abs = scr->cmds.size();
         scr->cmds[op_cmd + 1].arg = pack2(int32_t(value_start ? value_start - op_cmd : 0), int32_t(value_end ? value_end - op_cmd : 0));
         scr->cmds[op_cmd + 2].arg = pack2(int32_t(default_start ? default_start - op_cmd : 0), int32_t(end_abs - op_cmd));
+        // The four section bounds are stored relative to the opcode, so the peephole has to know
+        // both which half holds them and what they are relative to.
+        sys->record_cmd_index(ctx, op_cmd + 1, 1, op_cmd, true);
+        sys->record_cmd_index(ctx, op_cmd + 1, 2, op_cmd, true);
+        sys->record_cmd_index(ctx, op_cmd + 2, 1, op_cmd, true);
+        sys->record_cmd_index(ctx, op_cmd + 2, 2, op_cmd, false);
         if (!input_type_at_op.empty()) {
           const auto ref = sys->store_string(scr, input_type_at_op);
           scr->cmds[op_cmd + 3].arg = packstrid(uint32_t(ref.start), uint32_t(ref.count));

@@ -241,67 +241,75 @@ TEST_CASE("Description golden (partial evaluation)") {
   }
 
   SUBCASE("scope path") {
-    const std::string expected =
+    const std::string expected = std::format(
       "'ADD' value: '26' scope: 'handle<person>'\n"
-      "  'country' value: 'country*' scope: 'handle<person>'\n"
-      "    'leader' value: 'handle<person>' scope: 'country*'\n"
-      "      'age' value: '26' scope: 'handle<person>'\n";
+      "  'country' value: '{0}' scope: 'handle<person>'\n"
+      "    'leader' value: 'handle<person>' scope: '{0}'\n"
+      "      'age' value: '26' scope: 'handle<person>'\n",
+      ds::utils::type_name<country*>(), ds::utils::type_name<city*>());
     CHECK(run("country.leader:age") == expected);
   }
 
   SUBCASE("iterator single") {
-    const std::string expected =
+    const std::string expected = std::format(
       "'ADD' value: '343' scope: 'handle<person>'\n"
-      "  'country' value: 'country*' scope: 'handle<person>'\n"
-      "    'each_city' value: '343' scope: 'country*'\n"
+      "  'country' value: '{0}' scope: 'handle<person>'\n"
+      "    'each_city' value: '343' scope: '{0}'\n"
       "      'value' value: 'no value' scope: 'no scope'\n"
-      "        'population' value: 'no value' scope: 'no scope'\n";
+      "        'population' value: 'no value' scope: 'no scope'\n",
+      ds::utils::type_name<country*>(), ds::utils::type_name<city*>());
     CHECK(run("country = { each_city = { value = population } }") == expected);
   }
 
   SUBCASE("iterator nested") {
-    const std::string expected =
+    const std::string expected = std::format(
       "'ADD' value: '18' scope: 'handle<person>'\n"
-      "  'country' value: 'country*' scope: 'handle<person>'\n"
-      "    'each_city' value: '18' scope: 'country*'\n"
+      "  'country' value: '{0}' scope: 'handle<person>'\n"
+      "    'each_city' value: '18' scope: '{0}'\n"
       "      'value' value: 'no value' scope: 'no scope'\n"
       "        'each_notable_person' value: 'no value' scope: 'no scope'\n"
       "          'value' value: 'no value' scope: 'no scope'\n"
-      "            'charisma' value: 'no value' scope: 'no scope'\n";
+      "            'charisma' value: 'no value' scope: 'no scope'\n",
+      ds::utils::type_name<country*>(), ds::utils::type_name<city*>());
     CHECK(run("country = { each_city = { value = { each_notable_person = { value = charisma } } } }") == expected);
   }
 
   SUBCASE("ctx_save + division") {
-    const std::string expected =
+    const std::string expected = std::format(
       "'ADD' value: '0.0606061' scope: 'handle<person>'\n"
       "  'this' value: '0.0606061' scope: 'handle<person>'\n"
-      "    'living_in' value: 'city*' scope: 'handle<person>'\n"
-      "      'ctx_save' value: 'city*' scope: 'city*'\n"
-      "        'each_notable_person' value: '33' scope: 'city*'\n"
+      "    'living_in' value: '{1}' scope: 'handle<person>'\n"
+      "      'ctx_save' value: '{1}' scope: '{1}'\n"
+      "        'each_notable_person' value: '33' scope: '{1}'\n"
       "          'value' value: 'no value' scope: 'no scope'\n"
       "            'age' value: 'no value' scope: 'no scope'\n"
-      "      '/' value: '0.0606061' scope: 'city*'\n"
-      "        'notable_people_count' value: '2' scope: 'city*'\n"
-      "        'ctx' value: '33' scope: 'city*'\n"
-      "          'saved' value: '33' scope: 'devils_script::internal::thisctx'\n";
+      "      '/' value: '0.0606061' scope: '{1}'\n"
+      "        'notable_people_count' value: '2' scope: '{1}'\n"
+      "        'ctx' value: '33' scope: '{1}'\n"
+      // The `ctx` block's operand no longer exists: a `ctx:saved:` read takes the context straight
+      // out of `context*`, so the peephole drops the push. Reporting the internal thisctx object as
+      // this node's scope was leaking an implementation detail either way.
+      "          'saved' value: '33' scope: 'no scope'\n",
+      ds::utils::type_name<country*>(), ds::utils::type_name<city*>());
     CHECK(run("this:living_in = { ctx_save = { val1 = { each_notable_person = { value = age } } }, notable_people_count / ctx:saved:val1 }") == expected);
   }
 
   SUBCASE("ctx_save object + filter") {
-    const std::string expected =
+    const std::string expected = std::format(
       "'ADD' value: '13' scope: 'handle<person>'\n"
       "  'ctx_save' value: 'handle<person>' scope: 'handle<person>'\n"
       "    'this' value: 'handle<person>' scope: 'handle<person>'\n"
       "  'this' value: '13' scope: 'handle<person>'\n"
-      "    'living_in' value: 'city*' scope: 'handle<person>'\n"
-      "      'each_notable_person' value: '13' scope: 'city*'\n"
+      "    'living_in' value: '{1}' scope: 'handle<person>'\n"
+      "      'each_notable_person' value: '13' scope: '{1}'\n"
       "        'filter' value: 'no value' scope: 'no scope'\n"
       "          '!=' value: 'no value' scope: 'no scope'\n"
       "            'this' value: 'no value' scope: 'no scope'\n"
       "            'ctx' value: 'no value' scope: 'no scope'\n"
       "              'saved' value: 'no value' scope: 'no scope'\n"
       "        'value' value: 'no value' scope: 'no scope'\n"
-      "          'age' value: 'no value' scope: 'no scope'\n";
+      "          'age' value: 'no value' scope: 'no scope'\n",
+      ds::utils::type_name<country*>(), ds::utils::type_name<city*>());
     CHECK(run("{ ctx_save = { cur_player = this }, this:living_in = { each_notable_person = { filter = this != ctx:saved:cur_player, value = age } } }") == expected);
   }
 }

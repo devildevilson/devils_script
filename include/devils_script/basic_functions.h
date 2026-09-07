@@ -93,6 +93,9 @@ int64_t pushreturn(int64_t, context*, const script_container*);
 int64_t pusharg(int64_t, context*, const script_container*);
 int64_t pushinvalid(int64_t, context*, const script_container*);
 int64_t erase(int64_t, context*, const script_container*);
+// Fused scope unwind: erases `count` stack slots starting at `first` (packed as {first, count})
+// with a single shift, replacing a run of descending `erase` opcodes.
+int64_t erase_range(int64_t, context*, const script_container*);
 int64_t pushcurrent(int64_t, context*, const script_container*);
 int64_t pushchance(int64_t, context*, const script_container*);
 

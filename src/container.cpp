@@ -9,6 +9,14 @@
 #include <utility>
 
 namespace devils_script {
+namespace {
+struct current_script_guard {
+  context* ctx;
+  const script_container* previous;
+  current_script_guard(context* ctx, const script_container* script) : ctx(ctx), previous(ctx->current_script) { ctx->current_script = script; }
+  ~current_script_guard() { ctx->current_script = previous; }
+};
+}
 
 script_container::command::command() noexcept : fp(nullptr), arg(0) {}
 script_container::command::command(function_t fp, bool arg) noexcept : fp(fp), arg(arg) {}
@@ -28,13 +36,11 @@ void script_container::process(context* ctx) const {
   if (ctx->saved_base + max_saved > ctx->saved_stack._data.size())
     error_at(ctx, std::format("context saved-value stack too small: needs {} slots at base {}, but the context provides only {}", max_saved, ctx->saved_base, ctx->saved_stack._data.size()));
 
-  const script_container* prev_script = ctx->current_script;
-  ctx->current_script = this;
+  current_script_guard guard(ctx, this);
   for (; ctx->current_index < cmds.size(); ++ctx->current_index) {
     const auto& cmd = cmds[ctx->current_index];
     std::invoke(cmd.fp, cmd.arg, ctx, this);
   }
-  ctx->current_script = prev_script;
 }
 
 void script_container::shrink_to_fit() {
@@ -134,6 +140,8 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
   std::vector<eval_entry> table(block_descs.size());
   context work = *ctx;
   work.current_index = 0;
+  work.describing = true;
+  bool stopped = false;
 
   // Effect-ness is a property of the producing node (a void function/iterator): only its result
   // command is the effect to skip — argument pushes inside it must still be evaluated.
@@ -144,7 +152,7 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
 
   size_t counter = 0;
   for (size_t i = 0; i < cmds.size(); ++i) {
-    const bool reached = i >= work.current_index;
+    const bool reached = !stopped && i >= work.current_index;
     bool ok = reached;
     std::string error;
 
@@ -154,6 +162,18 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
         const auto& cmd = cmds[i];
         std::invoke(cmd.fp, cmd.arg, &work, this);
         work.current_index += 1;
+      } catch (const context::description_unavailable& e) {
+        ok = false;
+        error = e.what();
+        work = std::move(before);
+        stopped = true;
+        // Values sampled at the beginning of an unfinished parent are not its result.
+        for (size_t n = 0; n < table.size(); ++n) {
+          if (block_descs[n].cmd_index >= i) {
+            table[n].has_value = false;
+            table[n].error = error;
+          }
+        }
       } catch (const std::exception& e) {
         ok = false;
         error = e.what();
@@ -356,13 +376,11 @@ container_view::container_view(const script_container* scr, const size_t start, 
 {}
 
 void container_view::process(context* ctx) const {
-  const script_container* prev_script = ctx->current_script;
-  ctx->current_script = scr;
+  current_script_guard guard(ctx, scr);
   for (ctx->current_index = start; ctx->current_index < end; ++ctx->current_index) {
     const auto& cmd = scr->cmds[ctx->current_index];
     std::invoke(cmd.fp, cmd.arg, ctx, scr);
   }
-  ctx->current_script = prev_script;
 }
 
 std::string_view container_view::get_string(const size_t start, const size_t count) const {

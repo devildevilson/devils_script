@@ -23,6 +23,7 @@ void system::register_arithmetic_type(std::string block_name, const int32_t prio
 template <typename FROM, typename TO>
   requires(valid_stack_el_type_v<FROM> && valid_stack_el_type_v<TO>)
 void system::register_implicit_conversion(const int32_t cost) {
+  if (cost < 0) raise_error("Implicit conversion cost must be non-negative");
   using from_t = final_stack_el_t<FROM>;
   using to_t = final_stack_el_t<TO>;
   conversion_data data{
@@ -32,7 +33,12 @@ void system::register_implicit_conversion(const int32_t cost) {
     &convert<from_t, to_t>,
     &convert_unsafe<from_t, to_t>
   };
-  implicit_conversions[std::string(data.from)].push_back(data);
+  auto& edges = implicit_conversions[std::string(data.from)];
+  // Re-registration updates the edge without changing tie-breaking order.
+  for (auto& edge : edges) {
+    if (edge.to == data.to) { edge = data; return; }
+  }
+  edges.push_back(data);
 }
 
 namespace detail {
@@ -409,11 +415,9 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
   if (std::is_same_v<FROM, TO>) return;
   constexpr auto from_name = utils::type_name<final_stack_el_t<FROM>>();
   constexpr auto to_name = utils::type_name<final_stack_el_t<TO>>();
-  if constexpr (!std::is_same_v<final_stack_el_t<FROM>, bool> && !std::is_same_v<final_stack_el_t<TO>, bool>) {
-    if (can_convert_implicitly(from_name, to_name)) {
-      setup_type_conversion(ctx, scr, from_name, to_name);
-      return;
-    }
+  if (can_convert_implicitly(from_name, to_name)) {
+    setup_type_conversion(ctx, scr, from_name, to_name);
+    return;
   }
   if (!std::is_fundamental_v<FROM> && !std::is_same_v<final_stack_el_t<FROM>, bool>) raise_error(std::format("Could not convert from '{}' to '{}'", from_name, to_name));
   if (!std::is_fundamental_v<TO> && !std::is_same_v<final_stack_el_t<TO>, bool>) raise_error(std::format("Could not convert from '{}' to '{}'", from_name, to_name));
@@ -624,7 +628,10 @@ void system::register_function(std::string name, std::vector<std::string> func_a
             }
             sys->fold_block(ctx, scr, args, basicf::invalid);
             sys->scope_exit(ctx, scr, 1);
-            if (nullable) scr->cmds[guard_index].arg = pack2(static_cast<int32_t>(scr->cmds.size()), std::get<1>(unpack2(scr->cmds[guard_index].arg)));
+            if (nullable) {
+              scr->cmds[guard_index].arg = pack2(static_cast<int32_t>(scr->cmds.size()), std::get<1>(unpack2(scr->cmds[guard_index].arg)));
+              sys->record_cmd_index(ctx, guard_index, 1);
+            }
           } else if (offset < args.size() && ctx->ftype == function_type::lvalue) { // was args
             const auto remaining = command_block(args, offset);
             ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
@@ -638,7 +645,10 @@ void system::register_function(std::string name, std::vector<std::string> func_a
             }
             sys->dispatch_node(ctx, scr, remaining);
             sys->scope_exit(ctx, scr, 1);
-            if (nullable) scr->cmds[guard_index].arg = pack2(static_cast<int32_t>(scr->cmds.size()), std::get<1>(unpack2(scr->cmds[guard_index].arg)));
+            if (nullable) {
+              scr->cmds[guard_index].arg = pack2(static_cast<int32_t>(scr->cmds.size()), std::get<1>(unpack2(scr->cmds[guard_index].arg)));
+              sys->record_cmd_index(ctx, guard_index, 1);
+            }
 
             offset += remaining.size();
             if (offset < args.size()) 
@@ -853,13 +863,15 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
         constexpr function_t fs[] = { &useriter_unsafe<f, HT, vf>, &useriter<f, HT, vf> };
         scr->cmds.emplace_back(container::command(fs[size_t(sys->safety())], scope_index));
 
+        // One immediate-data slot per callback, holding that section's end command. They carry a
+        // `jump` fp but are never executed - useriter reads their args and steps over the block.
         std::vector<size_t> jumps;
         utils::static_for<args_count>([&](auto) {
           const size_t jump_index = sys->push_basic_function(ctx, scr, basicf::jump, 0);
           jumps.push_back(jump_index);
         });
+        if constexpr (args_count > 0) sys->record_data_slots(ctx, jumps.front(), args_count);
 
-        size_t section_start = scr->cmds.size();
         utils::static_for<args_count>([&](auto index) {
           constexpr size_t cur_index = first_argument_index + index;
           using fn_t = std::remove_cvref_t<utils::function_argument_type<F, cur_index>>;
@@ -890,7 +902,7 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
           ctx->pop();
 
           scr->cmds[jumps[index]].arg = scr->cmds.size();
-          section_start = scr->cmds.size();
+          sys->record_cmd_index(ctx, jumps[index], 0, SIZE_MAX, true);
         });
 
         if constexpr (!utils::is_void_v<ret_type>) ctx->push<ret_type>();
@@ -1064,6 +1076,7 @@ container system::parse(std::string_view name, std::string_view text) const {
   if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
 
   finalize_resource_usage(ctx, scr);
+  optimize_commands(ctx, scr);
 
   scr.build_description_index();
   compact_source_storage(&scr);
@@ -1098,7 +1111,7 @@ constexpr system::user_function_type system::get_user_function_type() {
     if constexpr (utils::is_void_v<ret_type>) t = user_function_type::iterator_effect;
     else if constexpr (std::is_same_v<bool, ret_type>) t = user_function_type::iterator_condition;
     else if constexpr (std::is_fundamental_v<ret_type> || is_script_arithmetic_type_v<ret_type>) t = user_function_type::iterator_arithmetic;
-    else raise_error(std::format("Iterator that returns '{}' is not supported", utils::type_name<ret_type>()));
+    else static_assert(utils::is_void_v<ret_type>, "Iterator return type must be void, bool, or a script arithmetic type");
   } else {
     if constexpr (utils::is_void_v<ret_type>) t = user_function_type::effect;
     else if constexpr (std::is_same_v<bool, ret_type>) t = user_function_type::condition;

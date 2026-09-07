@@ -257,12 +257,17 @@ it aligned with `describe`.
 
 ## Benchmarks
 
-Two standalone benchmark targets (no test framework):
+Three standalone benchmark targets (no test framework):
 
 - `devils_script_benchs` — parse, execution, unsafe execution, and description traversal on the
-  scripted scenario shared with the tests.
+  scripted scenario shared with the tests. Description benchmarks compare the default context
+  against one sized from `max_stack` / `max_saved` (`describe sized`). Pass `--script-function`
+  to compare iterator callbacks using `script_function` instead of `std::function`.
 - `devils_script_execute_bench` — script-in-script (`execute`) call overhead: inline-vs-execute
   baselines, rooted calls, nesting depth, fan-out, and a switch-heavy sub-script.
+- `devils_script_process_bench` — execution/codegen microbenchmarks, hand-simplified equivalents,
+  and two runtime-only opcode prototypes. Pass `--disassemble` to print the generated streams.
+  See [PROCESS_OPTIMIZATION.md](PROCESS_OPTIMIZATION.md) for results and limitations.
 
 ```sh
 cmake --build build-release --target devils_script_benchs devils_script_execute_bench
@@ -280,6 +285,9 @@ engine treats them as one type and will not catch feeding the wrong entity to a 
 distinct C++ type per script-domain type so safe mode can enforce the distinction.
 
 ## Current Gaps
+
+See [AUDIT.md](AUDIT.md) for the 2026-09-07 correctness audit, remaining defects,
+validation results, and measured optimization priorities.
 
 - More real-world examples would help document intended patterns.
 - `describe()` does not special-case `execute` nodes (script-in-script is otherwise fully supported,

@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.30)
+project(devils_script_compile_fail LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(INCLUDE_DIRECTORIES "${DS_SOURCE_DIR}/include;${TAVL_SOURCE_DIR}/include;${REFLECT_SOURCE_DIR}")
+try_compile(POSITIVE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iterator.cpp"
+  CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${INCLUDE_DIRECTORIES}" OUTPUT_VARIABLE POSITIVE_LOG)
+if (NOT POSITIVE)
+  message(FATAL_ERROR "Positive control failed: ${POSITIVE_LOG}")
+endif()
+try_compile(NEGATIVE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iterator.cpp"
+  CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${INCLUDE_DIRECTORIES}"
+  COMPILE_DEFINITIONS -DNEGATIVE OUTPUT_VARIABLE NEGATIVE_LOG)
+if (NEGATIVE OR NOT NEGATIVE_LOG MATCHES "Iterator return type must be void, bool, or a script arithmetic type")
+  message(FATAL_ERROR "Unsupported iterator did not fail with the expected diagnostic: ${NEGATIVE_LOG}")
+endif()

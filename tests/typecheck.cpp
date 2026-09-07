@@ -1,5 +1,17 @@
 #include "test_helpers.h"
 
+namespace {
+using kind = ds::system::user_function_type;
+static_assert(ds::system::get_user_function_type<void(*)()>() == kind::effect);
+static_assert(ds::system::get_user_function_type<bool(*)()>() == kind::condition);
+static_assert(ds::system::get_user_function_type<double(*)()>() == kind::arithmetic);
+static_assert(ds::system::get_user_function_type<std::string_view(*)()>() == kind::string);
+static_assert(ds::system::get_user_function_type<int*(*)()>() == kind::object);
+static_assert(ds::system::get_user_function_type<void(*)(), void, true>() == kind::iterator_effect);
+static_assert(ds::system::get_user_function_type<void(*)(), bool, true>() == kind::iterator_condition);
+static_assert(ds::system::get_user_function_type<void(*)(), double, true>() == kind::iterator_arithmetic);
+}
+
 TEST_CASE("Type checking and valid argument checks") {
   SUBCASE("parse-time type checks reject wrong contexts") {
     ds::system sys;

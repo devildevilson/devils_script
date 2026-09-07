@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <array>
+#include <bit>
 #include <string_view>
 #include <string>
 #include <format>
@@ -11,7 +13,7 @@
 // Shared low-level types used by the compiler and runtime.
 //
 // The VM stores script values in fixed-size stack slots so compiled containers can pass
-// small trivially-destructible C++ values without allocations or RTTI. Type names are kept
+// small trivially-copyable C++ values without allocations or RTTI. Type names are kept
 // next to values in the owning stacks/views rather than inside the raw slot itself. That
 // split is intentional: it keeps the command ABI compact while still allowing safe-mode
 // runtime type checks and description/introspection output.
@@ -21,6 +23,19 @@
 // description callbacks.
 
 namespace devils_script {
+namespace detail {
+template <typename T>
+T load_stack_bytes(const char* mem) noexcept {
+  std::array<std::byte, sizeof(T)> bytes;
+  std::memcpy(bytes.data(), mem, sizeof(T));
+  return std::bit_cast<T>(bytes);
+}
+template <typename T>
+void store_stack_bytes(char* mem, const T& value) noexcept {
+  std::memcpy(mem, &value, sizeof(T));
+  std::memset(mem + sizeof(T), 0, 16 - sizeof(T));
+}
+}
 
 constexpr int devils_script_version_major = 1;
 constexpr int devils_script_version_minor = 2;
@@ -79,6 +94,7 @@ constexpr std::string_view devils_script_version = "1.2.0";
   X(pusharg) \
   X(pushinvalid) \
   X(erase) \
+  X(erase_range) \
   X(current) \
   X(chance) \
   X(argcontext) \
@@ -178,7 +194,7 @@ constexpr std::string_view custom_description_constant = "custom_description";
 #define MAXIMUM_STACK_VAL_SIZE 16
 
 template <typename T>
-constexpr bool valid_stack_el_type_v = (sizeof(utils::void_or_t<std::remove_cvref_t<T>>) <= MAXIMUM_STACK_VAL_SIZE && std::is_trivially_destructible_v<utils::void_or_t<std::remove_cvref_t<T>>>);
+constexpr bool valid_stack_el_type_v = (sizeof(utils::void_or_t<std::remove_cvref_t<T>>) <= MAXIMUM_STACK_VAL_SIZE && std::is_trivially_copyable_v<utils::void_or_t<std::remove_cvref_t<T>>>);
 
 bool type_is_ignore(const std::string_view& type) noexcept;
 bool type_is_void(const std::string_view& type) noexcept;
@@ -227,10 +243,11 @@ struct alignas(MAXIMUM_STACK_VAL_SIZE) stack_element {
     friend bool operator!=(const view& v1, const view& v2);
   };
 
-  char mem[MAXIMUM_STACK_VAL_SIZE];
+  char mem[MAXIMUM_STACK_VAL_SIZE]{};
 
   template <typename T> requires(valid_stack_el_type_v<T>)
-  auto rawget() const -> const final_stack_el_t<T>*;
+  // Returns a value: byte storage does not expose a live T object.
+  auto rawget() const -> final_stack_el_t<T>;
   template <typename T> requires(valid_stack_el_type_v<T>)
   auto get() const -> final_stack_el_t<T>;
   template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, view>)
@@ -292,7 +309,7 @@ template <typename T>
 constexpr bool valid_stack_type_v = valid_stack_el_type_v<T> || is_typeless_v<std::remove_cvref_t<T>>;
 
 template<typename T>
-concept valid_stack_type = requires { valid_stack_type_v<T>; };
+concept valid_stack_type = valid_stack_type_v<T>;
 
 template <typename T>
 constexpr bool is_valid_argument_type_v = valid_stack_type_v<T> || (utils::is_optional_v<T> && !utils::is_void_v<utils::optional_value_t<T>>) || std::is_same_v<element_view, std::remove_cvref_t<T>> || std::is_same_v<object_view, std::remove_cvref_t<T>>;
@@ -316,7 +333,7 @@ template <typename F>
 constexpr bool valid_function_return_type = utils::is_void_v<utils::function_result_type<F>> || valid_stack_type_v<utils::function_result_type<F>> || std::is_same_v<any_stack, std::remove_cvref_t<utils::function_result_type<F>>>;
 
 template<typename F>
-concept valid_function_type = requires { utils::is_function_v<F> && (utils::is_void_v<utils::function_result_type<F>> || valid_function_return_type<F>); };
+concept valid_function_type = utils::is_function_v<F> && valid_function_return_type<F>;
 
 template <typename F>
 constexpr bool is_predicate_function_v = utils::is_function_v<F> && std::is_same_v<std::remove_cvref_t<utils::function_result_type<F>>, bool> && utils::function_arguments_count<F> == 1;
@@ -479,8 +496,8 @@ template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::r
 auto stack_element::view::rawget() const -> const final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
   if constexpr (is_el_view_v<basic_T>) {
-    return this;
-  } else return *reinterpret_cast<const basic_T*>(&_mem[0]);
+    return *this;
+  } else return detail::load_stack_bytes<basic_T>(_mem);
 }
 
 template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, element_view>)
@@ -493,15 +510,15 @@ auto stack_element::view::get() const -> final_stack_el_t<T> {
 }
 
 template <typename T> requires(valid_stack_el_type_v<T>)
-auto stack_element::rawget() const -> const final_stack_el_t<T>* {
+auto stack_element::rawget() const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
-  return reinterpret_cast<const basic_T*>(&mem[0]);
+  return detail::load_stack_bytes<basic_T>(mem);
 }
 
 template <typename T> requires(valid_stack_el_type_v<T>)
 auto stack_element::get() const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
-  return *rawget<basic_T>();
+  return rawget<basic_T>();
 }
 
 template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, element_view>)
@@ -509,7 +526,7 @@ void stack_element::set(const T& val) {
   using basic_T = final_stack_el_t<T>;
   if constexpr (is_el_view_v<basic_T>) {
     memcpy(mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
-  } else *reinterpret_cast<basic_T*>(&mem[0]) = val;
+  } else detail::store_stack_bytes(mem, basic_T(val));
 }
 
 template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
@@ -518,7 +535,7 @@ any_stack::any_stack(const T& val) noexcept : _type(utils::type_name<final_stack
   if constexpr (is_typeless_v<basic_T>) {
     _type = val.type();
     memcpy(_mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
-  } else *reinterpret_cast<basic_T*>(&_mem[0]) = val;
+  } else detail::store_stack_bytes(_mem, basic_T(val));
 }
 
 template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
@@ -538,7 +555,7 @@ auto any_stack::get() const -> final_stack_el_t<T> {
   if (!is<basic_T>()) throw std::runtime_error(std::format("Stack value view contains '{}' type, but '{}' is requested", _type, utils::type_id<basic_T>()));
   if constexpr (is_typeless_v<basic_T>) {
     return stack_element::view(_mem, _type);
-  } else return *reinterpret_cast<const basic_T*>(&_mem[0]);
+  } else return detail::load_stack_bytes<basic_T>(_mem);
 }
 
 }

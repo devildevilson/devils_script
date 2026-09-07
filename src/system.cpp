@@ -31,9 +31,10 @@ static constexpr char invalid_memory[MAXIMUM_STACK_VAL_SIZE] = {-1,-1,-1,-1,-1,-
 
 stack_element::view::view() noexcept : _mem(nullptr) {}
 stack_element::view::view(const char* _mem, const std::string_view& _type) noexcept : _mem(_mem), _type(_type) {}
-bool stack_element::view::valid() const { return !_type.empty() && memcmp(_mem, invalid_memory, MAXIMUM_STACK_VAL_SIZE) != 0; }
+bool stack_element::view::valid() const { return _mem && !_type.empty() && memcmp(_mem, invalid_memory, MAXIMUM_STACK_VAL_SIZE) != 0; }
 std::string_view stack_element::view::type() const { return _type; }
 bool operator==(const stack_element::view& v1, const stack_element::view& v2) {
+  if (!v1._mem || !v2._mem) return v1._mem == v2._mem && v1._type == v2._type;
   return memcmp(v1._mem, v2._mem, MAXIMUM_STACK_VAL_SIZE) == 0 && v1._type == v2._type;
 }
 bool operator!=(const stack_element::view& v1, const stack_element::view& v2) {
@@ -239,14 +240,16 @@ system::description_placeholder::~description_placeholder() noexcept { ctx->desc
 
 
 using p_t = prng::xoshiro256starstar;
-system::options::options() noexcept : seed(1), safety(safety::safe), error([](const std::string& msg) { throw std::runtime_error(msg); }), warning([](const std::string& msg) { std::cout << "WARN: " << msg << "\n"; }) {}
-system::system(const options& opts) noexcept : seed(opts.seed), safet(opts.safety), error(opts.error), warning(opts.warning) {
+system::options::options() noexcept : seed(1), safety(safety::safe), optimize(true), error([](const std::string& msg) { throw std::runtime_error(msg); }), warning([](const std::string& msg) { std::cout << "WARN: " << msg << "\n"; }) {}
+system::system(const options& opts) noexcept : seed(opts.seed), safet(opts.safety), optimize(opts.optimize), error(opts.error), warning(opts.warning) {
   register_arithmetic_type<int64_t>("ADD", 10);
   register_arithmetic_type<double>("ADD", 20);
   register_implicit_conversion<int64_t, double>(1);
 }
 
 void system::toggle_safety() { this->safet = static_cast<enum safety>(!static_cast<bool>(this->safet)); }
+void system::toggle_optimizations() { this->optimize = !this->optimize; }
+bool system::optimizations() const { return this->optimize; }
 bool system::safety() const { return static_cast<bool>(this->safet); }
 void system::raise_error(const std::string& msg) const { error(msg); }
 void system::raise_warning(const std::string& msg) const { warning(msg); }
@@ -340,84 +343,56 @@ std::string_view system::arithmetic_block_for(const std::string_view& type) cons
   return itr->second.block_name;
 }
 
-std::optional<int32_t> system::implicit_conversion_cost(const std::string_view& from, const std::string_view& to) const {
-  if (from == to) return 0;
-
-  struct node {
-    std::string_view type;
-    int32_t cost;
-  };
-
-  std::vector<node> open;
-  std::unordered_map<std::string, int32_t> best;
-  open.push_back({ from, 0 });
-  best.emplace(std::string(from), 0);
-
+std::optional<system::conversion_path> system::find_conversion_path(std::string_view from, std::string_view to) const {
+  struct node { std::string_view type; int64_t cost; std::vector<const conversion_data*> edges; };
+  std::vector<node> open{{from, 0, {}}};
+  std::unordered_map<std::string_view, int64_t> best{{from, 0}};
   while (!open.empty()) {
-    const node cur = open.back();
-    open.pop_back();
-    const auto best_cur = best.find(std::string(cur.type));
-    if (best_cur != best.end() && cur.cost > best_cur->second) continue;
-    if (cur.type == to) return cur.cost;
-
-    const auto conv_itr = implicit_conversions.find(std::string(cur.type));
-    if (conv_itr == implicit_conversions.end()) continue;
-
-    for (const auto& conv : conv_itr->second) {
-      const int32_t next_cost = cur.cost + conv.cost;
-      auto [it, inserted] = best.emplace(std::string(conv.to), next_cost);
-      if (!inserted && it->second <= next_cost) continue;
-      it->second = next_cost;
-      open.push_back({ conv.to, next_cost });
+    // Stable minimum selection: equal-cost alternatives keep registration/discovery order.
+    auto it = std::min_element(open.begin(), open.end(), [](const node& a, const node& b) { return a.cost < b.cost; });
+    node cur = std::move(*it);
+    open.erase(it);
+    if (cur.cost != best.at(cur.type)) continue;
+    if (cur.type == to) {
+      if (cur.cost > INT32_MAX) raise_error("Implicit conversion path cost exceeds INT32_MAX");
+      return conversion_path{int32_t(cur.cost), std::move(cur.edges)};
+    }
+    const auto next = implicit_conversions.find(std::string(cur.type));
+    if (next == implicit_conversions.end()) continue;
+    for (const auto& edge : next->second) {
+      // A path already beyond the public cost range need only propagate an overflow sentinel.
+      const int64_t cost = std::min(int64_t(INT32_MAX) + 1, cur.cost + edge.cost);
+      auto [known, inserted] = best.emplace(edge.to, cost);
+      if (!inserted && known->second <= cost) continue;
+      known->second = cost;
+      auto path = cur.edges;
+      path.push_back(&edge);
+      open.push_back({edge.to, cost, std::move(path)});
     }
   }
-
   return std::nullopt;
 }
 
+std::optional<int32_t> system::implicit_conversion_cost(const std::string_view& from, const std::string_view& to) const {
+  auto path = find_conversion_path(from, to);
+  return path ? std::optional<int32_t>(path->cost) : std::nullopt;
+}
+
 bool system::can_convert_implicitly(const std::string_view& from, const std::string_view& to) const {
-  return implicit_conversion_cost(from, to).has_value();
+  return find_conversion_path(from, to).has_value();
 }
 
 void system::setup_type_conversion(parse_ctx* ctx, container* scr, const std::string_view& from, const std::string_view& to) const {
   if (from == to) return;
-
-  const auto conv_itr = implicit_conversions.find(std::string(from));
-  if (conv_itr == implicit_conversions.end())
-    raise_error(std::format("Could not convert from '{}' to '{}'", from, to));
-
-  const conversion_data* direct = nullptr;
-  for (const auto& conv : conv_itr->second) {
-    if (conv.to == to) {
-      direct = &conv;
-      break;
-    }
-  }
-
-  if (direct == nullptr) {
-    std::optional<int32_t> best_cost;
-    const conversion_data* first_step = nullptr;
-    for (const auto& conv : conv_itr->second) {
-      const auto tail_cost = implicit_conversion_cost(conv.to, to);
-      if (!tail_cost.has_value()) continue;
-      const int32_t total = conv.cost + *tail_cost;
-      if (!best_cost.has_value() || total < *best_cost) {
-        best_cost = total;
-        first_step = &conv;
-      }
-    }
-    if (first_step == nullptr) raise_error(std::format("Could not convert from '{}' to '{}'", from, to));
-    setup_type_conversion(ctx, scr, from, first_step->to);
-    setup_type_conversion(ctx, scr, first_step->to, to);
-    return;
-  }
-
+  const auto path = find_conversion_path(from, to);
+  if (!path) raise_error(std::format("Could not convert from '{}' to '{}'", from, to));
   if (ctx->stack_types.empty() || ctx->stack_types.back() != from)
     raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", from, ctx->stack_types.empty() ? std::string_view("empty stack") : ctx->stack_types.back()));
-
-  scr->cmds.push_back(container::command(safety() ? direct->safe : direct->unsafe, INT64_C(0)));
-  ctx->stack_types.back() = direct->to;
-  ctx->conversion_cost += direct->cost;
+  for (const auto* edge : path->edges) {
+    scr->cmds.emplace_back(safety() ? edge->safe : edge->unsafe, INT64_C(0));
+    ctx->stack_types.back() = edge->to;
+  }
+  ctx->conversion_cost += path->cost;
 }
 
 const system::command_data* system::resolve_function(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& name) const {
@@ -438,8 +413,8 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
     const command_data* data = nullptr;
     parse_ctx ctx;
     container scr;
-    int32_t cost = 0;
-    int32_t rank = 0;
+    int64_t cost = 0;
+    int64_t rank = 0;
     size_t count = 0;
   };
 
@@ -461,7 +436,7 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
 
     try {
       const size_t count = std::invoke(data.init, e, block);
-      int32_t cost = test_ctx.conversion_cost;
+      int64_t cost = test_ctx.conversion_cost;
       const bool boolean_block = data.name == "AND" || data.name == "OR" || data.name == "NAND" || data.name == "NOR";
       const bool return_is_scalar = !boolean_block && (type_is_bool(data.return_type) || type_is_fundamental(data.return_type) || is_arithmetic_type(data.return_type) || type_is_string(data.return_type));
       if (return_is_scalar && !type_is_void(ctx->expected_type) && !type_is_any_type(ctx->expected_type) && !type_is_element_view(ctx->expected_type)) {
@@ -471,7 +446,7 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
           cost += *ret_cost;
         }
       }
-      int32_t rank = 0;
+      int64_t rank = 0;
       for (const auto arg_type : data.argument_types) {
         const auto arith = arithmetic_types.find(std::string(arg_type));
         rank += arith == arithmetic_types.end() ? 1000 : arith->second.priority;
@@ -496,9 +471,12 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
     raise_error(std::format("Ambiguous overload for function '{}' in scope type '{}'", name, current_scope));
   }
 
-  best->ctx.rpn_ctx = ctx->rpn_ctx;
-  best->ctx.script_ast_ctx = ctx->script_ast_ctx;
-  best->ctx.script_ast_nodes = ctx->script_ast_nodes;
+  // Active command blocks and token views refer to the caller's parser storage.
+  // Preserve its buffers when committing a candidate; copying them would free the
+  // original token allocation below and leave those views dangling.
+  best->ctx.rpn_ctx = std::move(ctx->rpn_ctx);
+  best->ctx.script_ast_ctx = std::move(ctx->script_ast_ctx);
+  best->ctx.script_ast_nodes = std::move(ctx->script_ast_nodes);
   *ctx = std::move(best->ctx);
   *scr = std::move(best->scr);
   return best->data;
@@ -550,7 +528,17 @@ void system::register_function(command_data data) {
     }
   }
 
+  data.builtin = registering_builtins;
   itr->second.push_back(std::move(data));
+}
+
+bool system::is_builtin_function(const std::string_view& name) const {
+  const auto itr = mfuncs.find(std::string(name));
+  if (itr == mfuncs.end()) return false;
+  for (const auto& overload : itr->second) {
+    if (!overload.builtin) return false;
+  }
+  return true;
 }
 
 void system::reserve_from_hint(container* scr, const size_t block_count, const size_t token_bytes) const {
@@ -726,6 +714,7 @@ constexpr std::array<insn_info, basicf_count> make_insn_table() {
   row(basicf::argcontext,    &pushargcontext,  &pushargcontext,        0,    pk::thisarg,     true,  0);
   row(basicf::context,       &pushcontext,     &pushcontext,           0,    pk::thisctx,     true,  0);
   row(basicf::erase,         &erase,           &erase,                 0,    pk::none,        false, 0);
+  row(basicf::erase_range,   &erase_range,     &erase_range,           0,    pk::none,        false, 0);
   row(basicf::current,       &pushcurrent,     &pushcurrent,           0,    pk::same_as_top, true,  0);
   row(basicf::pushargvalue,  &pushargvalue,    &pushargvalue,          0,    pk::arg_indexed, true,  0);
   row(basicf::setargrvalue,  &setargrvalue,    &setargrvalue,          1,    pk::none,        false, 0);
@@ -788,7 +777,10 @@ void system::emitter::jump_to(const basicf op, label& l) const { l.sites.push_ba
 void system::emitter::mark(label& l, const size_t cmd_index) const { l.sites.push_back(cmd_index); }
 void system::emitter::bind(label& l) const {
   const size_t target = scr->cmds.size();
-  for (const size_t site : l.sites) scr->cmds[site].arg = target;
+  for (const size_t site : l.sites) {
+    scr->cmds[site].arg = target;
+    sys->record_cmd_index(ctx, site);
+  }
 }
 
 size_t system::push_string(parse_ctx* ctx, container* scr, const std::string_view& str) const {
@@ -877,6 +869,9 @@ size_t system::push_enum_literal(parse_ctx* ctx, container* scr, const std::stri
 
 namespace {
 
+// A folded compile-time constant. Kinds are kept strictly apart: the emitted command stream has no
+// implicit bool<->double step of its own, so the folder must not invent one either. Anything that
+// would need a conversion (or an overload the folder cannot see) is left to normal codegen.
 struct const_value {
   enum class kind { boolean, number };
   kind type;
@@ -885,17 +880,15 @@ struct const_value {
 
   static const_value boolean(const bool v) noexcept { return { kind::boolean, v, 0.0 }; }
   static const_value number(const double v) noexcept { return { kind::number, false, v }; }
+
+  bool is_bool() const noexcept { return type == kind::boolean; }
+  bool is_number() const noexcept { return type == kind::number; }
 };
 
-bool const_as_bool(const const_value& v) noexcept {
-  return v.type == const_value::kind::boolean ? v.b : v.n != 0.0;
-}
-
-double const_as_number(const const_value& v) noexcept {
-  return v.type == const_value::kind::boolean ? double(v.b) : v.n;
-}
-
-std::optional<const_value> try_eval_const(const system::command_block& block) {
+// Evaluates a fully constant sub-expression, or nothing when it cannot be folded without changing
+// what the script would have done. Folding happens before overload resolution, so it is restricted
+// to built-in operators over literal bools/doubles; every other case falls through to codegen.
+std::optional<const_value> try_eval_const(const system& sys, const system::command_block& block) {
   if (block.empty()) return std::nullopt;
 
   const auto name = block.name();
@@ -906,71 +899,78 @@ std::optional<const_value> try_eval_const(const system::command_block& block) {
     return std::nullopt;
   }
 
+  // A consumer overload registered under this name may compute something else entirely, or have
+  // effects. Only names owned exclusively by init_math()/init_basic_functions() are foldable.
+  if (!sys.is_builtin_function(name)) return std::nullopt;
+
   std::vector<const_value> args;
   args.reserve(block.args_count());
   for (const auto& child : block.children()) {
-    auto v = try_eval_const(child);
+    auto v = try_eval_const(sys, child);
     if (!v) return std::nullopt;
     args.push_back(*v);
   }
   if (args.empty()) return std::nullopt;
 
-  if (name == "ADD") {
+  // n-ary arithmetic blocks. The accumulator starts at the first operand rather than at 0/1 so the
+  // fold associates exactly like the emitted chain of ADD/MUL opcodes - a leading identity would
+  // turn `ADD = { -0.0 }` into +0.0.
+  if (name == "ADD" || name == "MUL") {
+    const bool product = name == "MUL";
     double r = 0.0;
-    for (const auto& v : args) r += const_as_number(v);
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (!args[i].is_number()) return std::nullopt;
+      r = i == 0 ? args[i].n : (product ? r * args[i].n : r + args[i].n);
+    }
     return const_value::number(r);
   }
 
-  if (name == "MUL") {
-    double r = 1.0;
-    for (const auto& v : args) r *= const_as_number(v);
-    return const_value::number(r);
-  }
-
-  if (name == "AND" || name == "NAND") {
-    bool r = true;
-    for (const auto& v : args) r = r && const_as_bool(v);
-    return const_value::boolean(name == "NAND" ? !r : r);
-  }
-
-  if (name == "OR" || name == "NOR") {
+  if (name == "AND" || name == "NAND" || name == "OR" || name == "NOR") {
+    const bool disjunction = name == "OR" || name == "NOR";
+    const bool negated = name == "NAND" || name == "NOR";
     bool r = false;
-    for (const auto& v : args) r = r || const_as_bool(v);
-    return const_value::boolean(name == "NOR" ? !r : r);
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (!args[i].is_bool()) return std::nullopt;
+      r = i == 0 ? args[i].b : (disjunction ? r || args[i].b : r && args[i].b);
+    }
+    return const_value::boolean(negated ? !r : r);
   }
 
   if (args.size() == 1) {
-    if (name == "unary_plus") return const_value::number(+const_as_number(args[0]));
-    if (name == "unary_minus") return const_value::number(-const_as_number(args[0]));
-    if (name == "not") return const_value::boolean(!const_as_bool(args[0]));
+    if (args[0].is_number()) {
+      if (name == "unary_plus") return const_value::number(+args[0].n);
+      if (name == "unary_minus") return const_value::number(-args[0].n);
+    }
+    if (args[0].is_bool() && name == "not") return const_value::boolean(!args[0].b);
     return std::nullopt;
   }
 
   if (args.size() != 2) return std::nullopt;
 
-  const auto l = const_as_number(args[0]);
-  const auto r = const_as_number(args[1]);
-  if (name == "+") return const_value::number(l + r);
-  if (name == "-") return const_value::number(l - r);
-  if (name == "*") return const_value::number(l * r);
-  if (name == "/") return const_value::number(l / r);
-  if (name == "%") return const_value::number(std::fmod(l, r));
-  if (name == ">") return const_value::boolean(l > r);
-  if (name == "<") return const_value::boolean(l < r);
-  if (name == ">=") return const_value::boolean(l >= r);
-  if (name == "<=") return const_value::boolean(l <= r);
-  if (name == "==") {
-    if (args[0].type == const_value::kind::boolean && args[1].type == const_value::kind::boolean)
-      return const_value::boolean(args[0].b == args[1].b);
-    return const_value::boolean(std::abs(l - r) < EPSILON);
+  if (args[0].is_number() && args[1].is_number()) {
+    const auto l = args[0].n;
+    const auto r = args[1].n;
+    if (name == "+") return const_value::number(l + r);
+    if (name == "-") return const_value::number(l - r);
+    if (name == "*") return const_value::number(l * r);
+    if (name == "/") return const_value::number(l / r);
+    if (name == "%") return const_value::number(std::fmod(l, r));
+    if (name == ">") return const_value::boolean(l > r);
+    if (name == "<") return const_value::boolean(l < r);
+    if (name == ">=") return const_value::boolean(l >= r);
+    if (name == "<=") return const_value::boolean(l <= r);
+    // Matches the runtime double comparison (raweqd), which is tolerance-based.
+    if (name == "==") return const_value::boolean(std::abs(l - r) < EPSILON);
+    if (name == "!=") return const_value::boolean(std::abs(l - r) >= EPSILON);
+    return std::nullopt;
   }
-  if (name == "!=") {
-    if (args[0].type == const_value::kind::boolean && args[1].type == const_value::kind::boolean)
-      return const_value::boolean(args[0].b != args[1].b);
-    return const_value::boolean(std::abs(l - r) >= EPSILON);
+
+  if (args[0].is_bool() && args[1].is_bool()) {
+    if (name == "and") return const_value::boolean(args[0].b && args[1].b);
+    if (name == "or") return const_value::boolean(args[0].b || args[1].b);
+    if (name == "==") return const_value::boolean(args[0].b == args[1].b);
+    if (name == "!=") return const_value::boolean(args[0].b != args[1].b);
   }
-  if (name == "and") return const_value::boolean(const_as_bool(args[0]) && const_as_bool(args[1]));
-  if (name == "or") return const_value::boolean(const_as_bool(args[0]) || const_as_bool(args[1]));
 
   return std::nullopt;
 }
@@ -985,16 +985,21 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   const auto exp_t = ctx->expected_type;
   const bool any_type_expected = type_is_any_type(exp_t);
 
+  // Integral blocks never fold: the folder works in `double`, so it cannot represent int64 exactly.
   if (override_lvalue.empty() && !type_is_integral(exp_t)) {
-    if (auto v = try_eval_const(block)) {
-      set_function_type sft(ctx, function_type::rvalue);
-      if (v->type == const_value::kind::boolean) {
-        push_basic_function(ctx, scr, basicf::pushbool, v->b);
-      } else {
-        push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(v->n));
+    if (auto v = try_eval_const(*this, block)) {
+      // The constant replaces a call whose result type the caller already checked, so it may only
+      // be emitted where a value of its own kind is what codegen would have produced anyway.
+      const bool fits = v->is_bool()
+        ? any_type_expected || type_is_bool(exp_t)
+        : any_type_expected || type_is_floating_point(exp_t);
+      if (fits) {
+        set_function_type sft(ctx, function_type::rvalue);
+        if (v->is_bool()) push_basic_function(ctx, scr, basicf::pushbool, v->b);
+        else push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(v->n));
+        setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
+        return block.size();
       }
-      setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
-      return block.size();
     }
   }
   
@@ -1512,6 +1517,7 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
     if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
 
     finalize_resource_usage(ctx, c);
+    optimize_commands(ctx, c);
   } catch (const std::exception&) {
     ctx.rpn_ctx.clear();
     ctx.script_ast_nodes.clear();

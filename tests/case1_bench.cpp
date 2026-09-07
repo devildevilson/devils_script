@@ -89,6 +89,23 @@ static double each_notable_person(city* c, const std::function<bool(handle<perso
   return val;
 }
 
+static double each_city_script(country* c, devils_script::script_function<double(city*)> fn) {
+  double val = 0.0;
+  for (auto city : c->cities) val += fn(city);
+  return val;
+}
+
+static double each_notable_person_script(city* c,
+    devils_script::script_function<bool(handle<person>)> filter,
+    devils_script::script_function<double(handle<person>)> fn) {
+  double val = 0.0;
+  for (const auto& p : c->notable_people) {
+    if (filter && !filter(p)) continue;
+    val += fn(p);
+  }
+  return val;
+}
+
 const std::string scripts[] = {
   "country.country_leader:age",
   "country = { each_city = { value = city_population } }",
@@ -117,7 +134,14 @@ static void bench(const char* name, const size_t iters, F&& f) {
   std::printf("%-24s %10.1f ns/op  (%zu iters)\n", name, total_ns / double(iters), iters);
 }
 
-int main() {
+int main(int argc, char** argv) {
+  const auto has_flag = [&](const std::string_view flag) {
+    for (int i = 1; i < argc; ++i) if (std::string_view(argv[i]) == flag) return true;
+    return false;
+  };
+  const bool script_callbacks = has_flag("--script-function");
+  // Compiles every scenario with the command peephole off, for a before/after against the default.
+  const bool no_optimize = has_flag("--no-optimize");
   person p1{ "Mary", 20, 5, nullptr, nullptr };
   person p2{ "Alaska", 13, 2, nullptr, nullptr };
   person p3{ "Alexey", 26, 7, nullptr, nullptr };
@@ -153,6 +177,7 @@ int main() {
   ds::system sys;
   sys.init_basic_functions();
   sys.init_math();
+  if (no_optimize) sys.toggle_optimizations();
 
   sys.register_function<&country::get_population>("country_population");
   sys.register_function<&country::get_gdp>("country_gdp");
@@ -171,8 +196,13 @@ int main() {
   sys.register_function<&person::add_charisma, handle<person>>("add_charisma");
   sys.register_function<&person::country, handle<person>>("country");
   sys.register_function<&person::living_in, handle<person>>("living_in");
-  sys.register_function_iter<&each_city>("each_city", { "value" });
-  sys.register_function_iter<&each_notable_person>("each_notable_person", { "filter", "value" });
+  if (script_callbacks) {
+    sys.register_function_iter<&each_city_script>("each_city", { "value" });
+    sys.register_function_iter<&each_notable_person_script>("each_notable_person", { "filter", "value" });
+  } else {
+    sys.register_function_iter<&each_city>("each_city", { "value" });
+    sys.register_function_iter<&each_notable_person>("each_notable_person", { "filter", "value" });
+  }
 
   constexpr size_t script_count = sizeof(scripts) / sizeof(scripts[0]);
 
@@ -223,23 +253,26 @@ int main() {
   std::printf("== description ==\n");
   for (size_t i = 0; i < script_count; ++i) {
     const auto cont = sys.parse<double, handle<person>>("script", scripts[i]);
-    ds::context ctx;
-    ctx.set_arg(0, p1h);
-    ctx.create_lists(&cont);
+    for (const bool sized_context : { false, true }) {
+      ds::context ctx(sized_context ? cont.max_stack : ds::context::stack_size,
+                      sized_context ? cont.max_saved : ds::context::local_vars_size);
+      ctx.set_arg(0, p1h);
+      ctx.create_lists(&cont);
 
-    char name[32];
-    std::snprintf(name, sizeof(name), "script%zu describe", i + 1);
-    bench(name, 100000, [&] {
-      ctx.clear();
-      size_t count = 0;
-      cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
-        count += 1;
-        if (entry.state == ds::container::description_value_state::value && entry.value.is<double>()) {
-          g_sink += entry.value.get<double>() * 0.0;
-        }
+      char name[48];
+      std::snprintf(name, sizeof(name), "script%zu describe%s", i + 1, sized_context ? " sized" : "");
+      bench(name, 100000, [&] {
+        ctx.clear();
+        size_t count = 0;
+        cont.describe(&ctx, [&](const ds::container::description_entry& entry) {
+          count += 1;
+          if (entry.state == ds::container::description_value_state::value && entry.value.is<double>()) {
+            g_sink += entry.value.get<double>() * 0.0;
+          }
+        });
+        return double(count);
       });
-      return double(count);
-    });
+    }
   }
 
   return 0;

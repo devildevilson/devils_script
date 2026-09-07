@@ -1,5 +1,64 @@
 #include "test_helpers.h"
 
+TEST_CASE("Stack erase preserves all following values and types") {
+  ds::context::stack_t stack(8);
+  stack.push(int64_t(10));
+  stack.push(false);
+  stack.push(2.5);
+  stack.push(std::string_view("tail"));
+  stack.erase(0);
+  REQUIRE(stack.size() == 3);
+  CHECK(stack.safe_get<bool>(0) == false);
+  CHECK(stack.is<double>(1));
+  CHECK(stack.is<std::string_view>(2));
+  if (stack.is<double>(1)) CHECK(stack.safe_get<double>(1) == 2.5);
+  if (stack.is<std::string_view>(2)) CHECK(stack.safe_get<std::string_view>(2) == "tail");
+}
+
+TEST_CASE("Typeless stack access still requires an element") {
+  ds::context::stack_t stack(1);
+  CHECK_FALSE(stack.is<ds::any_stack>());
+  CHECK_FALSE(stack.is<ds::element_view>());
+  CHECK_THROWS_AS(stack.safe_get<ds::any_stack>(), std::runtime_error);
+  CHECK_THROWS_AS(stack.safe_get<ds::element_view>(), std::runtime_error);
+  stack.push(42);
+  CHECK(stack.is<ds::any_stack>());
+  CHECK(stack.safe_get<ds::any_stack>().get<int64_t>() == 42);
+}
+
+TEST_CASE("Stack concepts reject unsupported types") {
+  CHECK_FALSE(ds::valid_stack_type<std::string>);
+  CHECK_FALSE(ds::valid_function_type<std::string(*)()>);
+  CHECK(ds::valid_stack_type<int64_t>);
+  CHECK(ds::valid_stack_type<ds::any_stack>);
+  CHECK(ds::valid_function_type<double(*)()>);
+  CHECK_FALSE(ds::valid_function_type<int>);
+}
+
+TEST_CASE("Stack checked indices reject both out of range boundaries") {
+  ds::context::stack_t stack(4);
+  stack.push(17);
+  for (const auto index : { INT64_MIN, INT64_C(-2), INT64_C(1), INT64_MAX }) {
+    CAPTURE(index);
+    CHECK_FALSE(stack.get_view(index).valid());
+    CHECK(stack.type(index).empty());
+    CHECK(stack.invalid(index));
+    CHECK_NOTHROW(stack.element(index));
+    CHECK_THROWS_AS(stack.set(index, 20), std::runtime_error);
+    CHECK_THROWS_AS(stack.safe_get<int64_t>(index), std::runtime_error);
+    CHECK_THROWS_AS(stack.safe_get<ds::any_stack>(index), std::runtime_error);
+    stack.erase(index);
+    REQUIRE(stack.size() == 1);
+    CHECK(stack.safe_get<int64_t>(0) == 17);
+  }
+  stack.set(-1, 25);
+  CHECK(stack.safe_get<int64_t>(-1) == 25);
+  stack.erase(-1);
+  CHECK(stack.size() == 0);
+  stack.erase(-1);
+  CHECK(stack.size() == 0);
+}
+
 TEST_CASE("Script basics") {
   const std::string script1 = "5";
   const std::string script2 = "5 + 5";

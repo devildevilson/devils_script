@@ -174,11 +174,36 @@ public:
     // stacks. Set before parsing to carve scripts into nesting classes with smaller budgets.
     size_t max_stack_limit;
     size_t max_saved_limit;
-    int32_t conversion_cost;
+    int64_t conversion_cost;
 
     std::vector<std::string_view> function_names;
     std::vector<int64_t> scope_stack;
     std::vector<std::string_view> stack_types;
+
+    // Command slots that carry immediate data instead of an instruction (iterator callback ranges,
+    // list_pipeline metadata). They are never executed, and the peephole must not read them as
+    // opcodes - an iterator range slot in particular holds a `jump` fp but is not a jump.
+    std::vector<size_t> data_slots;
+
+    // Every place where a compiled command index is stored inside a command argument. Recorded as
+    // codegen writes it, because some of these fields cannot be recovered afterwards: the nullable
+    // scope guard packs its target into half an argument behind a template fp that no opcode table
+    // knows, and list_pipeline stores its section bounds relative to its own command.
+    struct cmd_index_field {
+      size_t cmd;             // command whose argument holds the index
+      size_t base;            // index is stored relative to this command (SIZE_MAX = absolute)
+      uint8_t half;           // 0 = whole argument, 1 = low half of pack2, 2 = high half
+      bool zero_is_absent;    // a stored 0 means "no such section", not "command 0"
+    };
+    std::vector<cmd_index_field> cmd_index_fields;
+
+    // `context` pushes whose scope turned out to be dead: the block compiled to
+    // `context; <direct ctx read>; erase`, and the read takes the context from `context*` itself.
+    // The peephole drops the push and its unwind. `scope_slot` is the operand-stack slot the push
+    // occupied, so description nodes that named it as their scope can stop naming a slot that is no
+    // longer there. See system::optimize_commands.
+    struct dead_context_push { size_t cmd; size_t unwind; int64_t scope_slot; };
+    std::vector<dead_context_push> dead_context_pushes;
 
     // per-parse mutable scratch — moved off `system` so the registry stays const/shareable
     rpn_conversion_ctx rpn_ctx;
@@ -281,6 +306,10 @@ public:
     ftype type;
     init_fn_t init;
     container::description_node_kind description_kind = container::description_node_kind::unknown;
+    // Set for everything registered by init_math()/init_basic_functions(). Constant folding only
+    // touches names whose every overload carries this flag, so a user registration under a
+    // built-in name (which may have a different result or effects) is never folded away.
+    bool builtin = false;
   };
 
   using custom_init_fn_t = std::function<void(emitter&, const command_block&, const std::vector<std::string> &)>;
@@ -371,7 +400,7 @@ public:
   // The registry must outlive any container parsed against it. Returns nullptr when unknown.
   using script_resolver_t = std::function<const script_container*(std::string_view)>;
   enum class safety { unsafe, safe };
-  struct options { uint64_t seed; enum safety safety; err_fn error; err_fn warning; options() noexcept; };
+  struct options { uint64_t seed; enum safety safety; bool optimize; err_fn error; err_fn warning; options() noexcept; };
   system(const options &opts = options()) noexcept;
   void init_math();
   void init_basic_functions();
@@ -385,6 +414,9 @@ public:
   void register_implicit_conversion(int32_t cost = 1);
 
   bool is_arithmetic_type(const std::string_view& type) const noexcept;
+  // True when `name` is registered and every one of its overloads came from init_math() /
+  // init_basic_functions(). Constant folding uses this as its permission check.
+  bool is_builtin_function(const std::string_view& name) const;
   std::string_view arithmetic_block_for(const std::string_view& type) const noexcept;
   std::optional<int32_t> implicit_conversion_cost(const std::string_view& from, const std::string_view& to) const;
   bool can_convert_implicitly(const std::string_view& from, const std::string_view& to) const;
@@ -392,6 +424,10 @@ public:
 
   void toggle_safety();
   bool safety() const;
+  // Peephole optimization of the compiled command stream. On by default; turning it off compiles the
+  // literal lowering, which is what the optimizer is differentially tested against.
+  void toggle_optimizations();
+  bool optimizations() const;
   void raise_error(const std::string &msg) const;
   void raise_warning(const std::string& msg) const;
   uint64_t get_seed() const;
@@ -539,6 +575,21 @@ public:
   size_t push_string(parse_ctx* ctx, container* scr, const std::string_view &str) const;
   script_container::string_ref store_string(container* scr, const std::string_view& str) const;
   void compact_source_storage(container* scr) const;
+
+  // Records that command `cmd` stores a compiled command index in its argument, so the peephole can
+  // relocate it. `base` is SIZE_MAX for an absolute index, or the command the index is relative to.
+  void record_cmd_index(parse_ctx* ctx, const size_t cmd, const uint8_t half = 0,
+                        const size_t base = SIZE_MAX, const bool zero_is_absent = false) const;
+  // Marks `count` slots starting at `first` as immediate data rather than instructions.
+  void record_data_slots(parse_ctx* ctx, const size_t first, const size_t count) const;
+  // Records a `context` push at `cmd`, unwound by the `erase` at `unwind` and occupying operand-stack
+  // slot `scope_slot`, whose scope turned out to be dead (see parse_context::dead_context_push).
+  void record_dead_context_push(parse_ctx* ctx, const size_t cmd, const size_t unwind, const int64_t scope_slot) const;
+
+  // Post-codegen peephole over the finished command stream. Fuses scope unwinds, drops dead context
+  // pushes and jumps that fall through, then relocates every stored command index and the
+  // description ranges. Runs before build_description_index(); a no-op when optimizations are off.
+  void optimize_commands(parse_ctx& ctx, container& scr) const;
   std::string_view static_string_arg(const command_block& block, const std::string_view& name) const;
   size_t push_enum_literal(parse_ctx* ctx, container* scr, const std::string_view& enum_type, const std::string_view& value) const;
   std::optional<int64_t> resolve_enum(const std::string_view& enum_type, const std::string_view& value) const;
@@ -554,10 +605,16 @@ public:
   void configure_parser(tavl::parser& p) const;
   void scope_exit(parse_ctx* ctx, container* scr, const size_t count) const;
 private:
+  struct conversion_path {
+    int32_t cost;
+    std::vector<const conversion_data*> edges;
+  };
+  std::optional<conversion_path> find_conversion_path(std::string_view from, std::string_view to) const;
   const command_data* resolve_function(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& name) const;
 
   uint64_t seed;
   enum safety safet;
+  bool optimize;
   err_fn error;
   err_fn warning;
   // function name first; overloads are resolved by scope, argument types and conversion cost
@@ -566,6 +623,9 @@ private:
   std::unordered_map<std::string, std::vector<conversion_data>> implicit_conversions;
   std::unordered_map<std::string, std::function<std::optional<int64_t>(std::string_view)>> enums;
   script_resolver_t script_resolver;
+  // Raised only for the duration of init_math() / init_basic_functions(); stamped onto every
+  // command_data they register so folding can tell built-ins from user registrations.
+  bool registering_builtins = false;
 };
 
 }

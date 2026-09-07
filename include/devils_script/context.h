@@ -41,7 +41,7 @@ struct context {
     std::vector<stack_element> _data;
     std::vector<std::string_view> _types;
 
-    stack_t(const size_t max) noexcept;
+    stack_t(const size_t max);
 
     template <typename T> requires(valid_stack_type<T>)
     bool is() const;
@@ -78,6 +78,9 @@ struct context {
 
     void erase();
     void erase(const int64_t index);
+    // Removes `count` slots starting at `index` in one shift. Equivalent to `count` descending
+    // `erase(index + count - 1) ... erase(index)` calls, which is what scope unwinding emits.
+    void erase_range(const int64_t index, const size_t count);
     void resize(const size_t size);
     stack_element element() const;
     stack_element element(const int64_t index) const;
@@ -86,9 +89,6 @@ struct context {
     size_t size() const;
     void push(const std::string_view &type, const stack_element &el);
     bool invalid(const int64_t index) const;
-  private:
-    template <typename T> requires(valid_stack_type<T>)
-    auto rawget(const size_t index) const -> final_stack_el_t<T>*;
   };
 
   stack_t stack;
@@ -115,6 +115,11 @@ struct context {
   const script_container* current_script;
   std::function<void(const std::string&)> trace;
 
+  // Internal evaluation mode propagated through script callbacks and execute.
+  bool describing = false;
+  struct description_unavailable : std::runtime_error {
+    description_unavailable() : std::runtime_error("execute is unavailable during describe") {}
+  };
   any_stack _return_value;
 
   std::vector<std::vector<stack_element>> lists;
@@ -123,11 +128,11 @@ struct context {
   // parse-time `script_container::max_stack` / `max_saved` (or a nesting-class bucket). The argument
   // stack stays at the fixed `script_arguments_size`. Any non-zero seed is valid; containers can
   // override it with their own parse seed.
-  context(const size_t stack_capacity, const size_t saved_capacity) noexcept;
+  context(const size_t stack_capacity, const size_t saved_capacity);
 
   // Default sizes (DEVILS_SCRIPT_DEFAULT_STACK_SIZE / local_vars_size); the parse-time stack/saved
   // limits in parse_context default to these too, so a default script fits a default context.
-  context() noexcept;
+  context();
 
   template <typename T> requires(valid_stack_type<T>)
   bool is_arg(const size_t index) const;
@@ -177,7 +182,7 @@ template <typename T> requires(valid_stack_type<T>)
 bool context::stack_t::is() const {
   using basic_T = final_stack_el_t<T>;
   if constexpr (is_typeless_v<basic_T>) {
-    return true;
+    return _size > 0;
   } else if constexpr (std::is_pointer_v<basic_T>) {
     using no_ptr_t = std::remove_cvref_t<std::remove_pointer_t<basic_T>>;
     return _size > 0 && (_types[_size - 1] == utils::type_name<no_ptr_t*>() || _types[_size - 1] == utils::type_name<const no_ptr_t*>());
@@ -250,7 +255,7 @@ template <typename T> requires(valid_stack_type<T>)
 void context::stack_t::set(const int64_t index, const T& val) {
   using basic_T = final_stack_el_t<T>;
   const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  if (final_index >= int64_t(_size)) throw std::runtime_error("Stack overflow");
+  if (final_index < 0 || final_index >= int64_t(_size)) throw std::runtime_error("Stack index out of range");
   if constexpr (is_typeless_v<basic_T>) {
     memcpy(_data[final_index].mem, val._mem, MAXIMUM_STACK_VAL_SIZE);
     _types[final_index] = val.type();
@@ -279,13 +284,6 @@ auto context::stack_t::safe_pop() -> final_stack_el_t<T> {
   if constexpr (is_typeless_v<basic_T>) {
     return basic_T(_data[_size].mem, _types[_size]);
   } else return _data[_size].template get<basic_T>();
-}
-
-template <typename T> requires(valid_stack_type<T>)
-auto context::stack_t::rawget(const size_t index) const -> final_stack_el_t<T>* {
-  using basic_T = final_stack_el_t<T>;
-  const int64_t final_index = index >= 0 ? index : int64_t(_size) + index;
-  return final_index < int64_t(_size) ? _data[final_index].template rawget<basic_T>() : nullptr;
 }
 
 template <typename T> requires(valid_stack_type<T>)

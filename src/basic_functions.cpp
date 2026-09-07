@@ -437,6 +437,12 @@ int64_t erase(int64_t arg, context* ctx, const script_container*) {
   return -1;
 }
 
+int64_t erase_range(int64_t arg, context* ctx, const script_container*) {
+  const auto [first, count] = unpack2(arg);
+  ctx->stack.erase_range(int64_t(first) + int64_t(ctx->frame_base), size_t(count));
+  return -int64_t(count);
+}
+
 int64_t pushcurrent(int64_t, context* ctx, const script_container*) {
   ctx->stack.push(ctx->stack.get_view());
   return 1;
