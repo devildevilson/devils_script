@@ -15,6 +15,10 @@ option(DS_BUILD_EXAMPLES "Build examples for devils_script" ON)
 # ISA for auto-vectorizing devils_script's own sources. Applied PRIVATE; not forced on
 # consumers (they pick their own arch). No SIMD intrinsics in headers, so no ABI impact.
 include(cmake/Architecture.cmake)
+# Width of the language's own numbers. OFF: int64/double. ON: int32/float. This changes the
+# layout of stack values and the meaning of the public accessors, so it propagates PUBLIC - a
+# consumer has to see the same setting the library was built with.
+option(DS_32BIT "Use 32-bit script numbers (int32_t / float)" OFF)
 
 # MSVC runtime: default to the DLL runtime (replaces the hand-written /MD /MDd). Guarded so a
 # consumer embedding devils_script can pick the static runtime instead.
@@ -111,6 +115,7 @@ add_library(devils_script STATIC ${SRC_LIST} ${HDR_LIST})
 target_link_libraries(devils_script PRIVATE devils_script_options)
 target_link_libraries(devils_script PUBLIC tavl)
 target_compile_features(devils_script PUBLIC cxx_std_20)
+target_compile_definitions(devils_script PUBLIC DEVILS_SCRIPT_32BIT=$<BOOL:${DS_32BIT}>)
 # MSVC: the /GL object code requires /LTCG when the archive is created.
 set_target_properties(devils_script PROPERTIES
   STATIC_LIBRARY_OPTIONS "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release,MinSizeRel,RelWithDebInfo>>:/LTCG>"
@@ -138,6 +143,7 @@ if (DS_BUILD_TESTS)
   add_executable (devils_script_tests
     tests/audit.cpp
     tests/optimizer.cpp
+    tests/numbers.cpp
     tests/main.cpp
     tests/basics.cpp
     tests/statements.cpp
@@ -162,6 +168,23 @@ if (DS_BUILD_TESTS)
   add_test(NAME devils_script_architecture COMMAND ${CMAKE_COMMAND}
     -DDS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/architecture.cmake)
+
+  # The 32-bit configuration is compiled and run as its own executable: the main suite pins 64-bit
+  # values, so it cannot double as the check that the narrow build still holds its numeric contract.
+  add_test(NAME devils_script_bits32_configure COMMAND ${CMAKE_COMMAND}
+    -S ${CMAKE_CURRENT_SOURCE_DIR}/tests/bits32
+    -B ${CMAKE_CURRENT_BINARY_DIR}/bits32
+    -DCMAKE_BUILD_TYPE=$<IF:$<CONFIG:Debug>,Debug,Release>
+    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+    -DDS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+    -DTAVL_SOURCE_DIR=${tavl_SOURCE_DIR}
+    -DREFLECT_SOURCE_DIR=${reflect_SOURCE_DIR}
+    -DTAVL_LIBRARY=$<TARGET_FILE:tavl>)
+  add_test(NAME devils_script_bits32_build COMMAND ${CMAKE_COMMAND}
+    --build ${CMAKE_CURRENT_BINARY_DIR}/bits32)
+  add_test(NAME devils_script_bits32 COMMAND ${CMAKE_CURRENT_BINARY_DIR}/bits32/devils_script_bits32)
+  set_tests_properties(devils_script_bits32_build PROPERTIES DEPENDS devils_script_bits32_configure)
+  set_tests_properties(devils_script_bits32 PROPERTIES DEPENDS devils_script_bits32_build)
 
 
   add_executable (devils_script_benchs tests/case1_bench.cpp)

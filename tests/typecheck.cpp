@@ -257,11 +257,27 @@ TEST_CASE("Arithmetic operators for registered numeric-like types") {
       sys.register_function<&i64_d>("d");
       sys.register_function<&i64_e>("e");
 
-      const auto cont = sys.parse<int64_t, void>("script", "a + b * c - d / e");
+      // Integer operands keep the integer operators all the way through.
+      const auto cont = sys.parse<int64_t, void>("script", "a + b * c - d * e");
       ds::context ctx;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<int64_t>());
-      CHECK(ctx.get_return<int64_t>() == 152);
+      CHECK(ctx.get_return<int64_t>() == -40);
+
+      // `/` is the exception: it has no integer overload, so both operands convert and the result
+      // is floating-point. Getting back to an integer is explicit.
+      const auto divided = sys.parse<double, void>("script", "a + b * c - d / e");
+      ds::context dctx;
+      divided.process(&dctx);
+      REQUIRE(dctx.is_return<double>());
+      CHECK(dctx.get_return<double>() == 152.0);
+
+      const auto narrowed = sys.parse<int64_t, void>("script", "to_int = { d / e }");
+      ds::context nctx;
+      narrowed.process(&nctx);
+      REQUIRE(nctx.is_return<int64_t>());
+      CHECK(nctx.get_return<int64_t>() == 8);
+      CHECK_THROWS(sys.parse<int64_t, void>("script", "d / e"));
     }
 
     {

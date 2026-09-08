@@ -671,7 +671,7 @@ int64_t useriter_condition(int64_t val, context* ctx, const script_container* sc
 
   size_t size = 1;
   if constexpr (has_count) {
-    size = size_t(ctx->stack.safe_pop<double>());
+    size = size_t(ctx->stack.safe_pop<script_float_t>());
   }
 
   const size_t curins = ctx->current_index;
@@ -680,7 +680,7 @@ int64_t useriter_condition(int64_t val, context* ctx, const script_container* sc
   const size_t end = scr->cmds[jumpins].arg;
   auto view = container_view(scr, start, end);
 
-  double sum = 0;
+  script_float_t sum = 0;
   size_t counter = 0;
   const auto in_f = [&] (input_scope s) -> bool {
     ctx->stack.push(s);
@@ -725,7 +725,7 @@ int64_t useriter_numeric(int64_t val, context* ctx, const script_container* scr)
   const size_t end = scr->cmds[jumpins].arg;
   auto view = container_view(scr, start, end);
 
-  double sum = 0;
+  script_float_t sum = 0;
   const auto in_f = [&] (input_scope s) -> bool {
     ctx->stack.push(s);
     const size_t cursize = ctx->stack.size();
@@ -734,7 +734,7 @@ int64_t useriter_numeric(int64_t val, context* ctx, const script_container* scr)
 
     if (cursize+1 == ctx->stack.size()) scr->error_at(ctx, "Error?");
 
-    const double val = ctx->stack.safe_pop<double>();
+    const script_float_t val = ctx->stack.safe_pop<script_float_t>();
     sum += val;
     ctx->stack.erase();
     return true;
@@ -926,7 +926,7 @@ int64_t useriter_condition_unsafe(int64_t val, context* ctx, const script_contai
 
   size_t size = 1;
   if constexpr (has_count) {
-    size = size_t(ctx->stack.pop<double>());
+    size = size_t(ctx->stack.pop<script_float_t>());
   }
 
   const size_t curins = ctx->current_index;
@@ -935,7 +935,7 @@ int64_t useriter_condition_unsafe(int64_t val, context* ctx, const script_contai
   const size_t end = scr->cmds[jumpins].arg;
   auto view = container_view(scr, start, end);
 
-  double sum = 0;
+  script_float_t sum = 0;
   size_t counter = 0;
   const auto in_f = [&](input_scope s) -> bool {
     ctx->stack.push(s);
@@ -980,7 +980,7 @@ int64_t useriter_numeric_unsafe(int64_t val, context* ctx, const script_containe
   const size_t end = scr->cmds[jumpins].arg;
   auto view = container_view(scr, start, end);
 
-  double sum = 0;
+  script_float_t sum = 0;
   const auto in_f = [&](input_scope s) -> bool {
     ctx->stack.push(s);
     const size_t cursize = ctx->stack.size();
@@ -989,7 +989,7 @@ int64_t useriter_numeric_unsafe(int64_t val, context* ctx, const script_containe
 
     if (cursize + 1 == ctx->stack.size()) scr->error_at(ctx, "Error?");
 
-    const double val = ctx->stack.pop<double>();
+    const script_float_t val = ctx->stack.pop<script_float_t>();
     sum += val;
     ctx->stack.erase();
     return true;
@@ -1027,8 +1027,8 @@ int64_t compute_count_and_mul(int64_t arg, context* ctx, const script_container*
     count = std::invoke(f);
   }
 
-  const double v = ctx->stack.safe_pop<double>();
-  ctx->stack.push(v * double(count));
+  const script_float_t v = ctx->stack.safe_pop<script_float_t>();
+  ctx->stack.push(v * script_float_t(count));
   return 0;
 }
 

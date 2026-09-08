@@ -181,33 +181,33 @@ int64_t invb(int64_t, context* ctx, const script_container*) {
 }
 
 int64_t sum(int64_t, context* ctx, const script_container*) {
-  const double n2 = ctx->stack.safe_pop<double>();
-  const double n1 = ctx->stack.safe_pop<double>();
+  const script_float_t n2 = ctx->stack.safe_pop<script_float_t>();
+  const script_float_t n1 = ctx->stack.safe_pop<script_float_t>();
   ctx->stack.push(n1 + n2);
   return -1;
 }
 
 int64_t mul(int64_t, context* ctx, const script_container*) {
-  const double n2 = ctx->stack.safe_pop<double>();
-  const double n1 = ctx->stack.safe_pop<double>();
+  const script_float_t n2 = ctx->stack.safe_pop<script_float_t>();
+  const script_float_t n1 = ctx->stack.safe_pop<script_float_t>();
   ctx->stack.push(n1 * n2);
   return -1;
 }
 
 int64_t neg(int64_t, context* ctx, const script_container*) {
-  const double n1 = ctx->stack.safe_pop<double>();
+  const script_float_t n1 = ctx->stack.safe_pop<script_float_t>();
   ctx->stack.push(-n1);
   return 0;
 }
 
 int64_t pos(int64_t, context* ctx, const script_container*) {
-  const double n1 = ctx->stack.safe_pop<double>();
+  const script_float_t n1 = ctx->stack.safe_pop<script_float_t>();
   ctx->stack.push(+n1);
   return 0;
 }
 
 int64_t invd(int64_t, context* ctx, const script_container*) {
-  const double n1 = ctx->stack.safe_pop<double>();
+  const script_float_t n1 = ctx->stack.safe_pop<script_float_t>();
   ctx->stack.push(1.0 / n1);
   return 0;
 }
@@ -232,8 +232,8 @@ int64_t cmplessd2(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.safe_get<double>(id1);
-  const auto& v2 = ctx->stack.safe_get<double>(id2);
+  const auto& v1 = ctx->stack.safe_get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.safe_get<script_float_t>(id2);
   ctx->stack.push(v1 < v2);
   return 1;
 }
@@ -242,8 +242,8 @@ int64_t cmplesseqd2(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.safe_get<double>(id1);
-  const auto& v2 = ctx->stack.safe_get<double>(id2);
+  const auto& v1 = ctx->stack.safe_get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.safe_get<script_float_t>(id2);
   ctx->stack.push(v1 <= v2);
   return 1;
 }
@@ -252,8 +252,8 @@ int64_t sumsetstack(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.safe_get<double>(id1);
-  const auto& v2 = ctx->stack.safe_get<double>(id2);
+  const auto& v1 = ctx->stack.safe_get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.safe_get<script_float_t>(id2);
   ctx->stack.set(id1, v1 + v2);
   return 0;
 }
@@ -262,8 +262,8 @@ int64_t mulsetstack(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.safe_get<double>(id1);
-  const auto& v2 = ctx->stack.safe_get<double>(id2);
+  const auto& v1 = ctx->stack.safe_get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.safe_get<script_float_t>(id2);
   ctx->stack.set(id1, v1 * v2);
   return 0;
 }
@@ -282,33 +282,33 @@ int64_t invb_unsafe(int64_t, context* ctx, const script_container*) {
 }
 
 int64_t sum_unsafe(int64_t, context* ctx, const script_container*) {
-  const double n2 = ctx->stack.pop<double>();
-  const double n1 = ctx->stack.pop<double>();
+  const script_float_t n2 = ctx->stack.pop<script_float_t>();
+  const script_float_t n1 = ctx->stack.pop<script_float_t>();
   ctx->stack.push(n1 + n2);
   return -1;
 }
 
 int64_t mul_unsafe(int64_t, context* ctx, const script_container*) {
-  const double n2 = ctx->stack.pop<double>();
-  const double n1 = ctx->stack.pop<double>();
+  const script_float_t n2 = ctx->stack.pop<script_float_t>();
+  const script_float_t n1 = ctx->stack.pop<script_float_t>();
   ctx->stack.push(n1 * n2);
   return -1;
 }
 
 int64_t neg_unsafe(int64_t, context* ctx, const script_container*) {
-  const double n1 = ctx->stack.pop<double>();
+  const script_float_t n1 = ctx->stack.pop<script_float_t>();
   ctx->stack.push(-n1);
   return 0;
 }
 
 int64_t pos_unsafe(int64_t, context* ctx, const script_container*) {
-  const double n1 = ctx->stack.pop<double>();
+  const script_float_t n1 = ctx->stack.pop<script_float_t>();
   ctx->stack.push(+n1);
   return 0;
 }
 
 int64_t invd_unsafe(int64_t, context* ctx, const script_container*) {
-  const double n1 = ctx->stack.pop<double>();
+  const script_float_t n1 = ctx->stack.pop<script_float_t>();
   ctx->stack.push(1.0 / n1);
   return 0;
 }
@@ -333,8 +333,8 @@ int64_t cmplessd2_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.get<double>(id1);
-  const auto& v2 = ctx->stack.get<double>(id2);
+  const auto& v1 = ctx->stack.get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.get<script_float_t>(id2);
   ctx->stack.push(v1 < v2);
   return 1;
 }
@@ -343,8 +343,8 @@ int64_t cmplesseqd2_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.get<double>(id1);
-  const auto& v2 = ctx->stack.get<double>(id2);
+  const auto& v1 = ctx->stack.get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.get<script_float_t>(id2);
   ctx->stack.push(v1 <= v2);
   return 1;
 }
@@ -353,8 +353,8 @@ int64_t sumsetstack_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.get<double>(id1);
-  const auto& v2 = ctx->stack.get<double>(id2);
+  const auto& v1 = ctx->stack.get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.get<script_float_t>(id2);
   ctx->stack.set(id1, v1 + v2);
   return 0;
 }
@@ -363,8 +363,8 @@ int64_t mulsetstack_unsafe(int64_t arg, context* ctx, const script_container*) {
   const auto [a, b] = unpack2(arg);
   const int64_t fb = int64_t(ctx->frame_base);
   const int64_t id1 = a + fb, id2 = b + fb;
-  const auto& v1 = ctx->stack.get<double>(id1);
-  const auto& v2 = ctx->stack.get<double>(id2);
+  const auto& v1 = ctx->stack.get<script_float_t>(id1);
+  const auto& v2 = ctx->stack.get<script_float_t>(id2);
   ctx->stack.set(id1, v1 * v2);
   return 0;
 }
@@ -375,12 +375,12 @@ int64_t pushbool(int64_t arg, context* ctx, const script_container*) {
 }
 
 int64_t pushvalue(int64_t arg, context* ctx, const script_container*) {
-  ctx->stack.push(std::bit_cast<double>(arg));
+  ctx->stack.push(unpack_float(arg));
   return 1;
 }
 
 int64_t pushint(int64_t arg, context* ctx, const script_container*) {
-  ctx->stack.push(arg);
+  ctx->stack.push(script_int_t(arg));
   return 1;
 }
 
@@ -612,7 +612,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     }
 
     case container::list_pipeline_kind::count: {
-      ctx->stack.push(double(list.size()));
+      ctx->stack.push(script_float_t(list.size()));
       break;
     }
 
@@ -649,15 +649,15 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     }
 
     case container::list_pipeline_kind::count_if: {
-      double ret = 0.0;
-      for (auto& item : list) ret += double(run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, item));
+      script_float_t ret = 0;
+      for (auto& item : list) ret += script_float_t(run_list_callback<bool>(ctx, scr, value_start, value_end, input_type, item));
       ctx->stack.push(ret);
       break;
     }
 
     case container::list_pipeline_kind::sum: {
-      double ret = 0.0;
-      for (auto& item : list) ret += run_list_callback<double>(ctx, scr, value_start, value_end, input_type, item);
+      script_float_t ret = 0;
+      for (auto& item : list) ret += run_list_callback<script_float_t>(ctx, scr, value_start, value_end, input_type, item);
       ctx->stack.push(ret);
       break;
     }
@@ -666,11 +666,11 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
     case container::list_pipeline_kind::max:
     case container::list_pipeline_kind::average: {
       bool found = false;
-      double ret = 0.0;
-      double sum = 0.0;
+      script_float_t ret = 0;
+      script_float_t sum = 0;
       size_t count = 0;
       for (auto& item : list) {
-        const double val = run_list_callback<double>(ctx, scr, value_start, value_end, input_type, item);
+        const script_float_t val = run_list_callback<script_float_t>(ctx, scr, value_start, value_end, input_type, item);
         if (!found) { ret = val; found = true; }
         else if (kind == container::list_pipeline_kind::min) ret = std::min(ret, val);
         else if (kind == container::list_pipeline_kind::max) ret = std::max(ret, val);
@@ -681,7 +681,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
         const auto def = run_default_callback(ctx, scr, default_start, default_end);
         ctx->stack.push(def);
       } else {
-        ctx->stack.push(kind == container::list_pipeline_kind::average ? sum / double(count) : ret);
+        ctx->stack.push(kind == container::list_pipeline_kind::average ? sum / script_float_t(count) : ret);
       }
       break;
     }

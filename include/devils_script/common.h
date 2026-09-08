@@ -37,6 +37,38 @@ void store_stack_bytes(char* mem, const T& value) noexcept {
 }
 }
 
+// The width of the language's own numbers. Every integer a script computes with is `script_int_t`
+// and every floating-point value is `script_float_t`; nothing else in the library picks a width for
+// script data. Define DEVILS_SCRIPT_32BIT=1 for the whole build - it changes the layout of stack
+// values and the meaning of the public accessors, so a consumer must be compiled with the same
+// setting as the library (the CMake option propagates it PUBLIC).
+//
+// The `command::arg` field stays 64-bit either way: it carries command indices and packed index
+// pairs, not script data.
+#ifndef DEVILS_SCRIPT_32BIT
+#define DEVILS_SCRIPT_32BIT 0
+#endif
+
+#if DEVILS_SCRIPT_32BIT
+using script_int_t = int32_t;
+using script_float_t = float;
+#else
+using script_int_t = int64_t;
+using script_float_t = double;
+#endif
+
+// The bit pattern of a script float, widened into a command argument and back. Going through the
+// unsigned type of the matching width keeps the round-trip exact in both configurations.
+using script_float_bits_t = std::conditional_t<sizeof(script_float_t) == sizeof(int64_t), int64_t, int32_t>;
+using script_float_ubits_t = std::make_unsigned_t<script_float_bits_t>;
+
+constexpr int64_t pack_float(const script_float_t val) noexcept {
+  return int64_t(uint64_t(script_float_ubits_t(std::bit_cast<script_float_bits_t>(val))));
+}
+constexpr script_float_t unpack_float(const int64_t arg) noexcept {
+  return std::bit_cast<script_float_t>(script_float_bits_t(script_float_ubits_t(uint64_t(arg))));
+}
+
 constexpr int devils_script_version_major = 1;
 constexpr int devils_script_version_minor = 2;
 constexpr int devils_script_version_patch = 0;
@@ -110,22 +142,24 @@ constexpr std::string_view devils_script_version = "1.2.0";
 
 
 
+// Any C++ integer a consumer registers becomes the language's integer type, any floating-point type
+// becomes the language's floating-point type. This is the single place the widths are applied.
 template <typename T>
 using final_stack_el_t = std::conditional_t<
   utils::is_void_v<T>, utils::void_t,
   std::conditional_t<
     std::is_same_v<bool, T>, bool,
     std::conditional_t<
-      std::is_integral_v<T>, int64_t,
+      std::is_integral_v<T>, script_int_t,
       std::conditional_t<
-        std::is_floating_point_v<T>, double,
+        std::is_floating_point_v<T>, script_float_t,
   std::remove_cvref_t<T>
 >>>>;
 
 template <typename T>
 using script_stack_el_t = std::conditional_t<
   std::is_enum_v<std::remove_cvref_t<T>>,
-  int64_t,
+  script_int_t,
   final_stack_el_t<T>
 >;
 

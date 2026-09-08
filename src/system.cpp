@@ -15,8 +15,8 @@ namespace devils_script {
 bool type_is_ignore(const std::string_view& type) noexcept { return type == utils::type_name<ignore_value>(); }
 bool type_is_void(const std::string_view& type) noexcept { return type == utils::type_name<void>() || type == utils::type_name<utils::void_t>(); }
 bool type_is_bool(const std::string_view& type) noexcept { return type == utils::type_name<bool>(); }
-bool type_is_integral(const std::string_view& type) noexcept { return type == utils::type_name<int64_t>(); }
-bool type_is_floating_point(const std::string_view& type) noexcept { return type == utils::type_name<double>(); }
+bool type_is_integral(const std::string_view& type) noexcept { return type == utils::type_name<script_int_t>(); }
+bool type_is_floating_point(const std::string_view& type) noexcept { return type == utils::type_name<script_float_t>(); }
 bool type_is_fundamental(const std::string_view& type) noexcept { return type_is_integral(type) || type_is_floating_point(type); }
 bool type_is_string(const std::string_view& type) noexcept { return type == utils::type_name<std::string_view>(); }
 bool type_is_object(const std::string_view& type) noexcept { return !type_is_ignore(type) && !type_is_void(type) && !type_is_bool(type) && !type_is_fundamental(type) && !type_is_string(type); }
@@ -119,13 +119,13 @@ bool as_bool(const std::string_view& str) noexcept {
   return str == "true";
 }
 
-bool is_number(const std::string_view& str, double& val) noexcept {
+bool is_number(const std::string_view& str, script_float_t& val) noexcept {
   const auto last = str.data() + str.size();
   const auto [ptr, ec] = std::from_chars(str.data(), last, val);
   return ec == std::errc() && ptr == last;
 }
 
-bool is_integer(const std::string_view& str, int64_t& val) noexcept {
+bool is_integer(const std::string_view& str, script_int_t& val) noexcept {
   const auto last = str.data() + str.size();
   const auto [ptr, ec] = std::from_chars(str.data(), last, val);
   return ec == std::errc() && ptr == last;
@@ -242,9 +242,9 @@ system::description_placeholder::~description_placeholder() noexcept { ctx->desc
 using p_t = prng::xoshiro256starstar;
 system::options::options() noexcept : seed(1), safety(safety::safe), optimize(true), error([](const std::string& msg) { throw std::runtime_error(msg); }), warning([](const std::string& msg) { std::cout << "WARN: " << msg << "\n"; }) {}
 system::system(const options& opts) noexcept : seed(opts.seed), safet(opts.safety), optimize(opts.optimize), error(opts.error), warning(opts.warning) {
-  register_arithmetic_type<int64_t>("ADD", 10);
-  register_arithmetic_type<double>("ADD", 20);
-  register_implicit_conversion<int64_t, double>(1);
+  register_arithmetic_type<script_int_t>("ADD", 10);
+  register_arithmetic_type<script_float_t>("ADD", 20);
+  register_implicit_conversion<script_int_t, script_float_t>(1);
 }
 
 void system::toggle_safety() { this->safet = static_cast<enum safety>(!static_cast<bool>(this->safet)); }
@@ -415,6 +415,7 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
     container scr;
     int64_t cost = 0;
     int64_t rank = 0;
+    bool exact_return = false;
     size_t count = 0;
   };
 
@@ -451,10 +452,22 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
         const auto arith = arithmetic_types.find(std::string(arg_type));
         rank += arith == arithmetic_types.end() ? 1000 : arith->second.priority;
       }
-      if (!best.has_value() || cost < best->cost || (cost == best->cost && rank < best->rank)) {
-        best = candidate_result{ &data, std::move(test_ctx), std::move(test_scr), cost, rank, count };
+      // `rank` prefers the narrower arithmetic type on a tie, which is the right default when every
+      // operand's type is known. It is the wrong one as soon as an operand is dynamically typed
+      // (`any_stack` out of value_or, a list element, a script argument): picking the narrow overload
+      // there does not just choose an implementation, it asserts a runtime type nothing established.
+      // So a candidate that already returns what this block expects wins the tie first - it needs no
+      // conversion and imposes nothing.
+      const bool exact_return = !type_is_void(ctx->expected_type) && data.return_type == ctx->expected_type;
+      const auto better = [&] {
+        if (cost != best->cost) return cost < best->cost;
+        if (exact_return != best->exact_return) return exact_return;
+        return rank < best->rank;
+      };
+      if (!best.has_value() || better()) {
+        best = candidate_result{ &data, std::move(test_ctx), std::move(test_scr), cost, rank, exact_return, count };
         ambiguous = false;
-      } else if (cost == best->cost && rank == best->rank) {
+      } else if (cost == best->cost && exact_return == best->exact_return && rank == best->rank) {
         ambiguous = true;
       }
     } catch (const std::exception& ex) {
@@ -592,7 +605,7 @@ void system::setup_block_description(
   const size_t index = scr->cmds.size()-1;
   size_t cmd_start = initial_cmd_start == SIZE_MAX ? index : initial_cmd_start;
   if (kind == container::description_node_kind::unknown) {
-    double number = 0.0;
+    script_float_t number = 0;
     if (text::is_bool(token) || text::is_number(token, number)) {
       kind = container::description_node_kind::literal;
     } else if (token == "condition" || token == "value" || token == "weight") {
@@ -869,25 +882,40 @@ size_t system::push_enum_literal(parse_ctx* ctx, container* scr, const std::stri
 
 namespace {
 
-// A folded compile-time constant. Kinds are kept strictly apart: the emitted command stream has no
-// implicit bool<->double step of its own, so the folder must not invent one either. Anything that
-// would need a conversion (or an overload the folder cannot see) is left to normal codegen.
+// A folded compile-time constant. The three kinds are kept strictly apart: the emitted command
+// stream has no implicit conversion of its own, so the folder must not invent one either. Anything
+// that would need a conversion the compiler did not choose, or an overload the folder cannot see, is
+// left to normal codegen.
 struct const_value {
-  enum class kind { boolean, number };
+  enum class kind { boolean, integer, number };
   kind type;
   bool b = false;
-  double n = 0.0;
+  script_int_t i = 0;
+  script_float_t n = 0;
 
-  static const_value boolean(const bool v) noexcept { return { kind::boolean, v, 0.0 }; }
-  static const_value number(const double v) noexcept { return { kind::number, false, v }; }
+  static const_value boolean(const bool v) noexcept { return { kind::boolean, v, 0, 0 }; }
+  static const_value integer(const script_int_t v) noexcept { return { kind::integer, false, v, 0 }; }
+  static const_value number(const script_float_t v) noexcept { return { kind::number, false, 0, v }; }
 
   bool is_bool() const noexcept { return type == kind::boolean; }
+  bool is_integer() const noexcept { return type == kind::integer; }
   bool is_number() const noexcept { return type == kind::number; }
+  bool is_numeric() const noexcept { return type != kind::boolean; }
+  // Mixed integer/floating operands make the compiler convert the integer side, so the folder reads
+  // the same value the emitted `convert<int64_t, double>` would have produced.
+  script_float_t as_float() const noexcept { return type == kind::integer ? script_float_t(i) : n; }
 };
+
+// Integer arithmetic wraps, matching rawaddi/rawsubi/rawmuli at runtime. Going through the unsigned
+// type keeps the fold itself free of the undefined behaviour it is modelling.
+using script_uint_t = std::make_unsigned_t<script_int_t>;
+script_int_t wrap_add(const script_int_t a, const script_int_t b) noexcept { return script_int_t(script_uint_t(a) + script_uint_t(b)); }
+script_int_t wrap_sub(const script_int_t a, const script_int_t b) noexcept { return script_int_t(script_uint_t(a) - script_uint_t(b)); }
+script_int_t wrap_mul(const script_int_t a, const script_int_t b) noexcept { return script_int_t(script_uint_t(a) * script_uint_t(b)); }
 
 // Evaluates a fully constant sub-expression, or nothing when it cannot be folded without changing
 // what the script would have done. Folding happens before overload resolution, so it is restricted
-// to built-in operators over literal bools/doubles; every other case falls through to codegen.
+// to built-in operators over literal bools, integers and doubles; every other case falls through.
 std::optional<const_value> try_eval_const(const system& sys, const system::command_block& block) {
   if (block.empty()) return std::nullopt;
 
@@ -895,7 +923,10 @@ std::optional<const_value> try_eval_const(const system& sys, const system::comma
   if (block.args_count() == 0 && block.size() == 1) {
     if (block.string_literal()) return std::nullopt;
     if (text::is_bool(name)) return const_value::boolean(text::as_bool(name));
-    if (double v = 0.0; text::is_number(name, v)) return const_value::number(v);
+    // Same order as the literal lowering in dispatch_node: written without a fraction or an
+    // exponent means integer, and only then is it read as a double.
+    if (script_int_t v = 0; text::is_integer(name, v)) return const_value::integer(v);
+    if (script_float_t v = 0; text::is_number(name, v)) return const_value::number(v);
     return std::nullopt;
   }
 
@@ -912,31 +943,40 @@ std::optional<const_value> try_eval_const(const system& sys, const system::comma
   }
   if (args.empty()) return std::nullopt;
 
+  const bool all_numeric = std::all_of(args.begin(), args.end(), [](const const_value& v) { return v.is_numeric(); });
+  const bool all_integer = std::all_of(args.begin(), args.end(), [](const const_value& v) { return v.is_integer(); });
+  const bool all_bool = std::all_of(args.begin(), args.end(), [](const const_value& v) { return v.is_bool(); });
+
   // n-ary arithmetic blocks. The accumulator starts at the first operand rather than at 0/1 so the
   // fold associates exactly like the emitted chain of ADD/MUL opcodes - a leading identity would
   // turn `ADD = { -0.0 }` into +0.0.
   if (name == "ADD" || name == "MUL") {
+    if (!all_numeric) return std::nullopt;
     const bool product = name == "MUL";
-    double r = 0.0;
-    for (size_t i = 0; i < args.size(); ++i) {
-      if (!args[i].is_number()) return std::nullopt;
-      r = i == 0 ? args[i].n : (product ? r * args[i].n : r + args[i].n);
+    if (all_integer) {
+      script_int_t r = args[0].i;
+      for (size_t k = 1; k < args.size(); ++k) r = product ? wrap_mul(r, args[k].i) : wrap_add(r, args[k].i);
+      return const_value::integer(r);
     }
+    script_float_t r = args[0].as_float();
+    for (size_t k = 1; k < args.size(); ++k) r = product ? r * args[k].as_float() : r + args[k].as_float();
     return const_value::number(r);
   }
 
   if (name == "AND" || name == "NAND" || name == "OR" || name == "NOR") {
+    if (!all_bool) return std::nullopt;
     const bool disjunction = name == "OR" || name == "NOR";
     const bool negated = name == "NAND" || name == "NOR";
-    bool r = false;
-    for (size_t i = 0; i < args.size(); ++i) {
-      if (!args[i].is_bool()) return std::nullopt;
-      r = i == 0 ? args[i].b : (disjunction ? r || args[i].b : r && args[i].b);
-    }
+    bool r = args[0].b;
+    for (size_t k = 1; k < args.size(); ++k) r = disjunction ? (r || args[k].b) : (r && args[k].b);
     return const_value::boolean(negated ? !r : r);
   }
 
   if (args.size() == 1) {
+    if (args[0].is_integer()) {
+      if (name == "unary_plus") return const_value::integer(args[0].i);
+      if (name == "unary_minus") return const_value::integer(wrap_sub(0, args[0].i));
+    }
     if (args[0].is_number()) {
       if (name == "unary_plus") return const_value::number(+args[0].n);
       if (name == "unary_minus") return const_value::number(-args[0].n);
@@ -947,9 +987,27 @@ std::optional<const_value> try_eval_const(const system& sys, const system::comma
 
   if (args.size() != 2) return std::nullopt;
 
-  if (args[0].is_number() && args[1].is_number()) {
-    const auto l = args[0].n;
-    const auto r = args[1].n;
+  if (all_integer) {
+    const auto l = args[0].i;
+    const auto r = args[1].i;
+    if (name == "+") return const_value::integer(wrap_add(l, r));
+    if (name == "-") return const_value::integer(wrap_sub(l, r));
+    if (name == "*") return const_value::integer(wrap_mul(l, r));
+    // Both cases raise at runtime, so folding them would turn a script error into a compile error.
+    if (name == "%") return r == 0 ? std::nullopt : std::optional(const_value::integer(r == -1 ? 0 : l % r));
+    if (name == ">") return const_value::boolean(l > r);
+    if (name == "<") return const_value::boolean(l < r);
+    if (name == ">=") return const_value::boolean(l >= r);
+    if (name == "<=") return const_value::boolean(l <= r);
+    if (name == "==") return const_value::boolean(l == r);
+    if (name == "!=") return const_value::boolean(l != r);
+    // `/` has no integer overload: fall through to the floating-point rules below.
+    if (name != "/") return std::nullopt;
+  }
+
+  if (all_numeric) {
+    const auto l = args[0].as_float();
+    const auto r = args[1].as_float();
     if (name == "+") return const_value::number(l + r);
     if (name == "-") return const_value::number(l - r);
     if (name == "*") return const_value::number(l * r);
@@ -965,7 +1023,7 @@ std::optional<const_value> try_eval_const(const system& sys, const system::comma
     return std::nullopt;
   }
 
-  if (args[0].is_bool() && args[1].is_bool()) {
+  if (all_bool) {
     if (name == "and") return const_value::boolean(args[0].b && args[1].b);
     if (name == "or") return const_value::boolean(args[0].b || args[1].b);
     if (name == "==") return const_value::boolean(args[0].b == args[1].b);
@@ -985,18 +1043,22 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   const auto exp_t = ctx->expected_type;
   const bool any_type_expected = type_is_any_type(exp_t);
 
-  // Integral blocks never fold: the folder works in `double`, so it cannot represent int64 exactly.
-  if (override_lvalue.empty() && !type_is_integral(exp_t)) {
+  if (override_lvalue.empty()) {
     if (auto v = try_eval_const(*this, block)) {
-      // The constant replaces a call whose result type the caller already checked, so it may only
-      // be emitted where a value of its own kind is what codegen would have produced anyway.
-      const bool fits = v->is_bool()
-        ? any_type_expected || type_is_bool(exp_t)
-        : any_type_expected || type_is_floating_point(exp_t);
+      // The constant stands in for a call whose result type the caller already checked, so it may
+      // only be emitted where a value of its own kind is what codegen would have produced. An
+      // integer in a floating-point block is the one crossing allowed, because there codegen would
+      // have emitted `pushint` followed by `convert<int64_t, double>` - the same static_cast.
+      const bool as_float = v->is_integer() && !any_type_expected && type_is_floating_point(exp_t);
+      const bool fits =
+        v->is_bool()    ? any_type_expected || type_is_bool(exp_t) :
+        v->is_integer() ? any_type_expected || type_is_integral(exp_t) || as_float :
+                          any_type_expected || type_is_floating_point(exp_t);
       if (fits) {
         set_function_type sft(ctx, function_type::rvalue);
         if (v->is_bool()) push_basic_function(ctx, scr, basicf::pushbool, v->b);
-        else push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(v->n));
+        else if (v->is_integer() && !as_float) push_basic_function(ctx, scr, basicf::pushint, v->i);
+        else push_basic_function(ctx, scr, basicf::pushvalue, pack_float(as_float ? script_float_t(v->i) : v->n));
         setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
         return block.size();
       }
@@ -1021,16 +1083,20 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
       return 1;
     }
 
-    if (int64_t val; type_is_integral(exp_t) && text::is_integer(funcname, val)) {
+    // A literal written without a fraction or an exponent is an integer, whatever the surrounding
+    // block happens to expect. Overload resolution and the registered int64 -> double conversion
+    // take it from there. Reading it as a double because the context is floating-point is what used
+    // to make `9007199254740992 == 9007199254740993` true.
+    if (script_int_t val; text::is_integer(funcname, val)) {
       set_function_type sft(ctx, function_type::rvalue);
       push_basic_function(ctx, scr, basicf::pushint, val);
       setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
       return 1;
     }
 
-    if (double val; text::is_number(funcname, val)) {
+    if (script_float_t val; text::is_number(funcname, val)) {
       set_function_type sft(ctx, function_type::rvalue);
-      push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(val));
+      push_basic_function(ctx, scr, basicf::pushvalue, pack_float(val));
       setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
       return 1;
     }

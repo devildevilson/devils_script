@@ -193,17 +193,24 @@ TEST_CASE("audit: constant folding keeps the semantics of the unfolded stream") 
   CHECK_THROWS(sys.parse<bool, void>("mixed_eq", "true == 1.0"));
   CHECK_THROWS([&] { const auto s = sys.parse<bool, void>("num_block", "AND = { 1.0, 2.0 }"); ctx.clear(); s.process(&ctx); }());
 
-  // Comparisons fold to what the runtime opcode computes: doubles compare with a tolerance, and an
-  // integer literal outside an integral block is a double there too.
+  // Comparisons fold to what the runtime opcode computes: doubles compare with a tolerance.
+  // Two integers past the precision of double now compare as the integers they are written as.
+  const auto exact = sys.parse<bool, void>("exact", "9007199254740992 == 9007199254740993");
+  CHECK(exact.cmds.size() == 2);
+  ctx.clear();
+  exact.process(&ctx);
+  CHECK_FALSE(ctx.get_return<bool>());
+
   ctx.clear();
   const auto eps = sys.parse<bool, void>("eps", "1.0 == 1.0000000001");
   CHECK(eps.cmds.size() == 2);
   eps.process(&ctx);
   CHECK(ctx.get_return<bool>());
 
-  // Integral blocks are never folded: the folder works in double and cannot represent int64 exactly.
+  // Integer constants fold as integers, exactly. Reading them as doubles first is what made
+  // `9007199254740992 + 1` collapse onto its own left operand.
   const auto integral = sys.parse<int64_t, void>("integral", "9007199254740992 + 1");
-  CHECK(integral.cmds.size() > 2);
+  CHECK(integral.cmds.size() == 2);
   ctx.clear();
   integral.process(&ctx);
   CHECK(ctx.get_return<int64_t>() == 9007199254740993LL);

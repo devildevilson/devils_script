@@ -283,7 +283,13 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
     if (!ctx->is_ignore()) {
       if (ctx->is_bool()) setup_type_conversion<bool, cur_arg_type>(ctx, scr);
       if (ctx->is_integral()) setup_type_conversion<int64_t, cur_arg_type>(ctx, scr);
-      if (ctx->is_number()) setup_type_conversion<double, cur_arg_type>(ctx, scr);
+      // Widening conversions are emitted here directly, without consulting the registry. Narrowing a
+      // floating-point value to an integer is not one of them: it drops the fraction, so it has to be
+      // written out (`to_int`). Leaving it in meant an overload taking int64 could swallow `1.5` as
+      // `1`, and `1.5 > 1` compiled into `1 > 1`.
+      if constexpr (!std::is_integral_v<cur_arg_type> || std::is_same_v<bool, cur_arg_type>) {
+        if (ctx->is_number()) setup_type_conversion<double, cur_arg_type>(ctx, scr);
+      }
     }
   }
 
@@ -390,7 +396,13 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
     if (!ctx->is_ignore()) {
       if (ctx->is_bool()) setup_type_conversion<bool, cur_arg_type>(ctx, scr);
       if (ctx->is_integral()) setup_type_conversion<int64_t, cur_arg_type>(ctx, scr);
-      if (ctx->is_number()) setup_type_conversion<double, cur_arg_type>(ctx, scr);
+      // Widening conversions are emitted here directly, without consulting the registry. Narrowing a
+      // floating-point value to an integer is not one of them: it drops the fraction, so it has to be
+      // written out (`to_int`). Leaving it in meant an overload taking int64 could swallow `1.5` as
+      // `1`, and `1.5 > 1` compiled into `1 > 1`.
+      if constexpr (!std::is_integral_v<cur_arg_type> || std::is_same_v<bool, cur_arg_type>) {
+        if (ctx->is_number()) setup_type_conversion<double, cur_arg_type>(ctx, scr);
+      }
     }
   }
 
@@ -422,7 +434,9 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
   if (!std::is_fundamental_v<FROM> && !std::is_same_v<final_stack_el_t<FROM>, bool>) raise_error(std::format("Could not convert from '{}' to '{}'", from_name, to_name));
   if (!std::is_fundamental_v<TO> && !std::is_same_v<final_stack_el_t<TO>, bool>) raise_error(std::format("Could not convert from '{}' to '{}'", from_name, to_name));
 
-  const function_t fs[] = { &convert_unsafe<FROM, TO>, &convert<FROM, TO> };
+  // Instantiate on the stack representations, so this emits the same function pointer that
+  // register_implicit_conversion would have stored for the same pair.
+  const function_t fs[] = { &convert_unsafe<final_stack_el_t<FROM>, final_stack_el_t<TO>>, &convert<final_stack_el_t<FROM>, final_stack_el_t<TO>> };
   scr->cmds.push_back(container::command(fs[size_t(safety())], INT64_C(0)));
 
   if (!ctx->is<FROM>()) raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", ctx->stack_types.back(), from_name));
@@ -525,13 +539,13 @@ void system::register_function(std::string name, std::vector<std::string> func_a
 
         if (conditional_arithmetic_fold) {
           constexpr auto arg_type_name = utils::type_name<first_argument>();
-          constexpr bool arg_is_int64 = std::is_same_v<first_argument, int64_t>;
-          constexpr bool arg_is_double = std::is_same_v<first_argument, double>;
+          constexpr bool arg_is_int64 = std::is_same_v<first_argument, script_int_t>;
+          constexpr bool arg_is_double = std::is_same_v<first_argument, script_float_t>;
           const int64_t identity = curfname == "MUL" ? INT64_C(1) : INT64_C(0);
           if constexpr (arg_is_int64) {
             sys->push_basic_function(ctx, scr, basicf::pushint, identity);
           } else {
-            sys->push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(double(identity)));
+            sys->push_basic_function(ctx, scr, basicf::pushvalue, pack_float(script_float_t(identity)));
             if constexpr (!arg_is_double) {
               if (sys->can_convert_implicitly(ctx->top(), arg_type_name)) {
                 sys->setup_type_conversion(ctx, scr, ctx->top(), arg_type_name);
@@ -896,7 +910,11 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
           sys->scope_exit(ctx, scr, 1);
 
           if constexpr (!utils::is_void_v<value_type>) {
-            if (ctx->top() != utils::type_name<value_type>()) throw std::runtime_error(std::format("Function's '{}' child '{}' returns type '{}', but '{}' was expected", curfname, child.name(), ctx->top(), utils::type_name<value_type>()));
+            // Compare against the stack representation, not the C++ type in the callback signature:
+            // a `std::function<double(city*)>` produces the language's floating-point value, which is
+            // not `double` in every configuration.
+            constexpr auto value_type_name = utils::type_name<final_stack_el_t<value_type>>();
+            if (ctx->top() != value_type_name) throw std::runtime_error(std::format("Function's '{}' child '{}' returns type '{}', but '{}' was expected", curfname, child.name(), ctx->top(), value_type_name));
           }
 
           ctx->pop();

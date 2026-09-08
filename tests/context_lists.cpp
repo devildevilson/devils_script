@@ -301,7 +301,8 @@ TEST_CASE("Using arguments + save to context + lists") {
 
     const size_t first_index = cont.find_arg("first");
     REQUIRE(first_index < ds::context::script_arguments_size);
-    CHECK(ctx.get_arg<double>(first_index) == 7);
+    // `7` is written as an integer, so that is what the argument slot holds.
+    CHECK(ctx.get_arg<int64_t>(first_index) == 7);
   }
 
   SUBCASE("ctx_set_as object args") {

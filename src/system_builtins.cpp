@@ -12,50 +12,78 @@ namespace devils_script {
 #define EPSILON 0.000001
 
 namespace internal {
-static int64_t rawaddi(const int64_t val1, const int64_t val2) noexcept { return val1 + val2; }
-static int64_t rawmuli(const int64_t val1, const int64_t val2) noexcept { return val1 * val2; }
-static int64_t rawsubi(const int64_t val1, const int64_t val2) noexcept { return val1 - val2; }
-static int64_t rawdivi(const int64_t val1, const int64_t val2) noexcept { return val1 / val2; }
-static int64_t rawposi(const int64_t val1) noexcept { return +val1; }
-static int64_t rawnegi(const int64_t val1) noexcept { return -val1; }
-static double rawadd(const double val1, const double val2) noexcept { return val1 + val2; }
-static double rawmul(const double val1, const double val2) noexcept { return val1 * val2; }
-static double rawsub(const double val1, const double val2) noexcept { return val1 - val2; }
-static double rawdiv(const double val1, const double val2) noexcept { return val1 / val2; }
-static double rawmod(const double val1, const double val2) noexcept { return std::fmod(val1, val2); }
-static double rawpos(const double val1) noexcept { return +val1; }
-static double rawneg(const double val1) noexcept { return -val1; }
+using script_uint_t = std::make_unsigned_t<script_int_t>;
+
+// Integer arithmetic wraps, two's complement, like the hardware underneath it. Signed overflow is
+// undefined in C++, so every operation goes through the unsigned type and back - which also gives
+// constant folding a contract it can reproduce exactly at compile time.
+static script_int_t rawaddi(const script_int_t val1, const script_int_t val2) noexcept { return script_int_t(script_uint_t(val1) + script_uint_t(val2)); }
+static script_int_t rawmuli(const script_int_t val1, const script_int_t val2) noexcept { return script_int_t(script_uint_t(val1) * script_uint_t(val2)); }
+static script_int_t rawsubi(const script_int_t val1, const script_int_t val2) noexcept { return script_int_t(script_uint_t(val1) - script_uint_t(val2)); }
+static script_int_t rawposi(const script_int_t val1) noexcept { return +val1; }
+static script_int_t rawnegi(const script_int_t val1) noexcept { return script_int_t(0u - script_uint_t(val1)); }
+// Integer remainder. Division by zero and INT64_MIN % -1 are trapping in hardware, so both are
+// rejected as script errors rather than left to the CPU.
+static script_int_t rawmodi(const script_int_t val1, const script_int_t val2) {
+  if (val2 == 0) throw std::runtime_error("Integer remainder by zero");
+  if (val2 == -1) return 0;
+  return val1 % val2;
+}
+static bool rawmorei(const script_int_t val1, const script_int_t val2) noexcept { return val1 > val2; }
+static bool rawlessi(const script_int_t val1, const script_int_t val2) noexcept { return val1 < val2; }
+static bool rawmoreeqi(const script_int_t val1, const script_int_t val2) noexcept { return val1 >= val2; }
+static bool rawlesseqi(const script_int_t val1, const script_int_t val2) noexcept { return val1 <= val2; }
+static script_float_t rawadd(const script_float_t val1, const script_float_t val2) noexcept { return val1 + val2; }
+static script_float_t rawmul(const script_float_t val1, const script_float_t val2) noexcept { return val1 * val2; }
+static script_float_t rawsub(const script_float_t val1, const script_float_t val2) noexcept { return val1 - val2; }
+static script_float_t rawdiv(const script_float_t val1, const script_float_t val2) noexcept { return val1 / val2; }
+static script_float_t rawmod(const script_float_t val1, const script_float_t val2) noexcept { return std::fmod(val1, val2); }
+static script_float_t rawpos(const script_float_t val1) noexcept { return +val1; }
+static script_float_t rawneg(const script_float_t val1) noexcept { return -val1; }
 static bool rawnot(const bool val1) noexcept { return !val1; }
 
-static bool rawmore(const double val1, const double val2) noexcept { return val1 > val2; }
-static bool rawless(const double val1, const double val2) noexcept { return val1 < val2; }
-static bool rawmoreeq(const double val1, const double val2) noexcept { return val1 >= val2; }
-static bool rawlesseq(const double val1, const double val2) noexcept { return val1 <= val2; }
+static bool rawmore(const script_float_t val1, const script_float_t val2) noexcept { return val1 > val2; }
+static bool rawless(const script_float_t val1, const script_float_t val2) noexcept { return val1 < val2; }
+static bool rawmoreeq(const script_float_t val1, const script_float_t val2) noexcept { return val1 >= val2; }
+static bool rawlesseq(const script_float_t val1, const script_float_t val2) noexcept { return val1 <= val2; }
 
-static double rawmax(const double val1, const double val2) noexcept { return std::max(val1, val2); }
-static double rawmin(const double val1, const double val2) noexcept { return std::min(val1, val2); }
-static double rawabs(const double val1) noexcept { return std::abs(val1); }
-static double rawceil(const double val1) noexcept { return std::ceil(val1); }
-static double rawfloor(const double val1) noexcept { return std::floor(val1); }
-static double rawround(const double val1) noexcept { return std::round(val1); }
-static double rawtrunc(const double val1) noexcept { return std::trunc(val1); }
-static double rawexp(const double val1) noexcept { return std::exp(val1); }
-static double rawsqrt(const double val1) noexcept { return std::sqrt(val1); }
-static double rawinversesqrt(const double val1) noexcept { return 1.0 / std::sqrt(val1); }
-static double rawsin(const double val1) noexcept { return std::sin(val1); }
-static double rawcos(const double val1) noexcept { return std::cos(val1); }
-static double rawasin(const double val1) noexcept { return std::asin(val1); }
-static double rawacos(const double val1) noexcept { return std::acos(val1); }
-static double rawtan(const double val1) noexcept { return std::tan(val1); }
-static double rawatan(const double val1) noexcept { return std::atan(val1); }
-static double rawinc(const double val1) noexcept { return val1 + 1.0; }
-static double rawdec(const double val1) noexcept { return val1 - 1.0; }
-static double rawinv(const double val1) noexcept { return 1.0 / val1; }
+static script_float_t rawmax(const script_float_t val1, const script_float_t val2) noexcept { return std::max(val1, val2); }
+static script_float_t rawmin(const script_float_t val1, const script_float_t val2) noexcept { return std::min(val1, val2); }
+static script_float_t rawabs(const script_float_t val1) noexcept { return std::abs(val1); }
+static script_float_t rawceil(const script_float_t val1) noexcept { return std::ceil(val1); }
+static script_float_t rawfloor(const script_float_t val1) noexcept { return std::floor(val1); }
+static script_float_t rawround(const script_float_t val1) noexcept { return std::round(val1); }
+static script_float_t rawtrunc(const script_float_t val1) noexcept { return std::trunc(val1); }
+static script_float_t rawexp(const script_float_t val1) noexcept { return std::exp(val1); }
+static script_float_t rawsqrt(const script_float_t val1) noexcept { return std::sqrt(val1); }
+static script_float_t rawinversesqrt(const script_float_t val1) noexcept { return 1.0 / std::sqrt(val1); }
+static script_float_t rawsin(const script_float_t val1) noexcept { return std::sin(val1); }
+static script_float_t rawcos(const script_float_t val1) noexcept { return std::cos(val1); }
+static script_float_t rawasin(const script_float_t val1) noexcept { return std::asin(val1); }
+static script_float_t rawacos(const script_float_t val1) noexcept { return std::acos(val1); }
+static script_float_t rawtan(const script_float_t val1) noexcept { return std::tan(val1); }
+static script_float_t rawatan(const script_float_t val1) noexcept { return std::atan(val1); }
+static script_float_t rawinc(const script_float_t val1) noexcept { return val1 + 1.0; }
+static script_float_t rawdec(const script_float_t val1) noexcept { return val1 - 1.0; }
+static script_float_t rawinv(const script_float_t val1) noexcept { return 1.0 / val1; }
+// The only way back from floating-point to integer. It is explicit on purpose: `/` always produces
+// a floating-point value, and an implicit narrowing rule would put the silent precision loss this
+// type system just removed straight back in.
+static script_int_t rawtoint(const script_float_t val1) {
+  if (!(val1 >= -9223372036854775808.0 && val1 < 9223372036854775808.0))
+    throw std::runtime_error(std::format("'to_int' cannot represent {} as an integer", val1));
+  return script_int_t(val1);
+}
 
 static bool raweqb(const bool val1, const bool val2) noexcept { return val1 == val2; }
-static bool raweqi(const int64_t val1, const int64_t val2) noexcept { return val1 == val2; }
-static bool raweqd(const double val1, const double val2) noexcept { return std::abs(val1 - val2) < EPSILON; }
+static bool raweqi(const script_int_t val1, const script_int_t val2) noexcept { return val1 == val2; }
+static bool raweqd(const script_float_t val1, const script_float_t val2) noexcept { return std::abs(val1 - val2) < EPSILON; }
 static bool raweqs(const std::string_view& val1, const std::string_view& val2) noexcept { return val1 == val2; }
+// Equality is compiled by hand, so unlike an ordinary call it cannot convert its first operand -
+// by the time both types are known that operand is already buried under the second. Comparing an
+// integer against a floating-point value therefore gets its own opcodes instead of a conversion.
+static bool raweqid(const script_int_t val1, const script_float_t val2) noexcept { return raweqd(script_float_t(val1), val2); }
+static bool raweqdi(const script_float_t val1, const script_int_t val2) noexcept { return raweqd(val1, script_float_t(val2)); }
 static bool raweq (const element_view& val1, const element_view& val2) noexcept { 
   return val1 == val2;
 }
@@ -63,20 +91,20 @@ static bool raweq (const element_view& val1, const element_view& val2) noexcept 
 static bool operator_or(const bool val1, const bool val2) noexcept { return val1 || val2; }
 static bool operator_and(const bool val1, const bool val2) noexcept { return val1 && val2; }
 
-static double rawsign(const double v1) noexcept { return v1 > 0.0 ? 1.0 : (v1 < 0.0 ? -1.0 : 0.0); }
-static double rawfma(const double v1, const double v2, const double v3) noexcept { return v1 * v2 + v3; }
-static double rawfract(const double v1) noexcept { return v1 - rawfloor(v1); }
-static double rawmix(const double v1, const double v2, const double v3) noexcept { return v1 * (1.0 - v3) + v2 * v3; }
-static double rawsclamp(const double t, const double v1, const double v2) noexcept { return std::clamp(t, v1, v2);  }
-static double rawsmoothstep(const double v1, const double v2, const double x) noexcept {
+static script_float_t rawsign(const script_float_t v1) noexcept { return v1 > 0.0 ? 1.0 : (v1 < 0.0 ? -1.0 : 0.0); }
+static script_float_t rawfma(const script_float_t v1, const script_float_t v2, const script_float_t v3) noexcept { return v1 * v2 + v3; }
+static script_float_t rawfract(const script_float_t v1) noexcept { return v1 - rawfloor(v1); }
+static script_float_t rawmix(const script_float_t v1, const script_float_t v2, const script_float_t v3) noexcept { return v1 * (1.0 - v3) + v2 * v3; }
+static script_float_t rawsclamp(const script_float_t t, const script_float_t v1, const script_float_t v2) noexcept { return std::clamp(t, v1, v2);  }
+static script_float_t rawsmoothstep(const script_float_t v1, const script_float_t v2, const script_float_t x) noexcept {
   if (x <= v1) return 0.0;
   if (x >= v2) return 1.0;
-  const double t = rawsclamp((x - v1) / (v2 - v1), 0.0, 1.0);
+  const script_float_t t = rawsclamp((x - v1) / (v2 - v1), 0.0, 1.0);
   return t * t * (3.0 - 2.0 * t);
 }
-static double rawstep(const double v1, const double x) noexcept { return x < v1 ? 0.0 : 1.0; }
-static double rawrndmix1(const double v1) noexcept { return prng::prng_normalize(prng::mix(std::bit_cast<uint64_t>(v1))); }
-static double rawrndmix(const double v1, const double v2) noexcept { return prng::prng_normalize(prng::mix(std::bit_cast<uint64_t>(v1), std::bit_cast<uint64_t>(v2))); }
+static script_float_t rawstep(const script_float_t v1, const script_float_t x) noexcept { return x < v1 ? 0.0 : 1.0; }
+static script_float_t rawrndmix1(const script_float_t v1) noexcept { return prng::prng_normalize(prng::mix(uint64_t(pack_float(v1)))); }
+static script_float_t rawrndmix(const script_float_t v1, const script_float_t v2) noexcept { return prng::prng_normalize(prng::mix(uint64_t(pack_float(v1)), uint64_t(pack_float(v2)))); }
 }
 #define RFI(func) register_function<&func>
 #define ROI(func) register_operator<&func>
@@ -103,14 +131,20 @@ void system::init_math() {
   ROI(internal::rawinc)("++", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawdec)("--", { 14, command_data::math_ftype::prefix, command_data::associativity::right });
   ROI(internal::rawmuli)("*", { 12, command_data::math_ftype::binary, command_data::associativity::left });
-  ROI(internal::rawdivi)("/", { 12, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmul)("*", { 12, command_data::math_ftype::binary, command_data::associativity::left });
+  // `/` deliberately has no integer overload: division is the one operation where the integer answer
+  // is almost never the intended one, so both operands convert and the result is floating-point.
   ROI(internal::rawdiv)("/", { 12, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawmodi)("%", { 12, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmod)("%", { 12, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawaddi)("+", { 11, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawsubi)("-", { 11, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawadd)("+", { 11, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawsub)("-", { 11, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawmoreeqi)(">=", { 8, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawlesseqi)("<=", { 8, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawmorei)(">", { 8, command_data::math_ftype::binary, command_data::associativity::left });
+  ROI(internal::rawlessi)("<", { 8, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmoreeq)(">=", { 8, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawlesseq)("<=", { 8, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::rawmore)(">", { 8, command_data::math_ftype::binary, command_data::associativity::left });
@@ -135,6 +169,7 @@ void system::init_math() {
   RFI(internal::rawtan)("tan");
   RFI(internal::rawatan)("atan");
   RFI(internal::rawinv)("inv");
+  RFI(internal::rawtoint)("to_int");
 
   RFI(internal::rawsign)("sign");
   RFI(internal::rawfma)("fma");
@@ -190,8 +225,8 @@ static ignore_value remove_from(const thisctxlist& l, const any_stack& val) {
   return ignore_value{};
 }
 
-static double chance() { return 1; }
-static any_stack randomfn(double, const element_view&) { return any_stack{}; }
+static script_float_t chance() { return 1; }
+static any_stack randomfn(script_float_t, const element_view&) { return any_stack{}; }
 
 // The command name is passed explicitly by the caller (assert/trace know their own name) — it is no
 // longer looked up from a per-command table, which has been removed.
@@ -780,6 +815,10 @@ void system::init_basic_functions() {
       ADD_CMD(internal::raweqi)(sys, scr);
     } else if (type_is_floating_point(first_type) && type_is_floating_point(second_type)) {
       ADD_CMD(internal::raweqd)(sys, scr);
+    } else if (type_is_integral(first_type) && type_is_floating_point(second_type)) {
+      ADD_CMD(internal::raweqid)(sys, scr);
+    } else if (type_is_floating_point(first_type) && type_is_integral(second_type)) {
+      ADD_CMD(internal::raweqdi)(sys, scr);
     } else if ((type_is_bool(first_type) || type_is_fundamental(first_type)) && (type_is_bool(second_type) || type_is_fundamental(second_type))) {
       if (type_is_bool(first_type)) sys->setup_type_conversion<bool, double>(ctx, scr);
       if (type_is_integral(first_type)) sys->setup_type_conversion<int64_t, double>(ctx, scr);
@@ -1018,7 +1057,7 @@ void system::init_basic_functions() {
         const auto wnode = curblock.find("weight");
         if (wnode.empty()) sys->raise_error(std::format("'random' node requires all of nodes to have node 'weight'"));
 
-        set_expected_type set(ctx, utils::type_name<double>());
+        set_expected_type set(ctx, utils::type_name<script_float_t>());
         const size_t start = scr->block_descs.size();
         sys->fold_block(ctx, scr, wnode, basicf::ADD);
         const auto cd = wnode.find(custom_description_constant);
@@ -1128,8 +1167,13 @@ void system::init_basic_functions() {
     if (index >= scr->saved.size()) {
       sys->raise_error(std::format("Trying to load unsaved value '{}'", child.name()));
     } else {
-      if (!type_is_any_type(ctx->expected_type) && nextblock.empty() && scr->saved[index].type != ctx->expected_type) 
-        sys->raise_error(std::format("Saved value type '{}' is not equals to expected '{}'", scr->saved[index].type, ctx->expected_type));
+      // The slot's type does not have to match the block exactly - a saved integer read in a
+      // floating-point block converts like any other value. Requiring equality here used to be
+      // harmless only because every numeric literal was a double.
+      if (!type_is_any_type(ctx->expected_type) && nextblock.empty() &&
+          scr->saved[index].type != ctx->expected_type &&
+          !sys->can_convert_implicitly(scr->saved[index].type, ctx->expected_type))
+        sys->raise_error(std::format("Saved value type '{}' cannot be used where '{}' is expected", scr->saved[index].type, ctx->expected_type));
     }
 
     sys->push_basic_function(ctx, scr, basicf::pushctxvalue, index);
@@ -1367,7 +1411,7 @@ void system::init_basic_functions() {
       const auto callback_expected = [](const container::list_pipeline_kind kind) {
         using k = container::list_pipeline_kind;
         if (kind == k::map) return utils::type_name<any_stack>();
-        if (kind == k::sum || kind == k::min || kind == k::max || kind == k::average) return utils::type_name<double>();
+        if (kind == k::sum || kind == k::min || kind == k::max || kind == k::average) return utils::type_name<script_float_t>();
         return utils::type_name<bool>();
       };
 
@@ -1488,7 +1532,7 @@ void system::init_basic_functions() {
 
         if (requires_default(kind)) {
           const auto expected = (kind == container::list_pipeline_kind::min || kind == container::list_pipeline_kind::max || kind == container::list_pipeline_kind::average)
-            ? utils::type_name<double>()
+            ? utils::type_name<script_float_t>()
             : (scr->lists[index].type.empty() ? utils::type_name<any_stack>() : scr->lists[index].type);
           const auto [s, en, result_type] = compile_default_section(default_body, expected);
           default_start = s;  // default_end == end
