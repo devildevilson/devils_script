@@ -3,7 +3,7 @@ Include(FetchContent)
 
 set(DS_VERSION_FALLBACK "0.0.0" CACHE STRING
   "Version used when devils_script is built outside a Git checkout")
-include(cmake/VersionFromGit.cmake)
+include(cmake/version_from_git.cmake)
 ds_version_from_git("${CMAKE_CURRENT_SOURCE_DIR}" DS_VERSION DS_VERSION_CORE)
 
 if (POLICY CMP0141)
@@ -20,7 +20,7 @@ option(DS_BUILD_TESTS "Build tests for devils_script" ON)
 option(DS_BUILD_EXAMPLES "Build examples for devils_script" ON)
 # ISA for auto-vectorizing devils_script's own sources. Applied PRIVATE; not forced on
 # consumers (they pick their own arch). No SIMD intrinsics in headers, so no ABI impact.
-include(cmake/Architecture.cmake)
+include(cmake/architecture.cmake)
 # Width of the language's own numbers. OFF: int64/double. ON: int32/float. This changes the
 # layout of stack values and the meaning of the public accessors, so it propagates PUBLIC - a
 # consumer has to see the same setting the library was built with.

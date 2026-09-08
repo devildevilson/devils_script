@@ -1,7 +1,7 @@
 foreach(PROCESSOR x86_64 AMD64 i686 aarch64 arm64 riscv64)
   unset(DS_ARCH CACHE)
   set(CMAKE_SYSTEM_PROCESSOR "${PROCESSOR}")
-  include("${DS_SOURCE_DIR}/cmake/Architecture.cmake")
+  include("${DS_SOURCE_DIR}/cmake/architecture.cmake")
   if (PROCESSOR MATCHES "^(x86_64|AMD64|i686)$")
     set(EXPECTED AVX)
   else()
