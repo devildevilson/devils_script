@@ -28,17 +28,32 @@ For a debug build, use `-DCMAKE_BUILD_TYPE=Debug` and a separate build directory
 ### Build options
 
 The library's own compile flags (ISA, warnings, RTTI, LTO, MSVC runtime) are applied **privately** and
-do not leak onto a consumer that links `devils_script` — only the C++20 requirement propagates.
+do not leak onto a consumer that links `devils_script`. The C++20 requirement, `tavl`, the numeric
+width setting, and version definitions propagate through the library target.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `DS_ARCH` | `AVX` | ISA baseline for devils_script's own sources: `OFF`, `AVX`, `AVX2`, `NATIVE`. No SIMD intrinsics live in the headers, so this has no ABI impact and consumers pick their own arch. |
+| `DS_ARCH` | `AVX` on x86, `OFF` otherwise | ISA baseline for devils_script's own sources: `OFF`, `AVX`, `AVX2`, `NATIVE`. No SIMD intrinsics live in the headers, so this has no ABI impact and consumers pick their own arch. |
+| `DS_32BIT` | `OFF` | Use `int32_t` / `float` for script numbers instead of `int64_t` / `double`. This changes the public stack layout and propagates to consumers. |
 | `DS_BUILD_TESTS` | `ON` | Build the doctest test suite. |
 | `DS_BUILD_EXAMPLES` | `ON` | Build the examples. |
+| `DS_VERSION_FALLBACK` | `0.0.0` | Version used only when the source is built outside a Git checkout. |
 
 In release configs the static archive is built **fat** (GCC `-ffat-lto-objects`, MSVC `/GL` + `/LTCG`),
 so it links into a consumer whether or not that consumer enables LTO. The MSVC C runtime defaults to the
 DLL runtime via `CMAKE_MSVC_RUNTIME_LIBRARY`; set that variable to override (e.g. for the static runtime).
+
+### Versioning
+
+CMake reads the nearest reachable `vMAJOR.MINOR.PATCH` tag. At a tag, both `PROJECT_VERSION` and
+`DS_VERSION` contain that release version. Later commits retain the numeric tag in `PROJECT_VERSION`
+and get a descriptive SemVer string in `DS_VERSION`, for example `1.2.1-dev.2+g59cfa69`. A modified
+tree adds `.dirty`. Reconfigure after creating a release tag.
+
+The same values are available to C++ consumers that link the CMake target as
+`devils_script_version`, `devils_script_version_major`, `devils_script_version_minor`, and
+`devils_script_version_patch`, with corresponding `DEVILS_SCRIPT_VERSION*` macros. Source archives
+without Git metadata can set `-DDS_VERSION_FALLBACK=1.3.0` when configuring.
 
 ## Basic Usage
 
@@ -82,18 +97,46 @@ script.process(&ctx);
 double result = ctx.get_return<double>();
 ```
 
-Scope types are expected to be small, trivially destructible values. The built-in validity
+Scope types are expected to be at most 16 bytes and trivially copyable. The built-in validity
 checks use common forms such as `valid()`, `is_valid()`, and `operator bool`; registration
 can also provide a custom validity predicate.
 
 `devils_script` intentionally ignores pointer constness when matching function signatures.
 
+## Numbers
+
+A script has two number types: an integer (`script_int_t`) and a floating-point value
+(`script_float_t`). A literal written without a fraction or an exponent is an integer wherever it
+appears - the surrounding block does not change how it is read, so `9007199254740992 ==
+9007199254740993` is false rather than losing both operands to the same double.
+
+Integer arithmetic is exact and wraps two's complement on overflow. `%` rejects division by zero and
+`INT_MIN % -1` as script errors instead of trapping. Mixing an integer with a floating-point value
+converts the integer side; nothing converts the other way on its own, so `1.5 > 1` compares 1.5
+against 1.0 rather than truncating.
+
+`/` is the exception: it has no integer overload at all, so both operands convert and the result is
+floating-point. That means an integer-returning script cannot end in a division by accident - going
+back is explicit, with `to_int`:
+
+```cpp
+sys.parse<double, void>("script", "7 / 2");            // 3.5
+sys.parse<int64_t, void>("script", "to_int = { 7 / 2 }");  // 3
+sys.parse<int64_t, void>("script", "7 / 2");           // throws: `/` does not produce an integer
+```
+
+Both widths are a build-time choice. By default `script_int_t` is `int64_t` and `script_float_t` is
+`double`; `-DDS_32BIT=ON` makes them `int32_t` and `float`. The setting changes the layout of stack
+values, so it propagates to consumers - build the library and everything using it the same way.
+Registered C++ signatures do not change: an `int64_t` getter or a `std::function<double(city*)>`
+callback is mapped onto whichever width the build selected.
+
 ## Arithmetic Types
 
-`init_math()` registers the default arithmetic model for `int64_t` and `double`. The parser keeps
-those types distinct, resolves overloaded functions by signature, and may use implicit conversions
-only along edges registered in the `system`. The built-in default conversion is `int64_t -> double`;
-custom value types do not get casts automatically.
+`init_math()` registers the default arithmetic model for the two number types. The parser keeps
+them distinct, resolves overloaded functions by signature, and may use implicit conversions
+only along edges registered in the `system`. The built-in default conversion is integer to
+floating-point; custom value types do not get casts automatically.
 
 To make a custom value participate in arithmetic:
 
@@ -192,6 +235,8 @@ with scalar/vector overloads and explicit conversion rules.
 - Deterministic PRNG (`chance`, `random`, `rndmix`) seeded per `system` and per `context`.
 - Safe and unsafe opcode variants; `system::toggle_safety()` disables stack safety checks
   for lower overhead after scripts are trusted.
+- Command peephole optimization enabled by default; `system::toggle_optimizations()` is available
+  for diagnostics and before/after benchmarks.
 - Copyable and movable compiled `container` objects, reusable across many `context` runs.
 
 ## Script-in-script calls
@@ -223,7 +268,8 @@ slot — when the call site gives it a bare `ctx:saved:x` / `ctx:arg:x` lvalue; 
 is by-value. A list-pipeline callback (`filter`/`map`/`sum`/…) may itself `execute` a list-using
 sub-script, with one rule: it cannot bind the very list it is currently iterating (rejected at parse).
 
-Current `execute` limitation: `describe()` does not yet special-case an `execute` node.
+During `describe()`, an `execute` node is inspected without running its sub-script. If its value
+cannot be established safely, the description reports it as unavailable.
 
 ## Memory model and deployment
 
@@ -270,9 +316,10 @@ Three standalone benchmark targets (no test framework):
   See [PROCESS_OPTIMIZATION.md](PROCESS_OPTIMIZATION.md) for results and limitations.
 
 ```sh
-cmake --build build-release --target devils_script_benchs devils_script_execute_bench
+cmake --build build-release --target devils_script_benchs devils_script_execute_bench devils_script_process_bench
 ./build-release/devils_script_benchs
 ./build-release/devils_script_execute_bench
+./build-release/devils_script_process_bench
 ```
 
 ## Type-safety notes
@@ -286,12 +333,10 @@ distinct C++ type per script-domain type so safe mode can enforce the distinctio
 
 ## Current Gaps
 
-See [AUDIT.md](AUDIT.md) for the 2026-09-07 correctness audit, remaining defects,
-validation results, and measured optimization priorities.
+See [AUDIT.md](AUDIT.md) for the 2026-09-07 correctness audit, fixes, validation results, and
+measured optimization priorities.
 
 - More real-world examples would help document intended patterns.
-- `describe()` does not special-case `execute` nodes (script-in-script is otherwise fully supported,
-  including in/out arguments and lists).
 - Debugging/editor tooling is mostly exposed through primitives, not a finished tool.
 
 ## License

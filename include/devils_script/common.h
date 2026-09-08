@@ -69,20 +69,23 @@ constexpr script_float_t unpack_float(const int64_t arg) noexcept {
   return std::bit_cast<script_float_t>(script_float_bits_t(script_float_ubits_t(uint64_t(arg))));
 }
 
-constexpr int devils_script_version_major = 1;
-constexpr int devils_script_version_minor = 2;
-constexpr int devils_script_version_patch = 0;
-constexpr std::string_view devils_script_version = "1.2.0";
-
 #ifndef DEVILS_SCRIPT_VERSION_MAJOR
-#define DEVILS_SCRIPT_VERSION_MAJOR 1
+#define DEVILS_SCRIPT_VERSION_MAJOR 0
 #endif
 #ifndef DEVILS_SCRIPT_VERSION_MINOR
-#define DEVILS_SCRIPT_VERSION_MINOR 2
+#define DEVILS_SCRIPT_VERSION_MINOR 0
 #endif
 #ifndef DEVILS_SCRIPT_VERSION_PATCH
 #define DEVILS_SCRIPT_VERSION_PATCH 0
 #endif
+#ifndef DEVILS_SCRIPT_VERSION
+#define DEVILS_SCRIPT_VERSION "0.0.0"
+#endif
+
+constexpr int devils_script_version_major = DEVILS_SCRIPT_VERSION_MAJOR;
+constexpr int devils_script_version_minor = DEVILS_SCRIPT_VERSION_MINOR;
+constexpr int devils_script_version_patch = DEVILS_SCRIPT_VERSION_PATCH;
+constexpr std::string_view devils_script_version = DEVILS_SCRIPT_VERSION;
 
 #define DEVILS_SCRIPT_BASIC_FUNCTIONS_LIST \
   X(jump) \

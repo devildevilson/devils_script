@@ -4,6 +4,79 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `DS_32BIT` build option: script numbers can use `int32_t` and `float` instead of `int64_t` and
+  `double`. The setting propagates to consumers because it changes the public stack layout.
+- Peephole optimization of compiled commands, enabled by default and switchable with
+  `system::toggle_optimizations()`. It removes unused context pushes, combines consecutive stack
+  erases, removes jumps to the next instruction, and threads jump chains.
+- Integer `%` and the explicit `to_int` conversion.
+- Runtime, compile-fail, architecture, and 32-bit configuration checks registered with CTest.
+- Build and public header versions derived from the nearest `vMAJOR.MINOR.PATCH` Git tag. Untagged
+  commits carry their distance and hash in `DEVILS_SCRIPT_VERSION`.
+
+### Changed
+
+- Integer literals remain integers regardless of the surrounding block. Integer arithmetic is exact
+  and wraps in two's-complement form; comparisons no longer lose precision through `double`.
+- `/` always produces a floating-point result. An integer-returning script must convert it explicitly
+  with `to_int`.
+- Mixed integer/floating-point operations widen the integer operand. Floating-point values no longer
+  narrow implicitly to reach an integer overload, and overload ties prefer the candidate whose return
+  type already matches the expected type.
+- Script stack values must be trivially copyable and no larger than 16 bytes. Typed byte reads use
+  `bit_cast`, and `stack_element::rawget<T>()` returns a value like `get<T>()`.
+- Allocating context constructors may throw. Non-x86 targets now default to `DS_ARCH=OFF`.
+- Direct `ctx:arg:`, `ctx:saved:`, and `ctx:list:` reads produce a smaller command stream. Their
+  namespace node may consequently have no value/scope in description output.
+
+### Fixed
+
+- Stack bounds checks and indexed tail erasure no longer access or discard the wrong slots.
+- Parser storage remains alive while overload candidates are resolved.
+- Implicit conversion cost and emitted conversion commands now use the same shortest path.
+- Constant folding preserves registered overloads, exact constant types, `-0.0`, and the behavior of
+  the equivalent non-folded script. Added `system::is_builtin_function()` for this distinction.
+- `describe()` never runs effects inside `execute`; unavailable results are reported as such.
+- Exceptions during nested execution restore the previous script and all frame registers.
+- `%` reports division by zero and `INT_MIN % -1` as script errors instead of trapping.
+
+## [1.2.1] - 2026-07-23
+
+### Changed
+
+- Expanded the custom arithmetic type documentation with registration and mixed-operator examples.
+
+### Fixed
+
+- Unary `+` and `-` now select integer overloads for `int64_t` operands.
+- Iterator registration correctly infers whether a free function's first argument is a scope or a
+  script callback, and void callbacks no longer create a phantom stack value.
+- Iterator blocks accepting void callbacks can contain ordinary effect commands.
+
+## [1.2.0] - 2026-06-27
+
+### Added
+
+- Registration for custom arithmetic value types, implicit conversion edges, and overloaded named
+  functions and operators.
+- Per-type arithmetic block reducers and priorities used by `parse<T>()` and nested blocks.
+- A standalone `vec4` arithmetic example covering same-type and mixed scalar/vector expressions.
+
+### Changed
+
+- Function and operator overloads are resolved by scope, argument types, conversion cost, and
+  priority.
+- Conditional children in arithmetic blocks are skipped while preserving the `ADD`/`MUL` identity.
+
+### Removed
+
+- Legacy `DEVILS_SCRIPT_OUTER_NAMESPACE` / `DEVILS_SCRIPT_INNER_NAMESPACE` wrapping; the public API
+  now consistently uses the `devils_script` namespace.
+
 ## [1.1.1] - 2026-06-24
 
 ### Changed

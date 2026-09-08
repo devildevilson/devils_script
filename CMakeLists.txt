@@ -1,12 +1,18 @@
 ﻿cmake_minimum_required(VERSION 3.30)
 Include(FetchContent)
 
+set(DS_VERSION_FALLBACK "0.0.0" CACHE STRING
+  "Version used when devils_script is built outside a Git checkout")
+include(cmake/VersionFromGit.cmake)
+ds_version_from_git("${CMAKE_CURRENT_SOURCE_DIR}" DS_VERSION DS_VERSION_CORE)
+
 if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
   set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
-project(devils_script VERSION 1.2.0)
+project(devils_script VERSION "${DS_VERSION_CORE}")
+message(STATUS "devils_script version: ${DS_VERSION}")
 
 enable_language(CXX)
 
@@ -115,7 +121,13 @@ add_library(devils_script STATIC ${SRC_LIST} ${HDR_LIST})
 target_link_libraries(devils_script PRIVATE devils_script_options)
 target_link_libraries(devils_script PUBLIC tavl)
 target_compile_features(devils_script PUBLIC cxx_std_20)
-target_compile_definitions(devils_script PUBLIC DEVILS_SCRIPT_32BIT=$<BOOL:${DS_32BIT}>)
+target_compile_definitions(devils_script PUBLIC
+  DEVILS_SCRIPT_32BIT=$<BOOL:${DS_32BIT}>
+  DEVILS_SCRIPT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  DEVILS_SCRIPT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  DEVILS_SCRIPT_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+  DEVILS_SCRIPT_VERSION="${DS_VERSION}"
+)
 # MSVC: the /GL object code requires /LTCG when the archive is created.
 set_target_properties(devils_script PROPERTIES
   STATIC_LIBRARY_OPTIONS "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release,MinSizeRel,RelWithDebInfo>>:/LTCG>"
