@@ -179,6 +179,9 @@ public:
     std::vector<std::string_view> function_names;
     std::vector<int64_t> scope_stack;
     std::vector<std::string_view> stack_types;
+    // Diagnostics are transactional just like the rest of parse_context: an overload candidate
+    // receives a copy, so warnings produced only by a rejected candidate disappear with that copy.
+    std::vector<std::string> warnings;
 
     // Command slots that carry immediate data instead of an instruction (iterator callback ranges,
     // list_pipeline metadata). They are never executed, and the peephole must not read them as
@@ -268,6 +271,7 @@ public:
 
     size_t emit(const basicf op, const int64_t arg = 0) const;  // -> push_basic_function
     size_t emit_string(const std::string_view& str) const;      // -> push_string
+    void warn(std::string msg) const;                           // queued until parsing succeeds
 
     label make_label() const;
     void jump_to(const basicf op, label& l) const;     // emit `op` (placeholder target), record its site
@@ -428,7 +432,7 @@ public:
   // literal lowering, which is what the optimizer is differentially tested against.
   void toggle_optimizations();
   bool optimizations() const;
-  void raise_error(const std::string &msg) const;
+  [[noreturn]] void raise_error(const std::string &msg) const;
   void raise_warning(const std::string& msg) const;
   uint64_t get_seed() const;
   void reseed(const uint64_t val);

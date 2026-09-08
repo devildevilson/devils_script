@@ -12,6 +12,13 @@
 
 namespace devils_script {
 
+namespace {
+class parse_rejected final : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+}
+
 bool type_is_ignore(const std::string_view& type) noexcept { return type == utils::type_name<ignore_value>(); }
 bool type_is_void(const std::string_view& type) noexcept { return type == utils::type_name<void>() || type == utils::type_name<utils::void_t>(); }
 bool type_is_bool(const std::string_view& type) noexcept { return type == utils::type_name<bool>(); }
@@ -251,7 +258,7 @@ void system::toggle_safety() { this->safet = static_cast<enum safety>(!static_ca
 void system::toggle_optimizations() { this->optimize = !this->optimize; }
 bool system::optimizations() const { return this->optimize; }
 bool system::safety() const { return static_cast<bool>(this->safet); }
-void system::raise_error(const std::string& msg) const { error(msg); }
+[[noreturn]] void system::raise_error(const std::string& msg) const { throw parse_rejected(msg); }
 void system::raise_warning(const std::string& msg) const { warning(msg); }
 uint64_t system::get_seed() const { return seed; }
 void system::reseed(const uint64_t val) { seed = val; }
@@ -430,6 +437,21 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
       continue;
     }
 
+    int64_t return_conversion_cost = 0;
+    const bool boolean_block = data.name == "AND" || data.name == "OR" || data.name == "NAND" || data.name == "NOR";
+    const bool return_is_scalar = !boolean_block && (type_is_bool(data.return_type) || type_is_fundamental(data.return_type) || is_arithmetic_type(data.return_type) || type_is_string(data.return_type));
+    if (return_is_scalar && !type_is_void(ctx->expected_type) && !type_is_any_type(ctx->expected_type) && !type_is_element_view(ctx->expected_type) && data.return_type != ctx->expected_type) {
+      const auto ret_cost = implicit_conversion_cost(data.return_type, ctx->expected_type);
+      if (!ret_cost.has_value()) {
+        errors.push_back(std::format(
+          "candidate '{}' returns '{}', which cannot be converted to expected type '{}'",
+          data.function_signature, data.return_type, ctx->expected_type
+        ));
+        continue;
+      }
+      return_conversion_cost = *ret_cost;
+    }
+
     parse_ctx test_ctx = *ctx;
     container test_scr = *scr;
     test_ctx.conversion_cost = 0;
@@ -437,16 +459,7 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
 
     try {
       const size_t count = std::invoke(data.init, e, block);
-      int64_t cost = test_ctx.conversion_cost;
-      const bool boolean_block = data.name == "AND" || data.name == "OR" || data.name == "NAND" || data.name == "NOR";
-      const bool return_is_scalar = !boolean_block && (type_is_bool(data.return_type) || type_is_fundamental(data.return_type) || is_arithmetic_type(data.return_type) || type_is_string(data.return_type));
-      if (return_is_scalar && !type_is_void(ctx->expected_type) && !type_is_any_type(ctx->expected_type) && !type_is_element_view(ctx->expected_type)) {
-        if (data.return_type != ctx->expected_type) {
-          const auto ret_cost = implicit_conversion_cost(data.return_type, ctx->expected_type);
-          if (!ret_cost.has_value()) continue;
-          cost += *ret_cost;
-        }
-      }
+      const int64_t cost = test_ctx.conversion_cost + return_conversion_cost;
       int64_t rank = 0;
       for (const auto arg_type : data.argument_types) {
         const auto arith = arithmetic_types.find(std::string(arg_type));
@@ -471,13 +484,18 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
         ambiguous = true;
       }
     } catch (const std::exception& ex) {
-      errors.push_back(ex.what());
+      errors.push_back(std::format("candidate '{}': {}", data.function_signature, ex.what()));
     }
   }
 
   if (!best.has_value()) {
     if (errors.empty()) raise_error(std::format("Could not find function '{}' for scope type '{}'", name, current_scope));
-    raise_error(std::format("Could not resolve function '{}' for scope type '{}': {}", name, current_scope, errors.front()));
+    std::string reasons;
+    for (const auto& reason : errors) {
+      if (!reasons.empty()) reasons += "; ";
+      reasons += reason;
+    }
+    raise_error(std::format("Could not resolve function '{}' for scope type '{}': {}", name, current_scope, reasons));
   }
 
   if (ambiguous) {
@@ -785,6 +803,7 @@ size_t system::push_basic_function(parse_ctx* ctx, container* scr, const basicf 
 
 size_t system::emitter::emit(const basicf op, const int64_t arg) const { return sys->push_basic_function(ctx, scr, op, arg); }
 size_t system::emitter::emit_string(const std::string_view& str) const { return sys->push_string(ctx, scr, str); }
+void system::emitter::warn(std::string msg) const { ctx->warnings.push_back(std::move(msg)); }
 system::emitter::label system::emitter::make_label() const { return label{}; }
 void system::emitter::jump_to(const basicf op, label& l) const { l.sites.push_back(emit(op, 0)); }
 void system::emitter::mark(label& l, const size_t cmd_index) const { l.sites.push_back(cmd_index); }
@@ -1584,12 +1603,18 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
 
     finalize_resource_usage(ctx, c);
     optimize_commands(ctx, c);
-  } catch (const std::exception&) {
+  } catch (const std::exception& ex) {
     ctx.rpn_ctx.clear();
     ctx.script_ast_nodes.clear();
+    ctx.warnings.clear();
+    // Keep this overload's established error-return contract even if the configured callback
+    // reports by throwing (as the default callback does).
+    try { error(ex.what()); } catch (...) {}
     return {ev, tavl::error{tavl::error_type::err_misplaced_operator, ev.token.span}};
   }
 
+  for (const auto& msg : ctx.warnings) raise_warning(msg);
+  ctx.warnings.clear();
   c.build_description_index();
   return {ev, err};
 }

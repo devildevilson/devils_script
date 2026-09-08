@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-09-08
+
+### Fixed
+
+- Overload probing is now diagnostic-free: rejected candidates neither call the user error callback
+  nor emit warnings. A final resolution failure reports all candidate reasons, including incompatible
+  return and expected types, exactly once.
+
 ## [1.3.0] - 2026-09-08
 
 ### Added

@@ -666,7 +666,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
 
             offset += remaining.size();
             if (offset < args.size()) 
-              sys->raise_warning(std::format("Found dead code in function '{}', this block '{}' would be ignored", curfname, command_block(args, offset).name()));
+              e.warn(std::format("Found dead code in function '{}', this block '{}' would be ignored", curfname, command_block(args, offset).name()));
           }
         }
 
@@ -805,7 +805,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
 
               offset += remaining.size();
               if (offset < args.size()) 
-                sys->raise_warning(std::format("Found dead code in function '{}', this block '{}' would be ignored", curfname, command_block(args, offset).name()));
+                e.warn(std::format("Found dead code in function '{}', this block '{}' would be ignored", curfname, command_block(args, offset).name()));
             }
           }
         }
@@ -1043,61 +1043,71 @@ container system::parse(std::string_view name, std::string_view text) const {
 
   container scr;
   parse_context ctx;
-  ctx.init<RETURN_T, ROOT_T>(*this, scr);
-  scr.name = store_string(&scr, name);
-  // Raw source stays local: it only feeds normalize/make_script_ast. The container never retains
-  // it — `store_string` builds the compact `scr.source` token pool during the semantic pass.
-  const auto script_block = std::string_view(text);
+  try {
+    ctx.init<RETURN_T, ROOT_T>(*this, scr);
+    scr.name = store_string(&scr, name);
+    // Raw source stays local: it only feeds normalize/make_script_ast. The container never retains
+    // it — `store_string` builds the compact `scr.source` token pool during the semantic pass.
+    const auto script_block = std::string_view(text);
 
-  // Path N: tavl lexes/structures/precedences the script (make_script_ast); normalize() turns its
-  // AST into the same rpn block stream the semantic pass consumes. Replaces the old text parser +
-  // shunting-yard path; convert_scope (scope-path splitting) is still used downstream.
-  tavl::parser tp;
-  configure_parser(tp);
-  const auto tree = make_script_ast(tp, script_block);
-  // Reserve before the walk so token text accumulates without reallocating mid-traversal.
-  ctx.rpn_ctx.token_storage.reserve(script_block.size() + 4096);
-  ctx.rpn_ctx.normalize(tree, script_block);
-  auto output = ctx.rpn_ctx.output;
-  output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.rpn_ctx.store_token(ctx.root_block_name), output.size()+1 });
+    // Path N: tavl lexes/structures/precedences the script (make_script_ast); normalize() turns its
+    // AST into the same rpn block stream the semantic pass consumes. Replaces the old text parser +
+    // shunting-yard path; convert_scope (scope-path splitting) is still used downstream.
+    tavl::parser tp;
+    configure_parser(tp);
+    const auto tree = make_script_ast(tp, script_block);
+    // Reserve before the walk so token text accumulates without reallocating mid-traversal.
+    ctx.rpn_ctx.token_storage.reserve(script_block.size() + 4096);
+    ctx.rpn_ctx.normalize(tree, script_block);
+    auto output = ctx.rpn_ctx.output;
+    output.emplace(output.begin(), rpn_conversion_ctx::block{ ctx.rpn_ctx.store_token(ctx.root_block_name), output.size()+1 });
 
-  reserve_from_hint(&scr, output.size(), ctx.rpn_ctx.token_storage.size());
+    reserve_from_hint(&scr, output.size(), ctx.rpn_ctx.token_storage.size());
 
-  set_function_type sft(&ctx, function_type::lvalue);
+    set_function_type sft(&ctx, function_type::lvalue);
 
-  auto script_cmds = command_block(std::span<rpn_conversion_ctx::block>(output), &ctx.rpn_ctx.token_storage);
+    auto script_cmds = command_block(std::span<rpn_conversion_ctx::block>(output), &ctx.rpn_ctx.token_storage);
 
-  {
-    set_expected_type set(&ctx, scope_type_name<ret_type>());
-    dispatch_node(&ctx, &scr, script_cmds);
-  }
-  if (const auto cd = static_string_arg(script_cmds.find(custom_description_constant), custom_description_constant); !cd.empty() && !scr.block_descs.empty()) {
-    scr.block_descs.back().custom_description = store_string(&scr, cd);
-  }
-  ctx.rpn_ctx.clear();
-
-  while (ctx.pop_while_ignore()) {}
-
-  if constexpr (!utils::is_void_v<root_type>) {
-    if (ctx.scope_stack.size() != 1) raise_error(std::format("There is not closed scope of type '{}' on stack", ctx.stack_types[ctx.scope_stack.back()]));
-    scope_exit(&ctx, &scr, 1);
-  }
-
-  if constexpr (!utils::is_void_v<ret_type>) {
-    if (!ctx.stack_types.empty() && ctx.stack_types.back() != ctx.return_type && can_convert_implicitly(ctx.stack_types.back(), ctx.return_type)) {
-      setup_type_conversion(&ctx, &scr, ctx.stack_types.back(), ctx.return_type);
+    {
+      set_expected_type set(&ctx, scope_type_name<ret_type>());
+      dispatch_node(&ctx, &scr, script_cmds);
     }
-    if (!ctx.is<ret_type>()) raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", ctx.stack_types.back(), scope_type_name<ret_type>(), ctx.stack_types.size()));
-    push_basic_function(&ctx, &scr, basicf::pushreturn, 0);
+    if (const auto cd = static_string_arg(script_cmds.find(custom_description_constant), custom_description_constant); !cd.empty() && !scr.block_descs.empty()) {
+      scr.block_descs.back().custom_description = store_string(&scr, cd);
+    }
+    ctx.rpn_ctx.clear();
+
+    while (ctx.pop_while_ignore()) {}
+
+    if constexpr (!utils::is_void_v<root_type>) {
+      if (ctx.scope_stack.size() != 1) raise_error(std::format("There is not closed scope of type '{}' on stack", ctx.stack_types[ctx.scope_stack.back()]));
+      scope_exit(&ctx, &scr, 1);
+    }
+
+    if constexpr (!utils::is_void_v<ret_type>) {
+      if (!ctx.stack_types.empty() && ctx.stack_types.back() != ctx.return_type && can_convert_implicitly(ctx.stack_types.back(), ctx.return_type)) {
+        setup_type_conversion(&ctx, &scr, ctx.stack_types.back(), ctx.return_type);
+      }
+      if (!ctx.is<ret_type>()) raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", ctx.stack_types.back(), scope_type_name<ret_type>(), ctx.stack_types.size()));
+      push_basic_function(&ctx, &scr, basicf::pushreturn, 0);
+    }
+
+    if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
+
+    finalize_resource_usage(ctx, scr);
+    optimize_commands(ctx, scr);
+
+    scr.build_description_index();
+    compact_source_storage(&scr);
+
+  } catch (const std::exception& ex) {
+    // Report only after the whole parse has failed. Exceptions raised while trying an overload are
+    // caught by resolve_function and remain ordinary candidate rejections.
+    error(ex.what());
+    throw;
   }
 
-  if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
-
-  finalize_resource_usage(ctx, scr);
-  optimize_commands(ctx, scr);
-
-  scr.build_description_index();
-  compact_source_storage(&scr);
+  for (const auto& msg : ctx.warnings) raise_warning(msg);
 
   return scr;
 }

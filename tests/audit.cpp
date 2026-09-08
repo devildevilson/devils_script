@@ -13,6 +13,8 @@ double dbl(const double x) { return x; }
 bool truth(bool x) { return x; }
 double choose_bool(bool) { return 1; }
 double choose_double(double) { return 2; }
+int64_t warned_double(double) { return 3; }
+int64_t exact_integer(int64_t) { return 10; }
 struct nontrivial_copy {
   int x;
   nontrivial_copy(const nontrivial_copy& rhs) : x(rhs.x) {}
@@ -93,6 +95,58 @@ TEST_CASE("audit: conversion cost and generated path agree") {
   CHECK_THROWS(overflow.implicit_conversion_cost(ds::utils::type_name<int64_t>(), ds::utils::type_name<bool>()));
   overflow.register_implicit_conversion<int64_t, bool>(2);
   CHECK(overflow.implicit_conversion_cost(ds::utils::type_name<int64_t>(), ds::utils::type_name<bool>()) == 2);
+}
+
+TEST_CASE("audit: overload probing keeps diagnostics transactional") {
+  std::vector<std::string> errors;
+  std::vector<std::string> warnings;
+  ds::system::options opts;
+  opts.error = [&](const std::string& msg) { errors.push_back(msg); };
+  opts.warning = [&](const std::string& msg) { warnings.push_back(msg); };
+  ds::system sys(opts);
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // This candidate is viable, but loses to the exact integer overload. Its warning must be
+  // discarded together with its speculative parse_context.
+  sys.register_function<&warned_double>(
+    "diagnostic_pick", {},
+    [](ds::system::emitter& e, const ds::system::command_block&, const std::vector<std::string>&) {
+      e.warn("warning from rejected overload");
+      e.ctx->push<int64_t>();
+    }
+  );
+  sys.register_function<&exact_integer>("diagnostic_pick");
+
+  const auto selected = sys.parse<int64_t, void>("selected", "diagnostic_pick = 1");
+  ds::context ctx;
+  selected.process(&ctx);
+  CHECK(ctx.get_return<int64_t>() == 10);
+  CHECK(errors.empty());
+  CHECK(warnings.empty());
+
+  // No overload can produce a string. This is a real parse failure: report it once, and retain
+  // the statically checked return-type reason instead of claiming that the function is absent.
+  CHECK_THROWS(sys.parse<std::string_view, void>("rejected", "diagnostic_pick = 1"));
+  REQUIRE(errors.size() == 1);
+  CHECK(errors.front().find("expected type") != std::string::npos);
+  CHECK(errors.front().find(ds::utils::type_name<std::string_view>()) != std::string::npos);
+  CHECK(warnings.empty());
+
+  errors.clear();
+  tavl::parser parser;
+  sys.configure_parser(parser);
+  parser.flush("diagnostic_pick = 1");
+  parser.finish();
+  ds::system::parse_context parse_ctx;
+  ds::container partial;
+  parse_ctx.init<std::string_view, void>(sys, partial);
+  const auto [event, parse_error] = sys.parse("streamed_rejection", parser, parse_ctx, partial);
+  CHECK(event.type == tavl::event_type::row_end);
+  CHECK_FALSE(parse_error.no_error());
+  REQUIRE(errors.size() == 1);
+  CHECK(errors.front().find(ds::utils::type_name<std::string_view>()) != std::string::npos);
+  CHECK(warnings.empty());
 }
 
 TEST_CASE("audit: describe never executes a subscript") {
