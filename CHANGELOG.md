@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Hexadecimal, octal and binary integer literals: `0x1f`, `0o17`, `0b101`, with the prefix letter in
+  either case.
+
+### Changed
+
+- `tavl` dependency updated from v1.0.3 to v1.1.1.
+
+### Fixed
+
+- Syntax errors reported by `tavl` now reject the script instead of being dropped by the AST
+  builder. Unterminated strings and block comments, invalid escapes, ill-formed UTF-8, forbidden
+  control characters, mismatched brackets, empty rows (`(a,,b)`), a call operator without a value
+  (`f =`) and out-of-range floats previously compiled; an unterminated string even lost its last
+  character. `system::parse(name, text)` throws `Syntax error @ line:column: ...`; the streaming
+  overload reports the same message through the error callback and returns the `tavl` error for the
+  row, keeping the stream usable for the following rows. `tavl`'s data-profile row-naming rule
+  (`err_expected_identifier`) and its warnings stay ignored: `{ -x }` and `{ bump }` are ordinary
+  devils_script.
+- The AST builder checks expressions itself. A missing operand (`5 + 3 *`, `dbl = -`) used to become
+  an empty-token leaf, which a string context accepted as `""`; a token after a complete expression
+  (`dbl = 5.0 6.0`) was dropped together with the rest of its block; `= x` reached overload
+  resolution. Each is now a syntax error with its position.
+- An integer literal that does not fit `script_int_t` is a syntax error. It used to compile as an
+  inexact double wherever a double was acceptable.
+
 ## [1.3.1] - 2026-09-08
 
 ### Fixed

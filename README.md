@@ -108,7 +108,10 @@ can also provide a custom validity predicate.
 A script has two number types: an integer (`script_int_t`) and a floating-point value
 (`script_float_t`). A literal written without a fraction or an exponent is an integer wherever it
 appears - the surrounding block does not change how it is read, so `9007199254740992 ==
-9007199254740993` is false rather than losing both operands to the same double.
+9007199254740993` is false rather than losing both operands to the same double. Integers can also be
+written in hexadecimal, octal or binary: `0x1f`, `0o17`, `0b101` (the prefix letter in either case).
+An integer literal has to fit `script_int_t`: `9223372036854775808` is a syntax error, not a double -
+write `9223372036854775808.0` for that, and `-9223372036854775807 - 1` for the smallest `int64_t`.
 
 Integer arithmetic is exact and wraps two's complement on overflow. `%` rejects division by zero and
 `INT_MIN % -1` as script errors instead of trapping. Mixing an integer with a floating-point value

@@ -132,12 +132,6 @@ bool is_number(const std::string_view& str, script_float_t& val) noexcept {
   return ec == std::errc() && ptr == last;
 }
 
-bool is_integer(const std::string_view& str, script_int_t& val) noexcept {
-  const auto last = str.data() + str.size();
-  const auto [ptr, ec] = std::from_chars(str.data(), last, val);
-  return ec == std::errc() && ptr == last;
-}
-
 constexpr std::string_view engalpha = "AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz_";
 constexpr std::string_view specials = "!@#$%^&*-+=<>?/;\\|`~";
 constexpr std::string_view numbers = "1234567890";
@@ -624,7 +618,8 @@ void system::setup_block_description(
   size_t cmd_start = initial_cmd_start == SIZE_MAX ? index : initial_cmd_start;
   if (kind == container::description_node_kind::unknown) {
     script_float_t number = 0;
-    if (text::is_bool(token) || text::is_number(token, number)) {
+    script_int_t integer = 0;
+    if (text::is_bool(token) || parse_integer_literal(token, integer) == integer_literal::valid || text::is_number(token, number)) {
       kind = container::description_node_kind::literal;
     } else if (token == "condition" || token == "value" || token == "weight") {
       kind = container::description_node_kind::argument;
@@ -944,7 +939,12 @@ std::optional<const_value> try_eval_const(const system& sys, const system::comma
     if (text::is_bool(name)) return const_value::boolean(text::as_bool(name));
     // Same order as the literal lowering in dispatch_node: written without a fraction or an
     // exponent means integer, and only then is it read as a double.
-    if (script_int_t v = 0; text::is_integer(name, v)) return const_value::integer(v);
+    script_int_t i = 0;
+    switch (parse_integer_literal(name, i)) {
+      case integer_literal::valid: return const_value::integer(i);
+      case integer_literal::out_of_range: return std::nullopt;   // dispatch_node rejects it
+      case integer_literal::none: break;
+    }
     if (script_float_t v = 0; text::is_number(name, v)) return const_value::number(v);
     return std::nullopt;
   }
@@ -1105,8 +1105,12 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
     // A literal written without a fraction or an exponent is an integer, whatever the surrounding
     // block happens to expect. Overload resolution and the registered int64 -> double conversion
     // take it from there. Reading it as a double because the context is floating-point is what used
-    // to make `9007199254740992 == 9007199254740993` true.
-    if (script_int_t val; text::is_integer(funcname, val)) {
+    // to make `9007199254740992 == 9007199254740993` true. Nor does an integer that does not fit
+    // become a double; the AST builder normally rejects it first.
+    script_int_t val = 0;
+    const auto literal = parse_integer_literal(funcname, val);
+    if (literal == integer_literal::out_of_range) raise_error(integer_literal_out_of_range_message(funcname));
+    if (literal == integer_literal::valid) {
       set_function_type sft(ctx, function_type::rvalue);
       push_basic_function(ctx, scr, basicf::pushint, val);
       setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
@@ -1547,8 +1551,12 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
   if (c.name.count == 0 && c.name.start == 0) c.name = store_string(&c, name);
 
   auto [ev, err] = make_script_ast(p, ctx.script_ast_ctx, ctx.script_ast_nodes);
+  if (!err.no_error()) {
+    // A syntax error rejects the row like a semantic one below: report it, then return it.
+    try { error(ctx.script_ast_ctx.error_message); } catch (...) {}
+    return {ev, err};
+  }
   if (ev.type == tavl::event_type::not_enought_data || ctx.script_ast_nodes.empty()) return {ev, err};
-  if (!err.no_error()) return {ev, err};
 
   // Reconstruct this batch's raw source into a local (padding keeps tavl spans at absolute
   // offsets). It feeds normalize only; the container's `c.string_pool` is the compact token pool

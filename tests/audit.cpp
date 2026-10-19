@@ -11,6 +11,7 @@ int fold_calls = 0;
 double counting_add(const double a, const double b) { ++fold_calls; return a + b + 100; }
 double dbl(const double x) { return x; }
 bool truth(bool x) { return x; }
+std::string_view text_id(std::string_view x) { return x; }
 double choose_bool(bool) { return 1; }
 double choose_double(double) { return 2; }
 int64_t warned_double(double) { return 3; }
@@ -292,4 +293,159 @@ TEST_CASE("audit: constant folding never replaces a user-registered operator") {
   ctx.clear();
   builtin.process(&ctx);
   CHECK(ctx.get_return<double>() == 3.0);
+}
+
+TEST_CASE("audit: tavl syntax errors reject the script") {
+  std::vector<std::string> errors;
+  ds::system::options opts;
+  opts.error = [&](const std::string& msg) { errors.push_back(msg); };
+  ds::system sys(opts);
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_function<&text_id>("text_id");
+  sys.register_function<&dbl>("dbl");
+  sys.register_function<&bump>("bump");
+
+  // Each of these used to compile: tavl reported the error, the AST builder dropped it. An
+  // unterminated string even lost its last character to the quote stripping.
+  const std::pair<std::string_view, std::string_view> cases[] = {
+    { "text_id = \"abc", "unterminated string" },
+    { "text_id = 'abc", "unterminated string" },
+    { "text_id = \"a\\qb\"", "invalid escape" },
+    { "text_id = \"a\xff b\"", "invalid utf8" },
+    { "text_id = \"a\x01" "b\"", "forbidden control" },
+    { "text_id = \"ok\" /* open", "unterminated block comment" },
+    { "text_id = (\"ok\"]", "bracket missmatch" },
+    { "text_id = (\"ok\",,)", "empty row" },
+    { "text_id =", "missing value" },
+  };
+  for (const auto& [source, what] : cases) {
+    CAPTURE(source);
+    errors.clear();
+    CHECK_THROWS(sys.parse<std::string_view, void>("bad", source));
+    REQUIRE(errors.size() == 1);
+    CHECK(errors.front().starts_with("Syntax error @ 1:"));
+    CHECK(errors.front().ends_with(what));
+  }
+
+  errors.clear();
+  CHECK_THROWS(sys.parse<double, void>("bad", "dbl = 1e400"));
+  REQUIRE(errors.size() == 1);
+  CHECK(errors.front() == "Syntax error @ 1:7: float out of range");
+
+  // tavl's data-profile naming rules do not apply to devils_script expression blocks.
+  errors.clear();
+  for (const auto source : { "{ -7.0 / 2.0 }", "{ dbl = 1.0, }", "{\n  dbl = 1.0\n\n  dbl = 2.0\n}" }) {
+    CAPTURE(source);
+    CHECK_NOTHROW(sys.parse<double, void>("good", source));
+  }
+  CHECK_NOTHROW(sys.parse<void, void>("good", "{ bump // a bare call: tavl's warn_object_without_value\n }"));
+  CHECK(errors.empty());
+}
+
+TEST_CASE("audit: the AST builder rejects malformed expressions") {
+  std::vector<std::string> errors;
+  ds::system::options opts;
+  opts.error = [&](const std::string& msg) { errors.push_back(msg); };
+  ds::system sys(opts);
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_function<&text_id>("text_id");
+  sys.register_function<&dbl>("dbl");
+
+  // A missing operand used to become an empty-token leaf, and a token after a complete expression
+  // was silently dropped together with the rest of its block.
+  const std::pair<std::string_view, std::string_view> cases[] = {
+    { "5.0 + 3.0 *", "Syntax error @ 1:11: missing operand after '*'" },
+    { "dbl = -", "Syntax error @ 1:7: missing operand after '-'" },
+    { "not", "Syntax error @ 1:1: missing operand after 'not'" },
+    { "dbl = 5.0 6.0", "Syntax error @ 1:11: unexpected '6.0' after the expression" },
+    { "{ dbl = 1.0 2.0, 3.0 }", "Syntax error @ 1:13: unexpected '2.0' after the expression" },
+    { "1.0 + dbl(2.0) 3.0", "Syntax error @ 1:16: unexpected '3.0' after the expression" },
+    { "= 1.0", "Syntax error @ 1:1: expected a function name before '='" },
+    { "{ ?= 1.0 }", "Syntax error @ 1:3: expected a function name before '?='" },
+  };
+  for (const auto& [source, message] : cases) {
+    CAPTURE(source);
+    errors.clear();
+    CHECK_THROWS(sys.parse<double, void>("bad", source));
+    REQUIRE(errors.size() == 1);
+    CHECK(errors.front() == message);
+  }
+
+  // In a string context the empty leaf compiled as "".
+  errors.clear();
+  CHECK_THROWS(sys.parse<std::string_view, void>("bad", "text_id = \"a\" +"));
+  REQUIRE(errors.size() == 1);
+  CHECK(errors.front() == "Syntax error @ 1:15: missing operand after '+'");
+
+  // The streaming overload returns the same error for its row and goes on with the next one.
+  errors.clear();
+  tavl::parser p;
+  sys.configure_parser(p);
+  p.flush("dbl = 1.0 2.0\ndbl = 3.0\n");
+  p.finish();
+  ds::system::parse_context parse_ctx;
+  ds::container streamed;
+  parse_ctx.init<double, void>(sys, streamed);
+  const auto [ev1, err1] = sys.parse("streamed", p, parse_ctx, streamed);
+  CHECK(err1.type == tavl::error_type::err_too_many_values);
+  REQUIRE(errors.size() == 1);
+  CHECK(errors.front() == "Syntax error @ 1:11: unexpected '2.0' after the expression");
+  const auto [ev2, err2] = sys.parse("streamed", p, parse_ctx, streamed);
+  CHECK(err2.no_error());
+  CHECK(ev2.type == tavl::event_type::row_end);
+  ds::context ctx;
+  streamed.process(&ctx);
+  CHECK(ctx.get_return<double>() == 3.0);
+}
+
+TEST_CASE("audit: streamed syntax errors are returned per row") {
+  ds::system sys;
+  sys.init_basic_functions();
+  sys.init_math();
+
+  // Byte-by-byte input: the error can arrive on an event the builder skips (the empty row) and
+  // before a resume; it must still reach the row's terminal event, and the next row stays clean.
+  const std::string_view source = "(5,,6)\n\"a\\qb\"\n7\n";
+  tavl::parser p;
+  sys.configure_parser(p);
+  ds::script_ast_context ctx;
+  std::vector<tavl::node> nodes;
+  std::vector<std::pair<tavl::error_type, bool>> rows;
+  const auto drain = [&] {
+    for (;;) {
+      const auto [ev, err] = ds::make_script_ast(p, ctx, nodes);
+      if (ev.type == tavl::event_type::not_enought_data) return;
+      if (ev.type == tavl::event_type::eof && nodes.empty() && err.no_error()) return;
+      rows.emplace_back(err.type, nodes.empty());
+      if (ev.type == tavl::event_type::eof) return;
+    }
+  };
+  for (const char c : source) { p.flush(std::string_view(&c, 1)); drain(); }
+  p.finish();
+  drain();
+  REQUIRE(rows.size() == 3);
+  CHECK(rows[0] == std::pair{ tavl::error_type::err_empty_row, true });
+  CHECK(rows[1] == std::pair{ tavl::error_type::err_invalid_escape, true });
+  CHECK(rows[2] == std::pair{ tavl::error_type::no_error, false });
+
+  // The system overload reports the error through the callback and returns it.
+  std::vector<std::string> errors;
+  ds::system::options opts;
+  opts.error = [&](const std::string& msg) { errors.push_back(msg); };
+  ds::system reporting(opts);
+  reporting.init_basic_functions();
+  tavl::parser rp;
+  reporting.configure_parser(rp);
+  rp.flush("\"abc");
+  rp.finish();
+  ds::system::parse_context parse_ctx;
+  ds::container partial;
+  parse_ctx.init<std::string_view, void>(reporting, partial);
+  const auto [event, parse_error] = reporting.parse("streamed", rp, parse_ctx, partial);
+  CHECK(parse_error.type == tavl::error_type::err_unterminated_string);
+  REQUIRE(errors.size() == 1);
+  CHECK(errors.front() == "Syntax error @ 1:1: unterminated string");
+  CHECK(partial.cmds.empty());
 }

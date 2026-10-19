@@ -62,6 +62,44 @@ TEST_CASE("numbers: an integer literal stays an integer") {
   CHECK(actx.get_arg<int64_t>(args.find_arg("n")) == 7);
 }
 
+TEST_CASE("numbers: hexadecimal, octal and binary literals are integers") {
+  const auto sys = make();
+  CHECK(eval<int64_t>(sys, "0x10") == 16);
+  CHECK(eval<int64_t>(sys, "0X1f + 0o17 + 0O7 + 0b101 + 0B11") == 31 + 15 + 7 + 5 + 3);
+  CHECK(eval<int64_t>(sys, "-0xff") == -255);
+  CHECK(eval<int64_t>(sys, "0x7fffffffffffffff") == std::numeric_limits<int64_t>::max());
+  CHECK(eval<bool>(sys, "0x20000000000001 == 9007199254740993"));
+  CHECK(eval<double>(sys, "0x10 / 0b100") == 4.0);
+  CHECK(eval<int64_t>(sys, "big - 0x20000000000000") == 1);   // not folded: stays exact at runtime
+}
+
+TEST_CASE("numbers: an integer literal that does not fit is an error, not a double") {
+  const auto sys = make();
+  // `9223372036854775808` used to compile as an inexact double wherever a double was acceptable.
+  const std::pair<const char*, const char*> cases[] = {
+    { "9223372036854775808", "Syntax error @ 1:1: integer literal '9223372036854775808' is out of range for int64; write '9223372036854775808.0' for a floating-point value" },
+    { "1.5 + 99999999999999999999999", "Syntax error @ 1:7: integer literal '99999999999999999999999' is out of range for int64; write '99999999999999999999999.0' for a floating-point value" },
+    { "-9223372036854775808", "Syntax error @ 1:2: integer literal '9223372036854775808' is out of range for int64; write '9223372036854775808.0' for a floating-point value" },
+    { "0x8000000000000000", "Syntax error @ 1:1: integer literal '0x8000000000000000' is out of range for int64" },
+  };
+  for (const auto& [source, message] : cases) {
+    CAPTURE(source);
+    for (const bool as_double : { false, true }) {
+      try {
+        if (as_double) (void)sys.parse<double, void>("script", source);
+        else (void)sys.parse<int64_t, void>("script", source);
+        FAIL("accepted");
+      } catch (const std::exception& e) {
+        CHECK(std::string_view(e.what()) == message);
+      }
+    }
+  }
+
+  // The spellings the messages point to.
+  CHECK(eval<double>(sys, "9223372036854775808.0") == 9223372036854775808.0);
+  CHECK(eval<int64_t>(sys, "-9223372036854775807 - 1") == std::numeric_limits<int64_t>::min());
+}
+
 TEST_CASE("numbers: integer arithmetic is exact and wraps") {
   const auto sys = make();
   constexpr int64_t max = std::numeric_limits<int64_t>::max();

@@ -69,6 +69,14 @@ constexpr script_float_t unpack_float(const int64_t arg) noexcept {
   return std::bit_cast<script_float_t>(script_float_bits_t(script_float_ubits_t(uint64_t(arg))));
 }
 
+// A number literal written without a fraction or an exponent: decimal, or hexadecimal, octal or
+// binary behind a `0x` / `0o` / `0b` prefix (either case, as tavl lexes them). Such a literal is an
+// integer and has to fit `script_int_t`; `out_of_range` must never fall back to a floating-point
+// value.
+enum class integer_literal { none, valid, out_of_range };
+integer_literal parse_integer_literal(const std::string_view text, script_int_t& value) noexcept;
+std::string integer_literal_out_of_range_message(const std::string_view text);
+
 #ifndef DEVILS_SCRIPT_VERSION_MAJOR
 #define DEVILS_SCRIPT_VERSION_MAJOR 0
 #endif

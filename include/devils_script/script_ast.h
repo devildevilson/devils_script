@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <string>
 #include <string_view>
 #include <tuple>
 
@@ -33,6 +34,8 @@ namespace devils_script {
 //
 struct script_ast_context {
   std::vector<tavl::event> events;
+  tavl::error error;           // first critical tavl error of the current row, kept across resumes
+  std::string error_message;   // full text of the error make_script_ast last returned
   size_t nest_counter = 0;
   bool got_start = false;
 
@@ -42,9 +45,15 @@ struct script_ast_context {
 // `p` must have its operators registered already (see system::configure_parser). Parses one row
 // from the current event stream and returns its terminal event (`row_end`, `eof`, or
 // `not_enought_data`). On `not_enought_data`, `ctx` keeps enough state to resume later.
+// The returned error is the row's first critical tavl error, or else a malformed expression found
+// while building it (a missing operand, a token after the expression); `ctx.error_message` holds
+// its text. tavl warnings and err_expected_identifier are not reported: they enforce tavl's
+// data-profile row naming, which ordinary devils_script syntax (`{ bump }`, `{ -x }`) does not
+// follow.
 std::tuple<tavl::event, tavl::error> make_script_ast(tavl::parser& p, script_ast_context& ctx, std::vector<tavl::node>& ast_nodes);
 
-// Whole-string helper kept for non-streaming callers.
+// Whole-string helper kept for non-streaming callers. Throws std::runtime_error on the first
+// syntax error, judged as above.
 std::vector<tavl::node> make_script_ast(tavl::parser& p, std::string_view src);
 
 }

@@ -109,6 +109,13 @@ int main() {
   expect<bool>(sys, "16777217 > 16777216", true);
   expect<int32_t>(sys, "16777216 + 1", 16777217);
 
+  // Literals follow the narrow width: one that does not fit int32 is rejected, never made a float.
+  expect<int32_t>(sys, "0x7fffffff", 2147483647);
+  expect<int32_t>(sys, "0b101 + 0o7", 12);
+  expect_throws(sys, "2147483648");
+  expect_throws(sys, "0x80000000");
+  expect<float>(sys, "2147483648.0", 2147483648.0f);
+
   // Division leaves the integers here too, and coming back is explicit.
   expect<float>(sys, "7 / 2", 3.5f);
   expect<float>(sys, "counted / 2", 1.5f);
