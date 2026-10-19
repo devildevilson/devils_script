@@ -12,6 +12,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <deque>
+#include <atomic>
 #include <vector>
 #include "devils_script/common.h"
 #include "devils_script/type_traits.h"
@@ -241,11 +242,11 @@ public:
     void init(const system& sys, container& c);
 
     uint64_t gen_value();           // advances this parse's PRNG (seeded from system at parse start)
-    // Seeds this parse's PRNG from the system seed and the script's name, and draws the script's own
-    // state from it. `chance` mixes that state, a per-occurrence state and the context's state: the
-    // first two are fixed per script, so they have to differ between scripts - seeded from the system
-    // seed alone, every script drew the same states and gave the same rolls.
-    void seed_script(const system& sys, const std::string_view name, container& c);
+    // Seeds this parse's PRNG with the system's next script state and draws the script's own state
+    // from it. `chance` mixes that state, a per-occurrence state and the context's state: the first two
+    // are fixed per script, so they have to differ between scripts - seeded from the system seed
+    // alone, every script drew the same states and gave the same rolls.
+    void seed_script(const system& sys, container& c);
 
     bool is_func_subblock() const;
     void push_func(const std::string_view &name);
@@ -472,7 +473,10 @@ public:
   [[noreturn]] void raise_error(const std::string &msg) const;
   void raise_warning(const std::string& msg) const;
   uint64_t get_seed() const;
-  void reseed(const uint64_t val);
+  void reseed(const uint64_t val);   // also restarts the per-script sequence (see next_script_state)
+  // The next fixed random state for a script being parsed: the system's own sequence, so every script
+  // gets a distinct state whatever its name, reproducibly for the same seed and parse order.
+  uint64_t next_script_state() const noexcept;
   std::string dump_registered_functions() const;
 
   // Installs the resolver used by the `execute` builtin to look up sub-scripts by name during
@@ -636,6 +640,7 @@ public:
   std::optional<int64_t> resolve_enum(const std::string_view& enum_type, const std::string_view& value) const;
   std::optional<int64_t> resolve_enum(const std::string_view& value) const;
   size_t dispatch_node(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view &override_lvalue = std::string_view()) const;
+  size_t dispatch_node_impl(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& override_lvalue) const;
   size_t fold_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const;
   command_data::ftype get_token_type(const std::string_view& name) const;
   std::tuple<int32_t, int32_t, command_data::associativity, command_data::ftype> get_token_caps(const std::string_view& name) const;
@@ -654,6 +659,15 @@ private:
   const command_data* resolve_function(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& name) const;
 
   uint64_t seed;
+  // Scripts parsed so far; atomic so a shared system can parse on several threads. Copying a system
+  // copies the count.
+  struct script_counter {
+    std::atomic<uint64_t> value{0};
+    script_counter() noexcept = default;
+    script_counter(const script_counter& other) noexcept : value(other.value.load()) {}
+    script_counter& operator=(const script_counter& other) noexcept { value = other.value.load(); return *this; }
+  };
+  mutable script_counter scripts_parsed;
   enum safety safet;
   bool optimize;
   err_fn error;

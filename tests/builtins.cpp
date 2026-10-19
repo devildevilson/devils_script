@@ -229,7 +229,7 @@ TEST_CASE("unsafe-mode execution") {
     sys.init_math();
     const auto cont = sys.parse<double, void>("script", "{ random = { { weight = 1, 3 }, { weight = 2, 6 }, { weight = 3, 9 } } }");
     ds::context ctx;
-    ctx.prng_state = 3;
+    ctx.prng_state = 2;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
     CHECK(ctx.get_return<double>() == 6); // identical to the safe-mode "random" subcase

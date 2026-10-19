@@ -10,7 +10,7 @@
 
 namespace devils_script {
 
-#define EPSILON 0.000001
+#define EPSILON float_equality_epsilon
 
 namespace internal {
 using script_uint_t = std::make_unsigned_t<script_int_t>;

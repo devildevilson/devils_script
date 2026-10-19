@@ -6,6 +6,7 @@
 #include <cassert>
 #include <optional>
 #include <cstring>
+#include <tuple>
 #include <vector>
 #include "devils_script/context.h"
 #include "devils_script/string-utils.hpp"
@@ -13,10 +14,21 @@
 namespace devils_script {
 
 namespace {
+// A compile error. raise_error throws it without a position; the innermost dispatch_node with a
+// source position stamps it on the way out, so the message names where the problem is.
 class parse_rejected final : public std::runtime_error {
 public:
-  using std::runtime_error::runtime_error;
+  explicit parse_rejected(const std::string& msg) : std::runtime_error(msg), reason(msg) {}
+  parse_rejected(const std::string& reason, const size_t line, const size_t column, const std::string& full)
+    : std::runtime_error(full), reason(reason), line(line), column(column) {}
+  std::string reason;              // what went wrong, without the position
+  size_t line = 0, column = 0;     // where; 0 = not known yet
+  bool positioned() const noexcept { return line != 0; }
 };
+
+parse_rejected positioned_error(const std::string& reason, const size_t line, const size_t column, const std::string& details) {
+  return parse_rejected(reason, line, column, std::format("@ {}:{}: {}", line, column, details));
+}
 }
 
 bool type_is_ignore(const std::string_view& type) noexcept { return type == utils::type_name<ignore_value>(); }
@@ -207,7 +219,7 @@ bool is_in_ignore_list(const std::string_view& str) noexcept {
 
 }
 
-#define EPSILON 0.000001
+#define EPSILON float_equality_epsilon
 
 
 system::nest_level_changer::nest_level_changer(parse_ctx* ctx) noexcept : ctx(ctx) { ctx->nest_level += 1; }
@@ -255,16 +267,15 @@ bool system::safety() const { return static_cast<bool>(this->safet); }
 [[noreturn]] void system::raise_error(const std::string& msg) const { throw parse_rejected(msg); }
 void system::raise_warning(const std::string& msg) const { warning(msg); }
 uint64_t system::get_seed() const { return seed; }
-void system::reseed(const uint64_t val) { seed = val; }
+void system::reseed(const uint64_t val) { seed = val; scripts_parsed.value = 0; }
+uint64_t system::next_script_state() const noexcept { return prng::mix(seed, scripts_parsed.value.fetch_add(1) + 1); }
 void system::set_script_resolver(script_resolver_t resolver) { script_resolver = std::move(resolver); }
 const script_container* system::resolve_script(const std::string_view& name) const {
   return script_resolver ? script_resolver(name) : nullptr;
 }
 uint64_t system::parse_context::gen_value() { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
-void system::parse_context::seed_script(const system& sys, const std::string_view name, container& c) {
-  uint64_t name_hash = UINT64_C(14695981039346656037);   // FNV-1a: stable across runs and platforms
-  for (const char ch : name) { name_hash ^= uint8_t(ch); name_hash *= UINT64_C(1099511628211); }
-  prng_s = p_t::init(prng::mix(sys.get_seed(), name_hash));
+void system::parse_context::seed_script(const system& sys, container& c) {
+  prng_s = p_t::init(sys.next_script_state());
   c.prng_state = gen_value();
 }
 
@@ -418,7 +429,9 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr, const std::st
   if (ctx->stack_types.empty() || ctx->stack_types.back() != from)
     raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", from, ctx->stack_types.empty() ? std::string_view("empty stack") : ctx->stack_types.back()));
   for (const auto* edge : path->edges) {
-    scr->cmds.emplace_back(safety() ? edge->safe : edge->unsafe, INT64_C(0));
+    const auto fp = safety() ? edge->safe : edge->unsafe;
+    scr->cmds.emplace_back(fp, INT64_C(0));
+    scr->note_conversion(fp, edge->from, edge->to);
     ctx->stack_types.back() = edge->to;
   }
   ctx->conversion_cost += path->cost;
@@ -451,6 +464,9 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
   std::optional<candidate_result> best;
   bool ambiguous = false;
   std::vector<std::string> errors;
+  // The candidate failure that got furthest into the source: when nothing fits, it is most likely the
+  // real problem (a misspelled name deep inside), so it leads the message.
+  std::optional<parse_rejected> furthest;
 
   // An untyped scope (an argument whose type the script does not know) may be any scope: scoped
   // candidates are tried as well, and the emitter commits the scope type it settles on. Only
@@ -514,6 +530,9 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
       } else if (cost == best->cost && exact_return == best->exact_return && rank == best->rank) {
         ambiguous = true;
       }
+    } catch (const parse_rejected& ex) {
+      errors.push_back(std::format("candidate '{}': {}", data.function_signature, ex.what()));
+      if (ex.positioned() && (!furthest || std::tie(ex.line, ex.column) > std::tie(furthest->line, furthest->column))) furthest = ex;
     } catch (const std::exception& ex) {
       errors.push_back(std::format("candidate '{}': {}", data.function_signature, ex.what()));
     }
@@ -526,6 +545,9 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
       if (!reasons.empty()) reasons += "; ";
       reasons += reason;
     }
+    if (furthest)
+      throw positioned_error(furthest->reason, furthest->line, furthest->column,
+                             std::format("{} (resolving '{}': {})", furthest->reason, name, reasons));
     raise_error(std::format("Could not resolve function '{}' for scope type '{}': {}", name, current_scope, reasons));
   }
 
@@ -1094,9 +1116,25 @@ std::optional<const_value> try_eval_const(const system& sys, const system::comma
 }  // namespace
 
 size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& override_lvalue) const {
+  try {
+    return dispatch_node_impl(ctx, scr, block, override_lvalue);
+  } catch (const parse_rejected& e) {
+    if (e.positioned() || block.empty() || block.line() == 0) throw;
+    throw positioned_error(e.reason, block.line(), block.column(), e.what());
+  }
+}
+
+size_t system::dispatch_node_impl(parse_ctx* ctx, container* scr, const command_block& block, const std::string_view& override_lvalue) const {
   if (block.empty()) return 0;
 
-  source_position_changer spc(ctx, block.line(), block.column());
+  // Commands the enclosing node emitted so far are its own: stamp them with its position before this
+  // child takes over. They used to be stamped later by the first child to finish, so a failing scope
+  // call reported the position of the block nested in it.
+  if (scr->locs.size() < scr->cmds.size())
+    scr->locs.resize(scr->cmds.size(), script_container::src_loc{ uint32_t(ctx->source_line), uint32_t(ctx->source_column) });
+  // A synthetic block (the root, an implicit combinator) has no position of its own.
+  const bool has_position = block.line() != 0;
+  source_position_changer spc(ctx, has_position ? block.line() : ctx->source_line, has_position ? block.column() : ctx->source_column);
 
   const auto exp_t = ctx->expected_type;
   const bool any_type_expected = type_is_any_type(exp_t);
@@ -1584,6 +1622,11 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
 void system::configure_parser(tavl::parser& p) const {
   p.clear_operators();
+  // Every block, the root included, is data to tavl: a devils_script `{}` is a list of expressions,
+  // not an object of named rows, so tavl's row-naming rules do not apply. The AST builder gives the
+  // tokens their structure (calls, operators, operands) itself. The modes survive parser::clear().
+  constexpr auto data = tavl::parse_mode::data_driven;
+  p.set_default_block_modes(data, data, data);
   // structural call operators — not registered in mfuncs; lowest precedence, right-assoc.
   // `abc = {...}` / `abc ?= {...}` lower than any math so the rhs expression binds first.
   p.add_operator("=",  tavl::op_fixity::binary, 1, tavl::op_assoc::right);
@@ -1672,7 +1715,7 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
   if (!ctx.initialized) raise_error("parse_context is not initialized");
   if (c.name.count == 0 && c.name.start == 0) {
     c.name = store_string(&c, name);
-    ctx.seed_script(*this, name, c);
+    ctx.seed_script(*this, c);
   }
 
   auto [ev, err] = make_script_ast(p, ctx.script_ast_ctx, ctx.script_ast_nodes);
@@ -1702,12 +1745,9 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
   // Reconstruct this batch's raw source into a local (padding keeps tavl spans at absolute
   // offsets). It feeds normalize only; the container's `c.string_pool` is the compact token pool
   // that `store_string` accumulates across calls, never the raw text.
-  const size_t storage_end = p.storage.size();
-  const size_t live_size = p.storage.buffer_size();
-  const size_t released_size = storage_end - live_size;
-  const auto live_src = p.content(tavl::source_span{released_size, live_size, 1, 1});
+  const size_t released_size = p.released_offset();
   std::string raw_src(released_size, ' ');
-  raw_src.append(live_src);
+  raw_src.append(p.live_source());
 
   try {
     ctx.rpn_ctx.token_storage.reserve(raw_src.size() + 4096);

@@ -213,12 +213,11 @@ bool is_script_event(tavl::event_type t) {
   return t != tavl::event_type::empty_row && t != tavl::event_type::got_comment;
 }
 
-// tavl's critical errors are lexical/structural, except err_expected_identifier: that is the
-// data-profile rule that an object row needs a name. A devils_script `{}` is an expression list,
-// where `{ -7 / 2 }` or a call to a literal operator `{ m = {...} }` is valid; the Pratt pass and
-// the semantic pass judge such rows instead.
+// tavl's critical errors are lexical/structural (every block is data, see configure_parser), except
+// err_number_out_of_range: parse_primary reports that one against the real width of script_int_t
+// (32-bit builds too) and with a hint.
 bool is_syntax_error(const tavl::error& err) {
-  return err.is_critical() && err.type != tavl::error_type::err_expected_identifier;
+  return err.is_critical() && err.type != tavl::error_type::err_number_out_of_range;
 }
 
 std::string syntax_error_message(const tavl::error& err) {

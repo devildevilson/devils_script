@@ -317,7 +317,7 @@ TEST_CASE("audit: tavl syntax errors reject the script") {
     { "text_id = \"ok\" /* open", "unterminated block comment" },
     { "text_id = (\"ok\"]", "bracket missmatch" },
     { "text_id = (\"ok\",,)", "empty row" },
-    { "text_id =", "missing value" },
+    { "text_id =", "missing operand after '='" },   // every block is data to tavl: the AST builder reports it
   };
   for (const auto& [source, what] : cases) {
     CAPTURE(source);

@@ -231,6 +231,9 @@ int64_t cmpeq2(int64_t arg, context* ctx, const script_container*) {
     ctx->stack.push(false);
   } else if (v1.type() == utils::type_name<std::string_view>()) {
     ctx->stack.push(ctx->stack.safe_get<std::string_view>(id1) == ctx->stack.safe_get<std::string_view>(id2));
+  } else if (v1.type() == utils::type_name<script_float_t>()) {
+    // Like `==`: within the epsilon, and never for NaN. Bytes differed for 0.1 + 0.2 vs 0.3.
+    ctx->stack.push(std::abs(ctx->stack.safe_get<script_float_t>(id1) - ctx->stack.safe_get<script_float_t>(id2)) < float_equality_epsilon);
   } else {
     ctx->stack.push(memcmp(v1._mem, v2._mem, MAXIMUM_STACK_VAL_SIZE) == 0);
   }
@@ -340,6 +343,9 @@ int64_t cmpeq2_unsafe(int64_t arg, context* ctx, const script_container*) {
     ctx->stack.push(false);
   } else if (v1.type() == utils::type_name<std::string_view>()) {
     ctx->stack.push(ctx->stack.get<std::string_view>(id1) == ctx->stack.get<std::string_view>(id2));
+  } else if (v1.type() == utils::type_name<script_float_t>()) {
+    // Like `==`: within the epsilon, and never for NaN. Bytes differed for 0.1 + 0.2 vs 0.3.
+    ctx->stack.push(std::abs(ctx->stack.get<script_float_t>(id1) - ctx->stack.get<script_float_t>(id2)) < float_equality_epsilon);
   } else {
     ctx->stack.push(memcmp(v1._mem, v2._mem, MAXIMUM_STACK_VAL_SIZE) == 0);
   }

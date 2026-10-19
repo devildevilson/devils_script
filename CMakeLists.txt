@@ -84,7 +84,7 @@ target_compile_definitions(devils_script_options INTERFACE
 FetchContent_Declare(
   tavl
   GIT_REPOSITORY https://github.com/devildevilson/tavl.git
-  GIT_TAG        v1.1.1
+  GIT_TAG        v1.1.2
 )
 
 FetchContent_MakeAvailable(tavl)

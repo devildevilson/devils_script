@@ -115,6 +115,8 @@ struct context {
   size_t saved_base;
   size_t list_base;
   size_t execute_depth = 0;   // `execute` frames currently running; see max_execute_depth
+  // Callback calls (iterator and list-pipeline bodies) made in this run; see container_view::process.
+  uint64_t callback_calls = 0;
   void* userptr;
   const script_container* current_script;
   std::function<void(const std::string&)> trace;

@@ -455,6 +455,7 @@ void system::setup_type_conversion(parse_ctx* ctx, container* scr) const {
   // register_implicit_conversion would have stored for the same pair.
   const function_t fs[] = { &convert_unsafe<final_stack_el_t<FROM>, final_stack_el_t<TO>>, &convert<final_stack_el_t<FROM>, final_stack_el_t<TO>> };
   scr->cmds.push_back(container::command(fs[size_t(safety())], INT64_C(0)));
+  scr->note_conversion(fs[size_t(safety())], from_name, to_name);
 
   if (!ctx->is<FROM>()) raise_error(std::format("Wrong FROM type '{}' - stack last type is '{}'", ctx->stack_types.back(), from_name));
   ctx->stack_types.back() = to_name;
@@ -1093,7 +1094,7 @@ container system::parse(std::string_view name, std::string_view text) const {
   try {
     ctx.init<RETURN_T, ROOT_T>(*this, scr);
     scr.name = store_string(&scr, name);
-    ctx.seed_script(*this, name, scr);
+    ctx.seed_script(*this, scr);
     // Raw source stays local: it only feeds normalize/make_script_ast. The container never retains
     // it — `store_string` builds the compact `scr.source` token pool during the semantic pass.
     const auto script_block = std::string_view(text);

@@ -19,10 +19,15 @@ All notable changes to this project are documented here. The format is based on
   argument frames at parse time.
 - `std::optional<T>` parameters work: an absent argument (positional or named) is passed as
   `std::nullopt`, a present one is converted to `T`.
+- Floating-point literals with a signed exponent: `1e-3`, `1.5e+3` (tavl v1.1.2 no longer splits
+  them at a registered `+`/`-`).
 
 ### Changed
 
-- `tavl` dependency updated from v1.0.3 to v1.1.1.
+- `tavl` dependency updated from v1.0.3 to v1.1.2. Every block, the root included, is parsed in tavl's
+  data-driven mode (`set_default_block_modes`): a devils_script `{}` is a list of expressions, so
+  tavl's row-naming rules no longer apply and the AST builder alone judges each row. Consumers no
+  longer build tavl's tests and command-line tool.
 - A number is not a truth value: every child of an `AND`/`OR`/`NAND`/`NOR` block must be a `bool`. The
   first child used to reach the short-circuit jump unconverted, later ones were silently converted.
 - `random` rejects a negative or NaN weight at run time; such weights used to make every branch fail
@@ -42,9 +47,18 @@ All notable changes to this project are documented here. The format is based on
   result conversion. An integer expression in a floating-point block is now computed in integers and
   converted once, as the README promises and as the constant folder already did (`-7` used to pick the
   double `unary_minus`, `2 % 0` the double `%`).
-- `chance` and `random` seed a script's fixed states from the system seed and the script's name; every
-  script used to draw the same states, so different scripts rolled the same values. The context's
-  `prng_state` (e.g. a frame index) stays the varying part. Seeded values differ from 1.3.1.
+- `chance` and `random`: every parsed script draws its fixed state from the system's own sequence
+  (`system::next_script_state`, restarted by `reseed`), named or not; every script used to draw the same
+  state from the system seed, so different scripts rolled the same values. Each callback call (iterator
+  or list-pipeline body) mixes its own index into the context's state, so every element rolls anew; a
+  run repeated in the same frame (`prng_state`) rolls the same values. Seeded values differ from 1.3.1.
+- `switch` compares floating-point values within the same epsilon as `==` (it compared bytes).
+- Error positions. A run-time error points at the failing call: a node's commands emitted before its
+  nested block used to carry the nested block's position. A compile error now leads with
+  `@ line:column` of the innermost node it happened in and, when no overload fits, with the candidate
+  failure that got furthest into the source; the full candidate list follows in parentheses.
+- `disassemble` names type conversions (`convert long -> double`) through `container::conversions`;
+  they used to print without a name or with the name of a neighbouring node.
 - `describe()` stops at the first command that cannot run, and never runs a void iterator.
 - An overload trial no longer copies the script's token storage (copying a parse context gives an empty
   token scratch); that copy grew with the square of a long expression's length.

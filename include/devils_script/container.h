@@ -90,6 +90,12 @@ struct script_container {
   // fields above they view compile-time type names, never `string_pool`: the runtime copies them
   // into stack and saved-slot type tags, which outlive the container.
   std::vector<std::string_view> types;
+  // The type conversions `cmds` uses, by function pointer. They are template instances no opcode table
+  // knows, so this is where the disassembler finds their names. `from`/`to` view static type names.
+  struct conversion_info { function_t fp; std::string_view from, to; };
+  std::vector<conversion_info> conversions;
+  void note_conversion(const function_t fp, const std::string_view from, const std::string_view to);
+  const conversion_info* find_conversion(const function_t fp) const noexcept;
   std::string string_pool;
   string_ref name{};
   // Static return type of this script (the parse-time RETURN_T), as a stable type-name view.

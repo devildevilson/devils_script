@@ -171,14 +171,15 @@ TEST_CASE("Main lang statements") {
   }
 
   SUBCASE("chance") {
-    // The values depend on the system seed, the script's name and the context seed.
-    { // context seed 3
+    // The values depend on the system seed, the script's place in the system's parse sequence and the
+    // context seed.
+    { // context seed 2
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
       const auto cont = sys.parse<bool, void>("script", script6);
       ds::context ctx;
-      ctx.prng_state = 3;
+      ctx.prng_state = 2;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
       REQUIRE(ctx.get_return<bool>() == true);
@@ -198,7 +199,7 @@ TEST_CASE("Main lang statements") {
 
     { // seed from system
       ds::system::options o;
-      o.seed = 5;
+      o.seed = 2;
       ds::system sys(o);
       sys.init_basic_functions();
       sys.init_math();
@@ -217,7 +218,7 @@ TEST_CASE("Main lang statements") {
     sys.init_math();
     const auto cont = sys.parse<double, void>("script", script7);
     ds::context ctx;
-    ctx.prng_state = 3;
+    ctx.prng_state = 2;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
     REQUIRE(ctx.get_return<double>() == 6);

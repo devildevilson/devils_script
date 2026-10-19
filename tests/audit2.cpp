@@ -1028,21 +1028,117 @@ TEST_CASE("audit2 #24: an integer expression in a floating-point block is comput
 }
 
 TEST_CASE("audit2 #45: chance is fixed per script and occurrence, varied by the context state") {
-  auto sys = make(configs[0]);
-  const auto roll = [&](const ds::container& script, const uint64_t frame) {
+  const auto roll = [](const ds::container& script, const uint64_t frame) {
     ds::context ctx;
     ctx.prng_state = frame;   // the external, mutable part: e.g. the frame index
     script.process(&ctx);
     return ctx.get_return<double>();
   };
+  auto sys = make(configs[0]);
   const auto loot = sys.parse<double, void>("loot", "chance");
   const auto plague = sys.parse<double, void>("plague", "chance");
-  const auto loot_again = sys.parse<double, void>("loot", "chance");
-  // Same script, same frame: the same roll, also when parsed again.
+  const auto unnamed = sys.parse<double, void>("", "chance");
+  const auto unnamed_too = sys.parse<double, void>("", "chance");
+  // Same script, same frame: the same roll. Another frame rolls again.
   CHECK(roll(loot, 7) == roll(loot, 7));
-  CHECK(roll(loot, 7) == roll(loot_again, 7));
-  // Another frame rolls again.
   CHECK(roll(loot, 7) != roll(loot, 8));
-  // Another script rolls on its own; both used to draw identical states from the system seed.
+  // Every script draws its own state from the system's sequence, named or not; all of them used to
+  // draw the same one from the system seed.
   CHECK(roll(loot, 7) != roll(plague, 7));
+  CHECK(roll(unnamed, 7) != roll(unnamed_too, 7));
+  // The sequence is reproducible: the same seed and parse order give the same states.
+  auto again = make(configs[0]);
+  CHECK(roll(again.parse<double, void>("loot", "chance"), 7) == roll(loot, 7));
+  CHECK(roll(again.parse<double, void>("plague", "chance"), 7) == roll(plague, 7));
+}
+
+TEST_CASE("tavl 1.1.2: signed exponents, out-of-range integers, data-driven blocks") {
+  for (const auto cfg : configs) {
+    CAPTURE(cfg.safe);
+    CAPTURE(cfg.optimize);
+    auto sys = make(cfg);
+    // The lexer used to split `1e-3` at the registered `-`: "Could not find function '1e'".
+    CHECK(run<double>(sys, "1e-3") == 0.001);
+    CHECK(run<double>(sys, "1.5e+3 + 1") == 1501.0);
+    CHECK(run<double>(sys, "1E-3 - 1") == -0.999);
+    CHECK(run<int64_t>(sys, "5-3") == 2);
+
+    // tavl now flags an integer past 64 bits itself; the parser still reports it with its hint.
+    CHECK_THROWS_WITH(((void)sys.parse<int64_t, void>("s", "99999999999999999999999")), doctest::Contains("write '99999999999999999999999.0'"));
+
+    // Data-driven blocks: rows tavl's object rules rejected are ordinary expressions.
+    CHECK(run<double>(sys, "{ -7.0 / 2.0 }") == -3.5);
+    CHECK(run<double>(sys, "{ max(1, 2.5), -1 }") == 1.5);
+    CHECK_THROWS_WITH(((void)sys.parse<double, void>("s", "{ 1.0, idi = }")), doctest::Contains("missing operand after '='"));
+  }
+}
+
+namespace {
+std::vector<double> noted;
+void note(const double v) { noted.push_back(v); }
+}
+
+TEST_CASE("chance rolls anew on every iteration, the same way in the same frame") {
+  for (const auto cfg : configs) {
+    CAPTURE(cfg.safe);
+    CAPTURE(cfg.optimize);
+    auto sys = make(cfg);
+    sys.register_function<&note>("note");
+    const auto script = sys.parse<void, void>("s", "{ each_item_do = { value = { note = chance } }, each_item_do = { value = { note = chance } } }");
+    const auto rolls = [&](const uint64_t frame) {
+      noted.clear();
+      ds::context ctx;
+      ctx.prng_state = frame;
+      script.process(&ctx);
+      return noted;
+    };
+    const auto first = rolls(11);
+    REQUIRE(first.size() == 6);
+    // Every element, of both loops, used to roll the same value.
+    for (size_t i = 0; i < first.size(); ++i)
+      for (size_t j = i + 1; j < first.size(); ++j) CHECK(first[i] != first[j]);
+    CHECK(rolls(11) == first);   // same frame, same inputs: same rolls
+    CHECK(rolls(12) != first);   // the next frame rolls again
+  }
+}
+
+TEST_CASE("switch compares floating-point values like ==") {
+  for (const auto cfg : configs) {
+    CAPTURE(cfg.safe);
+    CAPTURE(cfg.optimize);
+    auto sys = make(cfg);
+    // 0.1 + 0.2 is not bitwise 0.3, but `==` holds; switch used to compare bytes.
+    CHECK(run<int64_t>(sys, "switch = { value = 0.1 + 0.2, { value = 0.3, 1 }, { 2 } }") == 1);
+    CHECK(run<int64_t>(sys, "switch = { value = 0.0 / 0.0, { value = 0.0 / 0.0, 1 }, { 2 } }") == 2);   // NaN matches nothing
+  }
+}
+
+namespace {
+big* no_big(big*) { return nullptr; }
+}
+
+TEST_CASE("error positions") {
+  std::vector<std::string> errors;
+  ds::system::options opts;
+  opts.error = [&](const std::string& msg) { errors.push_back(msg); };
+  ds::system sys(opts);
+  sys.init_basic_functions();
+  sys.init_math();
+  sys.register_function<&other>("other");
+  sys.register_function<&no_big>("no_big");
+  sys.register_function<&big_id>("big_id");
+
+  // A run-time error is reported where the failing call is: `other` is called on the invalid scope
+  // `no_big` returns. Its commands used to be stamped with the position of the block nested in it.
+  const auto script = sys.parse<int64_t, big*>("s", "no_big = {\n   other = {\n      big_id\n   }\n}");
+  big root{ { 0, 0, 1, 0 }, nullptr };
+  ds::context ctx;
+  ctx.set_arg(0, &root);
+  CHECK_THROWS_WITH(script.process(&ctx), doctest::Contains("@ 2:4:"));
+
+  // A compile error leads with its position and the failure that got furthest into the source.
+  errors.clear();
+  CHECK_THROWS(((void)sys.parse<int64_t, big*>("s", "{\n  big_id,\n  bogus_fn\n}")));
+  REQUIRE(errors.size() == 1);
+  CHECK(errors.front().starts_with("@ 3:3: Could not find function 'bogus_fn'"));
 }

@@ -47,9 +47,8 @@ struct script_ast_context {
 // `not_enought_data`). On `not_enought_data`, `ctx` keeps enough state to resume later.
 // The returned error is the row's first critical tavl error, or else a malformed expression found
 // while building it (a missing operand, a token after the expression); `ctx.error_message` holds
-// its text. tavl warnings and err_expected_identifier are not reported: they enforce tavl's
-// data-profile row naming, which ordinary devils_script syntax (`{ bump }`, `{ -x }`) does not
-// follow.
+// its text. tavl warnings are not reported. The parser must be configured with
+// system::configure_parser, which makes every block data to tavl.
 std::tuple<tavl::event, tavl::error> make_script_ast(tavl::parser& p, script_ast_context& ctx, std::vector<tavl::node>& ast_nodes);
 
 // Whole-string helper kept for non-streaming callers. Throws std::runtime_error on the first

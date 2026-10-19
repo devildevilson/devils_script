@@ -11,6 +11,10 @@ namespace ds = devils_script;
 // these are the first to move — re-baseline deliberately (run the script through
 // `disassemble` and paste the new output) rather than tweaking by hand.
 
+// The integer -> double conversion as the disassembler names it (type names are the compiler's).
+static const std::string int_to_double = "convert " + std::string(ds::utils::type_name<ds::script_int_t>()) + " -> " +
+                                         std::string(ds::utils::type_name<ds::script_float_t>());
+
 static std::string disasm_double(const char* script) {
   ds::system sys; sys.init_basic_functions(); sys.init_math();
   return ds::disassemble(sys.parse<double, void>("script", script));
@@ -135,7 +139,7 @@ TEST_CASE("disassembly golden") {
       "  9: jump -> 12\n"
       " 10: pushint 100\n"
       " 11: jump -> 12\n"
-      " 12: \n"          // integer -> double conversion of the result (no opcode name)
+      " 12: " + int_to_double + "\n" +
       " 13: pushreturn\n";
     CHECK_EQ(disasm_double("{ select = { { condition = false, 10 }, { condition = true, 20 }, { 100 } } }"), expected);
   }
@@ -161,7 +165,7 @@ TEST_CASE("disassembly golden") {
       " 13: condjump -> 16\n"
       " 14: pushint 15\n"
       " 15: sumi\n"
-      " 16: \n"
+      " 16: " + int_to_double + "\n" +
       " 17: pushreturn\n";
     CHECK_EQ(disasm_double("{ sequence = { { condition = true, 5 }, { condition = true, 10 }, { condition = false, 15 } } }"), expected);
   }
@@ -169,7 +173,7 @@ TEST_CASE("disassembly golden") {
   // A `{a, b, c}` root folds through the registered unlimited "ADD" function, not the fold_block
   // combinator. max() is not const-foldable, so the calls really emit. Every operand is an integer, so
   // the integer max and ADD win (arguments convert as late as possible) and only the result is
-  // converted to double, at the end (the conversion has no opcode name).
+  // converted to double, at the end.
   SUBCASE("ADD via unlimited function") {
     const std::string expected =
       "  0: pushint 1\n"
@@ -183,7 +187,7 @@ TEST_CASE("disassembly golden") {
       "  8: pushint 6\n"
       "  9: max 9223372036854775807\n"
       " 10: ADD 9223372036854775807\n"
-      " 11: \n"
+      " 11: " + int_to_double + "\n" +
       " 12: pushreturn\n";
     CHECK_EQ(disasm_double("{ max(1,2), max(3,4), max(5,6) }"), expected);
   }
@@ -216,7 +220,7 @@ TEST_CASE("disassembly golden") {
       "  2: pushint 10\n"
       "  3: jump -> 5\n"
       "  4: pushint 20\n"
-      "  5: \n"           // integer -> double conversion of the result (no opcode name)
+      "  5: " + int_to_double + "\n" +
       "  6: pushreturn\n";
     CHECK_EQ(disasm_double("{ value_or = { false, 10, 20 } }"), expected);
   }

@@ -73,6 +73,10 @@ constexpr script_float_t unpack_float(const int64_t arg) noexcept {
 // binary behind a `0x` / `0o` / `0b` prefix (either case, as tavl lexes them). Such a literal is an
 // integer and has to fit `script_int_t`; `out_of_range` must never fall back to a floating-point
 // value.
+// Floating-point values are equal when they differ by less than this: `==`, `!=`, their constant
+// folding and `switch` all compare this way.
+inline constexpr script_float_t float_equality_epsilon = script_float_t(0.000001);
+
 // What a skipped `?=` call leaves in a value context: 0 none (an invalid handle), 1 false,
 // 2 floating-point zero, 3 integer zero.
 int32_t nullable_guard_mode(const std::string_view expected_type) noexcept;

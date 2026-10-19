@@ -1,4 +1,5 @@
 #include "devils_script/container.h"
+#include "devils_script/prng.h"
 
 #include <bit>
 #include <format>
@@ -44,6 +45,7 @@ void script_container::process(context* ctx) const {
   if (ctx->current_script == nullptr) {
     ctx->current_index = 0;
     ctx->stack.resize(0);
+    ctx->callback_calls = 0;   // so a run repeated in the same frame repeats its rolls
   }
 
   current_script_guard guard(ctx, this);
@@ -60,6 +62,7 @@ void script_container::shrink_to_fit() {
   saved.shrink_to_fit();
   lists.shrink_to_fit();
   types.shrink_to_fit();
+  conversions.shrink_to_fit();
   string_pool.shrink_to_fit();
 }
 
@@ -316,6 +319,15 @@ std::string_view script_container::get_name() const {
   return get_string(name);
 }
 
+void script_container::note_conversion(const function_t fp, const std::string_view from, const std::string_view to) {
+  if (find_conversion(fp) == nullptr) conversions.push_back(conversion_info{ fp, from, to });
+}
+
+const script_container::conversion_info* script_container::find_conversion(const function_t fp) const noexcept {
+  for (const auto& c : conversions) if (c.fp == fp) return &c;
+  return nullptr;
+}
+
 script_container::src_loc script_container::loc_at(const context* ctx) const {
   const size_t i = ctx->current_index;
   return i < locs.size() ? locs[i] : src_loc{ 0, 0 };
@@ -343,6 +355,12 @@ std::string disassemble(const container& scr) {
     // Opcode identity is recovered from the function pointer (basic ops) or, for user functions,
     // from the producing description node (via cmd_node) — never stored per command.
     const basicf op = find_basicf_by_fp(scr.cmds[i].fp);
+    if (op == basicf::invalid) {
+      if (const auto* conv = scr.find_conversion(scr.cmds[i].fp); conv != nullptr) {
+        out += std::format("{:>3}: convert {} -> {}\n", i, conv->from, conv->to);
+        continue;
+      }
+    }
     std::string_view name;
     if (op != basicf::invalid) name = to_string(op);
     else if (i < scr.cmd_node.size() && scr.cmd_node[i] != SIZE_MAX) name = scr.get_string(scr.block_descs[scr.cmd_node[i]].name);
@@ -405,6 +423,16 @@ container_view::container_view(const script_container* scr, const size_t start, 
 
 void container_view::process(context* ctx) const {
   current_script_guard guard(ctx, scr);
+  // `chance` mixes the context's state (the frame) with states fixed per script and occurrence, so a
+  // callback body run once per element rolled the same value for every element. Each callback call
+  // gets its own context state for its duration: still a function of the frame and of how far the run
+  // has got, so the same inputs in the same frame roll the same values.
+  struct frame_state_guard {
+    context* ctx;
+    uint64_t state;
+    ~frame_state_guard() { ctx->prng_state = state; }
+  } frame_state{ ctx, ctx->prng_state };
+  ctx->prng_state = prng::mix(frame_state.state, ++ctx->callback_calls);
   for (ctx->current_index = start; ctx->current_index < end; ++ctx->current_index) {
     const auto& cmd = scr->cmds[ctx->current_index];
     std::invoke(cmd.fp, cmd.arg, ctx, scr);
