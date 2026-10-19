@@ -11,6 +11,17 @@ namespace devils_script {
 std::tuple<system::rpn_conversion_ctx::token_ref, size_t> system::rpn_conversion_ctx::convert_scope(const std::string_view& expr, block* arr, const size_t max_size, const size_t line, const size_t column) {
   using kind = block_kind;
 
+  // Every piece of a path names something: `a.`, `a..b`, `a:` and `:b` are malformed. split() drops
+  // an empty trailing piece, so `liege:child_id:` used to be accepted as `liege:child_id`.
+  if (expr.find_first_of(".:") != std::string_view::npos) {
+    size_t piece_start = 0;
+    for (size_t i = 0; i <= expr.size(); ++i) {
+      if (i < expr.size() && expr[i] != '.' && expr[i] != ':') continue;
+      if (i == piece_start) throw std::runtime_error(std::format("Malformed scope path '{}': empty element", expr));
+      piece_start = i + 1;
+    }
+  }
+
   size_t counter = 0;
   std::array<std::string_view, 16> dot_arr;
   const size_t count = utils::string::split(expr, ".", dot_arr.data(), dot_arr.size());
@@ -68,10 +79,6 @@ namespace {
 std::string_view node_text(const tavl::node* n, std::string_view src) {
   const auto& sp = n->token.span;
   return sp.offset == SIZE_MAX ? std::string_view() : src.substr(sp.offset, sp.size);
-}
-system::rpn_conversion_ctx::token_ref node_token_ref(system::rpn_conversion_ctx* ctx, const tavl::node* n, std::string_view src) {
-  const auto& sp = n->token.span;
-  return ctx->store_token(node_text(n, src), sp.line, sp.column);
 }
 bool is_string_literal(const tavl::node* n) {
   return n->token.type == tavl::token_type::singlequote_string || n->token.type == tavl::token_type::doublequote_string;
@@ -154,12 +161,6 @@ auto system::rpn_conversion_ctx::normalize_token(const tavl::node* n, std::strin
 // Port of convert_block's per-token body, sourcing (lvalue, rhs) from a tavl row node.
 // Same size/args bookkeeping; reuses convert_scope.
 void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::string_view src) {
-  const size_t cur_size = output.size();
-  const auto empty_lvalue = store_token("__empty_lvalue");
-  token_ref lfn = empty_lvalue;
-  std::array<block, 16 * 3 + 1> arr;
-  size_t lvalue_tokens_count = 0;
-
   std::string_view lvalue;
   size_t lvalue_line = 0, lvalue_column = 0;
   const tavl::node* rhs = row;
@@ -177,7 +178,19 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
       nullable_call = op == "?=";
     }
   }
+  normalize_call(lvalue, lvalue_line, lvalue_column, rhs, nullptr, nullable_call, src);
+}
 
+// `lvalue = rhs`, or `lvalue(call_args...)` when call_args is given: the callee may be a scope path
+// (`a.b:f`), split by convert_scope. Shared by rows and by calls written inside expressions, so the
+// two spellings compile alike.
+size_t system::rpn_conversion_ctx::normalize_call(std::string_view lvalue, const size_t lvalue_line, const size_t lvalue_column, const tavl::node* rhs,
+                                                  const std::vector<const tavl::node*>* call_args, const bool nullable_call, std::string_view src) {
+  const size_t cur_size = output.size();
+  const auto empty_lvalue = store_token("__empty_lvalue");
+  token_ref lfn = empty_lvalue;
+  std::array<block, 16 * 3 + 1> arr;
+  size_t lvalue_tokens_count = 0;
   if (!lvalue.empty()) {
     const auto [func_name, count] = convert_scope(lvalue, arr.data(), arr.size(), lvalue_line, lvalue_column);
     lvalue_tokens_count = count;
@@ -198,16 +211,29 @@ void system::rpn_conversion_ctx::normalize_row(const tavl::node* row, std::strin
   if (!lvalue_is_empty) { output.push_back({ lfn, 1 }); lfn_index = output.size() - 1; }
 
   const size_t block_size = output.size();
-  if (rhs_is_block) normalize_block(rhs, src);
+  if (call_args != nullptr) { for (const auto* a : *call_args) normalize_expr(a, src); }
+  else if (rhs_is_block) normalize_block(rhs, src);
   else normalize_expr(rhs, src);
 
   const size_t size = output.size() - block_size;
+  // Each path element wraps the function block (when there is one) and the right-hand side. A pure
+  // scope path with a plain expression (`a.b = x`) has no function block; counting one anyway made the
+  // path swallow the next row, or read past the output when it was the last row.
+  const size_t lfn_size = lfn_index != SIZE_MAX ? 1 : 0;
   for (size_t i = cur_size; i < cur_size + lvalue_tokens_count; i += direct_child_count(output.data() + i, output.size() - i) + 1)
-    output[i].size += size + 1;
+    output[i].size += size + lfn_size;
+  // `a.b ?= {...}` guards the path itself: every scope it walks may be invalid. Marking only the
+  // synthetic block under it guarded nothing, and an invalid `b` reached the block as its scope.
+  const bool nullable_path = nullable_call && lvalue_is_empty;
+  if (nullable_path) {
+    for (size_t i = cur_size; i < cur_size + lvalue_tokens_count; ++i)
+      if (output[i].kind == block_kind::scope_path) output[i].kind = block_kind::nullable_call;
+  }
   if (lfn_index != SIZE_MAX) {
     output[lfn_index].size += size;
-    output[lfn_index].kind = call_kind(nullable_call, rhs_is_block);
+    output[lfn_index].kind = call_kind(nullable_call && !nullable_path, rhs_is_block);
   }
+  return output.size() - cur_size;
 }
 
 // Expression (rvalue) -> prefix blocks, mirroring convert()'s output but reading tavl's already
@@ -226,12 +252,15 @@ size_t system::rpn_conversion_ctx::normalize_expr(const tavl::node* n, std::stri
       throw std::runtime_error(std::format("Assignment operator '{}' is not allowed inside expressions", op));
 
     if (op.empty()) {                                 // call f(...) / f{...}: pair with empty op token
-      const size_t idx = output.size();
-      output.push_back({ node_token_ref(this, ch[0], src), 1 });
-      size_t s = 0;
-      for (const auto* a : node_children(ch[1])) s += normalize_expr(a, src);
-      output[idx].size += s;
-      return 1 + s;
+      if (ch[0]->type != tavl::node_type::token)
+        throw std::runtime_error("A call needs a function name before its arguments, not an expression");
+      const auto callee = node_text(ch[0], src);
+      const auto& sp = ch[0]->token.span;
+      // f{...} is f = {...}; f(a, b) passes each argument. Both go through the same path as a row,
+      // so a scope path callee (`a:f(1)`) is split, and `=` rows are allowed inside the braces.
+      if (ch[1]->type == tavl::node_type::object) return normalize_call(callee, sp.line, sp.column, ch[1], nullptr, false, src);
+      const auto args = node_children(ch[1]);
+      return normalize_call(callee, sp.line, sp.column, ch[1], &args, false, src);
     }
 
     if (ch.size() == 1) {                             // unary prefix (rpn names: unary_minus/unary_plus)
@@ -258,10 +287,14 @@ size_t system::rpn_conversion_ctx::normalize_expr(const tavl::node* n, std::stri
     return output.size() - idx;
   }
 
-  // tuple / array group: emit elements in sequence (best-effort; not exercised by golden)
-  size_t s = 0;
-  for (const auto* e : node_children(n)) s += normalize_expr(e, src);
-  return s;
+  // A parenthesized group in an expression is one value: `(a + b) * c`. Several elements, or none,
+  // used to be spliced into the parent's operands - `(1, 2) * 3` became `1 * 2`... and dropped the 3.
+  // Call arguments `f(1, 2)` are handled with the call above.
+  const auto elements = node_children(n);
+  if (elements.size() != 1)
+    throw std::runtime_error(std::format("A '{}' group in an expression must hold exactly one value, found {}",
+                                         n->type == tavl::node_type::array ? "[]" : "()", elements.size()));
+  return normalize_expr(elements[0], src);
 }
 
 void system::rpn_conversion_ctx::clear() {

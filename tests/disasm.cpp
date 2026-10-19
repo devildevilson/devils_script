@@ -126,16 +126,17 @@ TEST_CASE("disassembly golden") {
       "  0: pushbool false\n"
       "  1: condjump_get -> 2\n"
       "  2: condjump -> 5\n"
-      "  3: pushvalue 10\n"
+      "  3: pushint 10\n"
       "  4: jump -> 12\n"
       "  5: pushbool true\n"
       "  6: condjump_get -> 7\n"
       "  7: condjump -> 10\n"
-      "  8: pushvalue 20\n"
+      "  8: pushint 20\n"
       "  9: jump -> 12\n"
-      " 10: pushvalue 100\n"
+      " 10: pushint 100\n"
       " 11: jump -> 12\n"
-      " 12: pushreturn\n";
+      " 12: \n"          // integer -> double conversion of the result (no opcode name)
+      " 13: pushreturn\n";
     CHECK_EQ(disasm_double("{ select = { { condition = false, 10 }, { condition = true, 20 }, { 100 } } }"), expected);
   }
 
@@ -144,42 +145,46 @@ TEST_CASE("disassembly golden") {
   // exactly the identity-vs-ignore_value behavior we are pinning before revisiting it.
   SUBCASE("sequence") {
     const std::string expected =
-      "  0: pushvalue 0\n"
+      "  0: pushint\n"
       "  1: pushbool true\n"
       "  2: condjump_get -> 3\n"
       "  3: condjump -> 16\n"
-      "  4: pushvalue 5\n"
-      "  5: sum\n"
+      "  4: pushint 5\n"
+      "  5: sumi\n"
       "  6: pushbool true\n"
       "  7: condjump_get -> 8\n"
       "  8: condjump -> 16\n"
-      "  9: pushvalue 10\n"
-      " 10: sum\n"
+      "  9: pushint 10\n"
+      " 10: sumi\n"
       " 11: pushbool false\n"
       " 12: condjump_get -> 13\n"
       " 13: condjump -> 16\n"
-      " 14: pushvalue 15\n"
-      " 15: sum\n"
-      " 16: pushreturn\n";
+      " 14: pushint 15\n"
+      " 15: sumi\n"
+      " 16: \n"
+      " 17: pushreturn\n";
     CHECK_EQ(disasm_double("{ sequence = { { condition = true, 5 }, { condition = true, 10 }, { condition = false, 15 } } }"), expected);
   }
 
-  // A double `{a, b, c}` root folds through the registered unlimited "ADD" function (rawadd),
-  // not the fold_block combinator. max() is not const-foldable, so the calls really emit.
+  // A `{a, b, c}` root folds through the registered unlimited "ADD" function, not the fold_block
+  // combinator. max() is not const-foldable, so the calls really emit. Every operand is an integer, so
+  // the integer max and ADD win (arguments convert as late as possible) and only the result is
+  // converted to double, at the end (the conversion has no opcode name).
   SUBCASE("ADD via unlimited function") {
     const std::string expected =
-      "  0: pushvalue 1\n"
-      "  1: pushvalue 2\n"
+      "  0: pushint 1\n"
+      "  1: pushint 2\n"
       "  2: max 9223372036854775807\n"
-      "  3: pushvalue 3\n"
-      "  4: pushvalue 4\n"
+      "  3: pushint 3\n"
+      "  4: pushint 4\n"
       "  5: max 9223372036854775807\n"
       "  6: ADD 9223372036854775807\n"
-      "  7: pushvalue 5\n"
-      "  8: pushvalue 6\n"
+      "  7: pushint 5\n"
+      "  8: pushint 6\n"
       "  9: max 9223372036854775807\n"
       " 10: ADD 9223372036854775807\n"
-      " 11: pushreturn\n";
+      " 11: \n"
+      " 12: pushreturn\n";
     CHECK_EQ(disasm_double("{ max(1,2), max(3,4), max(5,6) }"), expected);
   }
 
@@ -187,16 +192,16 @@ TEST_CASE("disassembly golden") {
   // `andjump` opcode (Level-2: routed through emit()/insn_table) with short-circuit to the end.
   SUBCASE("AND combinator fold (andjump)") {
     const std::string expected =
-      "  0: pushvalue 1\n"
-      "  1: pushvalue 2\n"
+      "  0: pushint 1\n"
+      "  1: pushint 2\n"
       "  2: max 9223372036854775807\n"
-      "  3: pushvalue 0\n"
+      "  3: pushint\n"
       "  4: > 9223372036854775807\n"
       "  5: condjump_get -> 12\n"
-      "  6: pushvalue 3\n"
-      "  7: pushvalue 4\n"
+      "  6: pushint 3\n"
+      "  7: pushint 4\n"
       "  8: max 9223372036854775807\n"
-      "  9: pushvalue 0\n"
+      "  9: pushint\n"
       " 10: > 9223372036854775807\n"
       " 11: andjump -> 12\n"
       " 12: pushreturn\n";
@@ -208,10 +213,11 @@ TEST_CASE("disassembly golden") {
     const std::string expected =
       "  0: pushbool false\n"
       "  1: condjump -> 4\n"
-      "  2: pushvalue 10\n"
+      "  2: pushint 10\n"
       "  3: jump -> 5\n"
-      "  4: pushvalue 20\n"
-      "  5: pushreturn\n";
+      "  4: pushint 20\n"
+      "  5: \n"           // integer -> double conversion of the result (no opcode name)
+      "  6: pushreturn\n";
     CHECK_EQ(disasm_double("{ value_or = { false, 10, 20 } }"), expected);
   }
 }

@@ -261,6 +261,12 @@ const script_container* system::resolve_script(const std::string_view& name) con
   return script_resolver ? script_resolver(name) : nullptr;
 }
 uint64_t system::parse_context::gen_value() { prng_s = p_t::next(prng_s); return p_t::value(prng_s); }
+void system::parse_context::seed_script(const system& sys, const std::string_view name, container& c) {
+  uint64_t name_hash = UINT64_C(14695981039346656037);   // FNV-1a: stable across runs and platforms
+  for (const char ch : name) { name_hash ^= uint8_t(ch); name_hash *= UINT64_C(1099511628211); }
+  prng_s = p_t::init(prng::mix(sys.get_seed(), name_hash));
+  c.prng_state = gen_value();
+}
 
 static std::string_view command_data_ftype_name(const system::command_data::ftype t) noexcept {
   using ftype = system::command_data::ftype;
@@ -383,6 +389,28 @@ bool system::can_convert_implicitly(const std::string_view& from, const std::str
   return find_conversion_path(from, to).has_value();
 }
 
+std::string_view system::slot_value_type(parse_ctx* ctx, container* scr, const std::string_view& slot_type, const std::string_view& value_type,
+                                         const bool value_on_top, const std::string_view& slot) const {
+  if (slot_type.empty() || type_is_any_type(slot_type) || slot_type == value_type) return value_type;
+  if (value_on_top && can_convert_implicitly(value_type, slot_type)) {
+    setup_type_conversion(ctx, scr, value_type, slot_type);
+    return slot_type;
+  }
+  raise_error(std::format("{} already holds '{}', it cannot store '{}'", slot, slot_type, value_type));
+}
+
+void system::reject_ignored_condition(const command_block& arg_block, const std::string_view& function) const {
+  if (arg_block.name() == "condition" || arg_block.args_count() == 0) return;
+  if (!arg_block.find("condition").empty())
+    raise_error(std::format("'condition' in an argument of '{}' is never evaluated; use a conditional term of ADD/MUL or 'select'", function));
+}
+
+void system::convert_top_to(parse_ctx* ctx, container* scr, const std::string_view& to, const std::string_view& what) const {
+  if (type_is_any_type(to) || ctx->top() == to) return;
+  if (!can_convert_implicitly(ctx->top(), to)) raise_error(std::format("{} returns '{}', but '{}' is expected", what, ctx->top(), to));
+  setup_type_conversion(ctx, scr, ctx->top(), to);
+}
+
 void system::setup_type_conversion(parse_ctx* ctx, container* scr, const std::string_view& from, const std::string_view& to) const {
   if (from == to) return;
   const auto path = find_conversion_path(from, to);
@@ -424,10 +452,14 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
   bool ambiguous = false;
   std::vector<std::string> errors;
 
+  // An untyped scope (an argument whose type the script does not know) may be any scope: scoped
+  // candidates are tried as well, and the emitter commits the scope type it settles on. Only
+  // scope-less candidates used to be considered, which left the emitter's untyped-scope path dead.
+  const bool untyped_scope = type_is_element_view(current_scope);
   for (const auto& data : itr->second) {
     if (has_exact_scope) {
       if (data.expected_scope != current_scope) continue;
-    } else if (data.expected_scope != void_scope) {
+    } else if (data.expected_scope != void_scope && !untyped_scope) {
       continue;
     }
 
@@ -453,7 +485,12 @@ const system::command_data* system::resolve_function(parse_ctx* ctx, container* 
 
     try {
       const size_t count = std::invoke(data.init, e, block);
-      const int64_t cost = test_ctx.conversion_cost + return_conversion_cost;
+      // Convert as late as possible: converting an argument costs more than converting the result.
+      // With equal weights `-7` in a floating-point block was a tie (int version: convert the result;
+      // double version: convert the argument) that the exact-return rule gave to the double version,
+      // so integer expressions in floating-point blocks were computed in double - unlike the README's
+      // "integers stay integers" and unlike the constant folder.
+      const int64_t cost = 2 * test_ctx.conversion_cost + return_conversion_cost;
       int64_t rank = 0;
       for (const auto arg_type : data.argument_types) {
         const auto arith = arithmetic_types.find(std::string(arg_type));
@@ -713,6 +750,7 @@ constexpr std::array<insn_info, basicf_count> make_insn_table() {
   row(basicf::jump,          &jump,            &jump,                  0,    pk::none,        false, 0);
   row(basicf::andbin,        &andbin,          &andbin_unsafe,         2,    pk::b_bool,      true,  2);
   row(basicf::sum,           &sum,             &sum_unsafe,            2,    pk::b_double,    true,  2);
+  row(basicf::sumi,          &sumi,            &sumi_unsafe,           2,    pk::b_int64,     true,  2);
   row(basicf::mul,           &mul,             &mul_unsafe,            2,    pk::b_double,    true,  2);
   row(basicf::sumsetstack,   &sumsetstack,     &sumsetstack_unsafe,    0,    pk::none,        false, 0);
   row(basicf::mulsetstack,   &mulsetstack,     &mulsetstack_unsafe,    0,    pk::none,        false, 0);
@@ -1038,7 +1076,8 @@ std::optional<const_value> try_eval_const(const system& sys, const system::comma
     if (name == "<=") return const_value::boolean(l <= r);
     // Matches the runtime double comparison (raweqd), which is tolerance-based.
     if (name == "==") return const_value::boolean(std::abs(l - r) < EPSILON);
-    if (name == "!=") return const_value::boolean(std::abs(l - r) >= EPSILON);
+    // The runtime computes `!=` as `!raweqd`; `abs(l - r) >= EPSILON` would be false for NaN.
+    if (name == "!=") return const_value::boolean(!(std::abs(l - r) < EPSILON));
     return std::nullopt;
   }
 
@@ -1065,10 +1104,14 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
   if (override_lvalue.empty()) {
     if (auto v = try_eval_const(*this, block)) {
       // The constant stands in for a call whose result type the caller already checked, so it may
-      // only be emitted where a value of its own kind is what codegen would have produced. An
-      // integer in a floating-point block is the one crossing allowed, because there codegen would
-      // have emitted `pushint` followed by `convert<int64_t, double>` - the same static_cast.
-      const bool as_float = v->is_integer() && !any_type_expected && type_is_floating_point(exp_t);
+      // only be emitted where a value of its own kind is what codegen would have produced. An integer
+      // in a floating-point block is the one crossing allowed: codegen would have emitted `pushint`
+      // and the registered integer -> floating-point conversion, the same static_cast. That
+      // conversion has a cost the overload resolver weighs, so the folded double pays it too; a free
+      // double changed which overload won (`2 % 0` picked the double `%` and returned NaN).
+      const auto int_to_float = v->is_integer() && !any_type_expected && type_is_floating_point(exp_t)
+        ? find_conversion_path(utils::type_name<script_int_t>(), exp_t) : std::nullopt;
+      const bool as_float = int_to_float.has_value();
       const bool fits =
         v->is_bool()    ? any_type_expected || type_is_bool(exp_t) :
         v->is_integer() ? any_type_expected || type_is_integral(exp_t) || as_float :
@@ -1077,7 +1120,11 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
         set_function_type sft(ctx, function_type::rvalue);
         if (v->is_bool()) push_basic_function(ctx, scr, basicf::pushbool, v->b);
         else if (v->is_integer() && !as_float) push_basic_function(ctx, scr, basicf::pushint, v->i);
-        else push_basic_function(ctx, scr, basicf::pushvalue, pack_float(as_float ? script_float_t(v->i) : v->n));
+        else if (as_float) {
+          push_basic_function(ctx, scr, basicf::pushvalue, pack_float(script_float_t(v->i)));
+          ctx->conversion_cost += int_to_float->cost;
+        }
+        else push_basic_function(ctx, scr, basicf::pushvalue, pack_float(v->n));
         setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
         return block.size();
       }
@@ -1092,6 +1139,14 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
       set_function_type sft(ctx, function_type::rvalue);
       push_string(ctx, scr, block.name());
       setup_block_description(ctx, scr, block.name(), std::string_view(), scr->block_descs.size());
+      return 1;
+    }
+
+    // A synthetic block name as a leaf is a block with nothing in it: an empty script, `{}`, or the
+    // name written out. It used to become the string "__string_block", or a missing function.
+    if (funcname == "__effect_block" || funcname == "__string_block" || funcname == "__object_block" || funcname == "__empty_lvalue") {
+      if (!type_is_void(exp_t)) raise_error("An empty block produces no value");
+      ctx->push<ignore_value>();
       return 1;
     }
 
@@ -1254,7 +1309,12 @@ size_t system::dispatch_node(parse_ctx* ctx, container* scr, const command_block
 }
 
 size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& block, const basicf id) const {
-  if (block.args_count() == 0 && block.size() == 1) return dispatch_node(ctx, scr, block);
+  if (block.args_count() == 0 && block.size() == 1) {
+    // A leaf named after the combinator folding it is that combinator with nothing inside (a bare
+    // `AND`, an empty bool script). Dispatching it would resolve the same combinator again, forever.
+    if (id != basicf::invalid && block.name() == to_string(id)) raise_error(std::format("'{}' produces no value", block.name()));
+    return dispatch_node(ctx, scr, block);
+  }
 
   if (id == basicf::NAND) { 
     const size_t size = fold_block(ctx, scr, block, basicf::AND);
@@ -1285,6 +1345,7 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     const bool any_object_expected = type_is_any_type(exp_t) || type_is_any_type_object(exp_t) || type_is_element_view(exp_t);
     std::string_view result_type = any_object_expected ? std::string_view() : exp_t;
     bool has_value = false;
+    bool can_fall_through = false;   // the last child may be skipped (condition, `?=`)
 
     size_t offset = 1;
     while (offset < block.size()) {
@@ -1320,6 +1381,18 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
       e.jump_to(basicf::jump, end);
       if (has_condition || child.nullable()) e.bind(skip_child);
+      can_fall_through = has_condition || child.nullable();
+    }
+
+    // No child produced a value: leave the same default a skipped `?=` leaves (false, 0, 0.0, or an
+    // invalid handle for an object) instead of nothing - the consumer used to read a missing operand.
+    if (has_value && can_fall_through) {
+      switch (nullable_guard_mode(result_type.empty() ? exp_t : result_type)) {
+        case 1: push_basic_function(ctx, scr, basicf::pushbool, 0); ctx->pop(); break;
+        case 2: push_basic_function(ctx, scr, basicf::pushvalue, pack_float(script_float_t(0))); ctx->pop(); break;
+        case 3: push_basic_function(ctx, scr, basicf::pushint, 0); ctx->pop(); break;
+        default: push_basic_function(ctx, scr, basicf::pushinvalid, 0); break;   // pushes no parse-time type
+      }
     }
 
     e.bind(end);
@@ -1448,7 +1521,13 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
 
     const size_t before_child = ctx->stack_types.size();
     dispatch_node(ctx, scr, child);
-    if (curid == basicf::effect_block) continue;
+    if (curid == basicf::effect_block) {
+      // An effect child reports "no value" with an ignore_value placeholder. Leaving it in the model
+      // shifted every later absolute stack index (scopes, erase, switch slots) by one. Only the
+      // child's own placeholders go; anything below belongs to an enclosing block.
+      ctx->drop_ignore_above(before_child);
+      continue;
+    }
     if (before_child >= ctx->stack_types.size()) raise_error(std::format("Block '{}' does not push any value", child.name()));
     if (ctx->is<ignore_value>()) {
       ctx->pop();
@@ -1467,6 +1546,18 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
     const size_t curarg = counter;
     counter += 1;
 
+    // The `sum`/`mul` fold opcodes work on floating point: in a floating-point block an integer
+    // operand, the first one included, is converted. It used to reach them unconverted, and only a
+    // folded literal (already a double) hid that.
+    if ((curid == basicf::ADD || curid == basicf::MUL) && ctx->is_integral() && type_is_floating_point(ctx->expected_type))
+      setup_type_conversion<int64_t, double>(ctx, scr);
+
+    // A number never becomes a truth value on its own: every child of a boolean block is a bool.
+    // The first child used to reach the short-circuit jump unconverted, the later ones were
+    // silently converted.
+    if ((boolean_and_block || boolean_or_block) && !ctx->is<bool>())
+      raise_error(std::format("'{}' expects 'bool' children, but '{}' returns '{}'", to_string(curid), child.name(), ctx->top()));
+
     if (curarg == 0) {
       if (boolean_and_block) e.jump_to(basicf::condjump_get, end);
       else if (boolean_or_block) e.jump_to(basicf::condjumpt_get, end);
@@ -1474,11 +1565,7 @@ size_t system::fold_block(parse_ctx* ctx, container* scr, const command_block& b
       continue;
     }
 
-    if (ctx->is<double>() && (boolean_and_block || boolean_or_block)) {
-      setup_type_conversion<double, bool>(ctx, scr);
-    } else if (ctx->is<int64_t>() && (boolean_and_block || boolean_or_block)) {
-      setup_type_conversion<int64_t, bool>(ctx, scr);
-    } else if (ctx->is<bool>() && !(boolean_and_block || boolean_or_block)) {
+    if (ctx->is<bool>() && !(boolean_and_block || boolean_or_block)) {
       setup_type_conversion<bool, double>(ctx, scr);
     }
 
@@ -1540,15 +1627,53 @@ void system::finalize_resource_usage(parse_context& ctx, container& c) const {
   c.max_saved = c.saved.size() + ctx.max_child_saved;
   // Peak ctx->lists size = own lists + deepest nested execute list-frame; create_lists reserves it.
   c.max_lists = c.lists.size() + ctx.max_child_lists;
+  c.max_args = c.args.size() + ctx.max_child_args;
   if (c.max_stack > ctx.max_stack_limit)
     raise_error(std::format("Script '{}' needs a stack of {}, exceeding the limit of {}", c.get_name(), c.max_stack, ctx.max_stack_limit));
   if (c.max_saved > ctx.max_saved_limit)
     raise_error(std::format("Script '{}' needs {} saved-value slots, exceeding the limit of {}", c.get_name(), c.max_saved, ctx.max_saved_limit));
+  // The argument stack has a fixed size, so nested argument frames can be bounded here instead of
+  // overflowing at run time.
+  if (c.max_args > context::script_arguments_size)
+    raise_error(std::format("Script '{}' needs {} argument slots with its executed scripts, exceeding the limit of {}", c.get_name(), c.max_args, context::script_arguments_size));
+}
+
+namespace {
+// What a streamed row may change, taken before the row so a rejected row leaves nothing behind.
+// The large vectors only grow inside a row and are truncated back; the small metadata tables and
+// the parse-time stack model are copied, since a row may also retype entries it did not add.
+struct row_checkpoint {
+  size_t cmds, locs, block_descs, string_pool, data_slots, cmd_index_fields, dead_context_pushes;
+  std::vector<script_container::argument_data> args, saved, lists;
+  std::vector<std::string_view> types, stack_types;
+  std::vector<int64_t> scope_stack;
+
+  row_checkpoint(const container& c, const system::parse_context& ctx) :
+    cmds(c.cmds.size()), locs(c.locs.size()), block_descs(c.block_descs.size()), string_pool(c.string_pool.size()),
+    data_slots(ctx.data_slots.size()), cmd_index_fields(ctx.cmd_index_fields.size()), dead_context_pushes(ctx.dead_context_pushes.size()),
+    args(c.args), saved(c.saved), lists(c.lists), types(c.types), stack_types(ctx.stack_types), scope_stack(ctx.scope_stack) {}
+
+  void restore(container& c, system::parse_context& ctx) const {
+    c.cmds.resize(cmds);
+    c.locs.resize(std::min(locs, c.locs.size()));
+    c.block_descs.resize(block_descs);
+    c.string_pool.resize(string_pool);
+    c.args = args; c.saved = saved; c.lists = lists; c.types = types;
+    ctx.data_slots.resize(data_slots);
+    ctx.cmd_index_fields.resize(cmd_index_fields);
+    ctx.dead_context_pushes.resize(dead_context_pushes);
+    ctx.stack_types = stack_types;
+    ctx.scope_stack = scope_stack;
+  }
+};
 }
 
 std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::parser& p, parse_context& ctx, container& c) const {
   if (!ctx.initialized) raise_error("parse_context is not initialized");
-  if (c.name.count == 0 && c.name.start == 0) c.name = store_string(&c, name);
+  if (c.name.count == 0 && c.name.start == 0) {
+    c.name = store_string(&c, name);
+    ctx.seed_script(*this, name, c);
+  }
 
   auto [ev, err] = make_script_ast(p, ctx.script_ast_ctx, ctx.script_ast_nodes);
   if (!err.no_error()) {
@@ -1556,7 +1681,23 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
     try { error(ctx.script_ast_ctx.error_message); } catch (...) {}
     return {ev, err};
   }
-  if (ev.type == tavl::event_type::not_enought_data || ctx.script_ast_nodes.empty()) return {ev, err};
+  // The root scope is pushed once by init() and stays on the stack for every row; it is closed only
+  // at the end of input. Closing it after each row left later rows without a root, at parse time and
+  // at run time.
+  const size_t root_slots = ctx.root_type.empty() ? 0 : 1;
+  const auto close_root = [&] {
+    if (root_slots == 0 || ctx.scope_stack.size() != 1) return;
+    scope_exit(&ctx, &c, 1);
+    c.build_description_index();
+  };
+
+  if (ev.type == tavl::event_type::not_enought_data) return {ev, err};
+  if (ctx.script_ast_nodes.empty()) {
+    if (ev.type == tavl::event_type::eof) close_root();
+    return {ev, err};
+  }
+
+  const row_checkpoint checkpoint(c, ctx);
 
   // Reconstruct this batch's raw source into a local (padding keeps tavl spans at absolute
   // offsets). It feeds normalize only; the container's `c.string_pool` is the compact token pool
@@ -1591,10 +1732,8 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
 
     while (ctx.pop_while_ignore()) {}
 
-    if (!ctx.root_type.empty()) {
-      if (ctx.scope_stack.size() != 1) raise_error(std::format("There is not closed scope of type '{}' on stack", ctx.stack_types[ctx.scope_stack.back()]));
-      scope_exit(&ctx, &c, 1);
-    }
+    if (root_slots != 0 && ctx.scope_stack.size() != 1)
+      raise_error(std::format("There is not closed scope of type '{}' on stack", ctx.scope_stack.empty() ? std::string_view() : ctx.stack_types[ctx.scope_stack.back()]));
 
     if (!type_is_void(ctx.return_type)) {
       if (!ctx.stack_types.empty() && ctx.stack_types.back() != ctx.return_type && can_convert_implicitly(ctx.stack_types.back(), ctx.return_type)) {
@@ -1607,11 +1746,12 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
       push_basic_function(&ctx, &c, basicf::pushreturn, 0);
     }
 
-    if (ctx.stack_types.size() != 0) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size()));
+    if (ctx.stack_types.size() != root_slots) raise_error(std::format("Script is not properly ended, {} values on stack", ctx.stack_types.size() - root_slots));
 
     finalize_resource_usage(ctx, c);
     optimize_commands(ctx, c);
   } catch (const std::exception& ex) {
+    checkpoint.restore(c, ctx);
     ctx.rpn_ctx.clear();
     ctx.script_ast_nodes.clear();
     ctx.warnings.clear();
@@ -1624,6 +1764,7 @@ std::tuple<tavl::event, tavl::error> system::parse(std::string_view name, tavl::
   for (const auto& msg : ctx.warnings) raise_warning(msg);
   ctx.warnings.clear();
   c.build_description_index();
+  if (ev.type == tavl::event_type::eof) close_root();
   return {ev, err};
 }
 
@@ -1650,7 +1791,7 @@ std::tuple<int32_t, int32_t, system::command_data::associativity, system::comman
 
 system::parse_context::parse_context() noexcept :
   ftype(function_type::lvalue), nest_level(0), source_line(0), source_column(0), unlimited_func_index(SIZE_MAX), list_index_upvalue(SIZE_MAX), prev_chaining(0), description_placeholder_depth(0),
-  max_stack_depth(0), max_child_saved(0), max_child_lists(0), max_stack_limit(context::stack_size), max_saved_limit(context::local_vars_size), conversion_cost(0), initialized(false)
+  max_stack_depth(0), max_child_saved(0), max_child_lists(0), max_child_args(0), max_stack_limit(context::stack_size), max_saved_limit(context::local_vars_size), conversion_cost(0), initialized(false)
 {}
 
 bool system::parse_context::is_func_subblock() const {
@@ -1684,6 +1825,7 @@ bool system::parse_context::is_fundamental() const { return type_is_fundamental(
 bool system::parse_context::is_string() const { return type_is_string(top()); }
 bool system::parse_context::is_object() const { return type_is_object(top()); }
 bool system::parse_context::pop_while_ignore() { if (!stack_types.empty() && is_ignore()) { pop(); return true; } return false; }
+void system::parse_context::drop_ignore_above(const size_t size) { while (stack_types.size() > size && is_ignore()) pop(); }
 void system::parse_context::push(const std::string_view& type) {
   stack_types.push_back(type);
   if (stack_types.size() > max_stack_depth) max_stack_depth = stack_types.size();
@@ -1698,6 +1840,8 @@ void system::parse_context::erase(const size_t index) {
   stack_types.erase(stack_types.begin() + index);
 }
 
-std::string_view system::parse_context::top() const { return stack_types.back(); }
+// An empty stack has no type: every `is<T>()`/`is_ignore()` check on it is simply false, instead of
+// reading past the vector (an empty script, a call that produced nothing).
+std::string_view system::parse_context::top() const { return stack_types.empty() ? std::string_view() : stack_types.back(); }
 
 }

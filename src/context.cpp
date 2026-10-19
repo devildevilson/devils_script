@@ -23,7 +23,11 @@ std::string_view context::saved_type(const int64_t index) const { return saved_s
 std::string_view context::return_type() const { return _return_value.type(); }
 void context::clear() {
   current_script = nullptr;
-  _return_value = any_stack{}; current_index = 0; frame_base = 0; arg_base = 0; saved_base = 0; list_base = 0; stack.resize(0); }
+  _return_value = any_stack{}; current_index = 0; frame_base = 0; arg_base = 0; saved_base = 0; list_base = 0; execute_depth = 0; stack.resize(0);
+  // Untyped saved slots make a read before the write an error again. Without this a cleared context
+  // handed the previous run's saved value to the next one, even to a different script.
+  std::fill(saved_stack._types.begin(), saved_stack._types.end(), std::string_view());
+}
 
 context::stack_t::stack_t(const size_t max) : _size(0) { _data.resize(max); _types.resize(max); }
 

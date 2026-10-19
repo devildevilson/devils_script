@@ -177,6 +177,10 @@ void stack_push_result(context* ctx, const T& value) {
   }
 }
 
+// A call's scope argument is a slot within the running script's own frame. An `execute`d
+// sub-script's frame starts at ctx->frame_base, so every scope read below adds it; reading the
+// absolute slot used to hand the sub-script the caller's value.
+
 template <typename T, is_valid_t<T> vt>
 int64_t nullable_scope_guard(int64_t arg, context* ctx, const script_container*) {
   const auto [target, mode] = unpack2(arg);
@@ -184,7 +188,8 @@ int64_t nullable_scope_guard(int64_t arg, context* ctx, const script_container*)
   if (!std::invoke(vt, value)) {
     ctx->stack.erase();
     if (mode == 1) ctx->stack.push(false);
-    else if (mode == 2) ctx->stack.push(0.0);
+    else if (mode == 2) ctx->stack.push(script_float_t(0));
+    else if (mode == 3) ctx->stack.push(script_int_t(0));   // an integer block gets an integer zero
     else {
       stack_element el;
       el.invalidate();
@@ -202,7 +207,7 @@ int64_t invoke_mathfunc(int64_t val, context* ctx, const script_container* scr, 
     ctx->stack.resize(ctx->stack.size() - COUNT);
     stack_push_result(ctx, ret);
   } else {
-    auto c = ctx->stack.safe_get<HT>(val);
+    HT c = ctx->stack.safe_get<HT>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
     const auto ret = std::invoke(f, c, stack_get<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     ctx->stack.resize(ctx->stack.size() - COUNT);
@@ -290,7 +295,7 @@ int64_t invoke_mathfunc_unsafe(int64_t val, context* ctx, const script_container
     ctx->stack.resize(ctx->stack.size() - COUNT);
     stack_push_result(ctx, ret);
   } else {
-    auto c = ctx->stack.get<HT>(val);
+    HT c = ctx->stack.get<HT>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
     const auto ret = std::invoke(f, c, stack_get_unsafe<el_t<decltype(f), I+OFF>>(ctx, -int64_t(COUNT - I))...);
     ctx->stack.resize(ctx->stack.size() - COUNT);
@@ -313,6 +318,7 @@ int64_t invoke_userfunc_unsafe(context* ctx, [[maybe_unused]] const script_conta
       std::invoke(eff, ctx->userptr, name, t);
     }
 
+    ctx->stack.resize(ctx->stack.size() - COUNT);
     return -int64_t(COUNT);
   } else {
     if constexpr (eff == nullptr) {
@@ -345,6 +351,7 @@ int64_t invoke_userfunc_scope_unsafe(context* ctx, [[maybe_unused]] const script
       std::invoke(eff, ctx->userptr, name, t);
     }
 
+    ctx->stack.resize(ctx->stack.size() - COUNT);
     return -int64_t(COUNT);
   } else {
     if constexpr (eff == nullptr) {
@@ -370,7 +377,7 @@ int64_t invoke_mathfunc_noargs(int64_t val, context* ctx, const script_container
     const auto ret = std::invoke(f);
     stack_push_result(ctx, ret);
   } else {
-    auto c = ctx->stack.safe_get<HT>(val);
+    HT c = ctx->stack.safe_get<HT>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
     const auto ret = std::invoke(f, c);
     stack_push_result(ctx, ret);
@@ -440,7 +447,7 @@ int64_t invoke_mathfunc_unsafe_noargs(int64_t val, context* ctx, const script_co
     const auto ret = std::invoke(f);
     stack_push_result(ctx, ret);
   } else {
-    auto c = ctx->stack.get<HT>(val);
+    HT c = ctx->stack.get<HT>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
     const auto ret = std::invoke(f, c);
     stack_push_result(ctx, ret);
@@ -532,7 +539,7 @@ int64_t userfunc(int64_t val, context* ctx, const script_container* scr) {
     if constexpr (utils::is_void_v<HT>) {
       return detail::invoke_userfunc_noargs<f, eff>(ctx, scr);
     } else {
-      auto c = ctx->stack.safe_get<HT>(val);
+      HT c = ctx->stack.safe_get<HT>(val + int64_t(ctx->frame_base));
       if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
       return detail::invoke_userfunc_scope_noargs<f, HT, eff>(ctx, scr, c);
     }
@@ -540,7 +547,7 @@ int64_t userfunc(int64_t val, context* ctx, const script_container* scr) {
     if constexpr (utils::is_void_v<HT>) {
       return detail::invoke_userfunc<0, sig_args_count, f, eff>(ctx, scr, std::make_index_sequence<sig_args_count>{});
     } else {
-      auto c = ctx->stack.safe_get<HT>(val);
+      HT c = ctx->stack.safe_get<HT>(val + int64_t(ctx->frame_base));
       if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
       return detail::invoke_userfunc_scope<first_argument_index, args_count, f, HT, eff>(ctx, scr, c, std::make_index_sequence<args_count>{});
     }
@@ -602,7 +609,7 @@ int64_t useriter(int64_t val, context* ctx, const script_container* scr) {
       detail::stack_push_result(ctx, ret);
     }
   } else if constexpr (is_not_member_func) {
-    auto c = ctx->stack.safe_get<scope_type>(val);
+    scope_type c = ctx->stack.safe_get<scope_type>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<scope_type>()));
     std::get<0>(args_tuple) = c;
 
@@ -613,13 +620,13 @@ int64_t useriter(int64_t val, context* ctx, const script_container* scr) {
       detail::stack_push_result(ctx, ret);
     }
   } else if constexpr (is_member_function<decltype(f)>) {
-    auto c = ctx->stack.safe_get<scope_type>(val);
+    scope_type c = ctx->stack.safe_get<scope_type>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<scope_type>()));
 
     if constexpr (utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>) {
-      std::apply(f, std::tuple_cat(c, args_tuple));
+      std::apply(f, std::tuple_cat(std::make_tuple(c), args_tuple));
     } else {
-      const auto ret = std::apply(f, std::tuple_cat(c, args_tuple));
+      const auto ret = std::apply(f, std::tuple_cat(std::make_tuple(c), args_tuple));
       detail::stack_push_result(ctx, ret);
     }
   } else scr->error_at(ctx, "Bad scope deduction");
@@ -651,7 +658,7 @@ int64_t useriter_effect(int64_t val, context* ctx, const script_container* scr) 
   };
 
   if constexpr (!std::is_fundamental_v<first_el_t> && !utils::is_function_v<first_el_t>) {
-    auto c = ctx->stack.safe_get<first_el_t>(val);
+    first_el_t c = ctx->stack.safe_get<first_el_t>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<first_el_t>()));
     std::invoke(f, c, in_f);
   } else {
@@ -700,7 +707,7 @@ int64_t useriter_condition(int64_t val, context* ctx, const script_container* sc
   };
 
   if constexpr (!std::is_fundamental_v<first_el_t> && !utils::is_function_v<first_el_t>) {
-    auto c = ctx->stack.safe_get<first_el_t>(val);
+    first_el_t c = ctx->stack.safe_get<first_el_t>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<first_el_t>()));
     std::invoke(f, c, in_f);
   } else {
@@ -741,7 +748,7 @@ int64_t useriter_numeric(int64_t val, context* ctx, const script_container* scr)
   };
 
   if constexpr (!std::is_fundamental_v<first_el_t> && !utils::is_function_v<first_el_t>) {
-    auto c = ctx->stack.safe_get<first_el_t>(val);
+    first_el_t c = ctx->stack.safe_get<first_el_t>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<first_el_t>()));
     std::invoke(f, c, in_f);
   } else {
@@ -788,7 +795,7 @@ int64_t userfunc_unsafe(int64_t val, context* ctx, const script_container* scr) 
     if constexpr (utils::is_void_v<HT>) {
       return detail::invoke_userfunc_unsafe_noargs<f, eff>(ctx, scr);
     } else {
-      auto c = ctx->stack.get<HT>(val);
+      HT c = ctx->stack.get<HT>(val + int64_t(ctx->frame_base));
       if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
       return detail::invoke_userfunc_scope_unsafe_noargs<f, HT, eff>(ctx, scr, c);
     }
@@ -796,7 +803,7 @@ int64_t userfunc_unsafe(int64_t val, context* ctx, const script_container* scr) 
     if constexpr (utils::is_void_v<HT>) {
       return detail::invoke_userfunc_unsafe<0, sig_args_count, f, eff>(ctx, scr, std::make_index_sequence<sig_args_count>{});
     } else {
-      auto c = ctx->stack.get<HT>(val);
+      HT c = ctx->stack.get<HT>(val + int64_t(ctx->frame_base));
       if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
       return detail::invoke_userfunc_scope_unsafe<first_argument_index, args_count, f, HT, eff>(ctx, scr, c, std::make_index_sequence<args_count>{});
     }
@@ -856,7 +863,7 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const script_container* scr) 
       detail::stack_push_result(ctx, ret);
     }
   } else if constexpr (is_not_member_func) {
-    auto c = ctx->stack.get<scope_type>(val);
+    scope_type c = ctx->stack.get<scope_type>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<scope_type>()));
     std::get<0>(args_tuple) = c;
 
@@ -867,13 +874,13 @@ int64_t useriter_unsafe(int64_t val, context* ctx, const script_container* scr) 
       detail::stack_push_result(ctx, ret);
     }
   } else if constexpr (is_member_function<decltype(f)>) {
-    auto c = ctx->stack.get<scope_type>(val);
+    scope_type c = ctx->stack.get<scope_type>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<scope_type>()));
 
     if constexpr (utils::is_void_v<ret_type> || std::is_same_v<ret_type, ignore_value>) {
-      std::apply(f, std::tuple_cat(c, args_tuple));
+      std::apply(f, std::tuple_cat(std::make_tuple(c), args_tuple));
     } else {
-      const auto ret = std::apply(f, std::tuple_cat(c, args_tuple));
+      const auto ret = std::apply(f, std::tuple_cat(std::make_tuple(c), args_tuple));
       detail::stack_push_result(ctx, ret);
     }
   } else scr->error_at(ctx, "Bad scope deduction");
@@ -905,7 +912,7 @@ int64_t useriter_effect_unsafe(int64_t val, context* ctx, const script_container
   };
 
   if constexpr (!std::is_fundamental_v<first_el_t> && !utils::is_function_v<first_el_t>) {
-    auto c = ctx->stack.get<first_el_t>(val);
+    first_el_t c = ctx->stack.get<first_el_t>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<first_el_t>()));
     std::invoke(f, c, in_f);
   }
@@ -955,7 +962,7 @@ int64_t useriter_condition_unsafe(int64_t val, context* ctx, const script_contai
   };
 
   if constexpr (!std::is_fundamental_v<first_el_t> && !utils::is_function_v<first_el_t>) {
-    auto c = ctx->stack.get<first_el_t>(val);
+    first_el_t c = ctx->stack.get<first_el_t>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<first_el_t>()));
     std::invoke(f, c, in_f);
   } else {
@@ -996,7 +1003,7 @@ int64_t useriter_numeric_unsafe(int64_t val, context* ctx, const script_containe
   };
 
   if constexpr (!std::is_fundamental_v<first_el_t> && !utils::is_function_v<first_el_t>) {
-    auto c = ctx->stack.get<first_el_t>(val);
+    first_el_t c = ctx->stack.get<first_el_t>(val + int64_t(ctx->frame_base));
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<first_el_t>()));
     std::invoke(f, c, in_f);
   } else {
@@ -1020,7 +1027,7 @@ template <auto f, typename HT, is_valid_t<HT> vt>
 int64_t compute_count_and_mul(int64_t arg, context* ctx, const script_container* scr) {
   size_t count = 0;
   if constexpr (!utils::is_void_v<HT>) {
-    auto c = ctx->stack.safe_get<HT>(arg);
+    HT c = ctx->stack.safe_get<HT>(arg);
     if (!std::invoke(vt, c)) scr->error_at(ctx, std::format("Scope handle '{}' is invalid", utils::type_name<HT>()));
     count = std::invoke(f, c);
   } else {

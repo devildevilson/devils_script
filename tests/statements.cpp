@@ -171,25 +171,26 @@ TEST_CASE("Main lang statements") {
   }
 
   SUBCASE("chance") {
-    { // context seed 1
+    // The values depend on the system seed, the script's name and the context seed.
+    { // context seed 3
+      ds::system sys;
+      sys.init_basic_functions();
+      sys.init_math();
+      const auto cont = sys.parse<bool, void>("script", script6);
+      ds::context ctx;
+      ctx.prng_state = 3;
+      cont.process(&ctx);
+      REQUIRE(ctx.is_return<bool>());
+      REQUIRE(ctx.get_return<bool>() == true);
+    }
+
+    { // different context seed 1
       ds::system sys;
       sys.init_basic_functions();
       sys.init_math();
       const auto cont = sys.parse<bool, void>("script", script6);
       ds::context ctx;
       ctx.prng_state = 1;
-      cont.process(&ctx);
-      REQUIRE(ctx.is_return<bool>());
-      REQUIRE(ctx.get_return<bool>() == true);
-    }
-
-    { // different context seed 352
-      ds::system sys;
-      sys.init_basic_functions();
-      sys.init_math();
-      const auto cont = sys.parse<bool, void>("script", script6);
-      ds::context ctx;
-      ctx.prng_state = 352;
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
       REQUIRE(ctx.get_return<bool>() == false);
@@ -197,16 +198,16 @@ TEST_CASE("Main lang statements") {
 
     { // seed from system
       ds::system::options o;
-      o.seed = 36263;
+      o.seed = 5;
       ds::system sys(o);
       sys.init_basic_functions();
       sys.init_math();
       const auto cont = sys.parse<bool, void>("script", script6);
       ds::context ctx;
-      ctx.prng_state = 1;
+      ctx.prng_state = 1;   // false with the default system seed (above)
       cont.process(&ctx);
       REQUIRE(ctx.is_return<bool>());
-      REQUIRE(ctx.get_return<bool>() == false);
+      REQUIRE(ctx.get_return<bool>() == true);
     }
   }
 
@@ -216,7 +217,7 @@ TEST_CASE("Main lang statements") {
     sys.init_math();
     const auto cont = sys.parse<double, void>("script", script7);
     ds::context ctx;
-    ctx.prng_state = 125;
+    ctx.prng_state = 3;
     cont.process(&ctx);
     REQUIRE(ctx.is_return<double>());
     REQUIRE(ctx.get_return<double>() == 6);

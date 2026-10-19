@@ -16,6 +16,13 @@ unsigned integer_literal_base(const std::string_view text) noexcept {
 }
 }
 
+int32_t nullable_guard_mode(const std::string_view expected_type) noexcept {
+  if (type_is_bool(expected_type)) return 1;
+  if (type_is_integral(expected_type)) return 3;
+  if (type_is_fundamental(expected_type)) return 2;
+  return 0;
+}
+
 integer_literal parse_integer_literal(const std::string_view text, script_int_t& value) noexcept {
   const unsigned base = integer_literal_base(text);
   const auto digits = base == 10 ? text : text.substr(2);

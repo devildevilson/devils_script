@@ -10,10 +10,44 @@ All notable changes to this project are documented here. The format is based on
 
 - Hexadecimal, octal and binary integer literals: `0x1f`, `0o17`, `0b101`, with the prefix letter in
   either case.
+- `switch` default case: a last case without `value`. A value-producing `switch` without one that
+  matches nothing is a runtime error instead of leaving no value on the stack.
+- Integer overloads of `max`, `min` and `abs`; integer `sequence`; `sum`/`min`/`max`/`average` over an
+  integer list (through the registered integer -> floating-point conversion).
+- `context::max_execute_depth` (128): nested `execute`, including recursion through the resolver, is a
+  runtime error past it instead of overflowing the C++ stack. `container::max_args` bounds nested
+  argument frames at parse time.
+- `std::optional<T>` parameters work: an absent argument (positional or named) is passed as
+  `std::nullopt`, a present one is converted to `T`.
 
 ### Changed
 
 - `tavl` dependency updated from v1.0.3 to v1.1.1.
+- A number is not a truth value: every child of an `AND`/`OR`/`NAND`/`NOR` block must be a `bool`. The
+  first child used to reach the short-circuit jump unconverted, later ones were silently converted.
+- `random` rejects a negative or NaN weight at run time; such weights used to make every branch fail
+  and leave no value.
+- A variadic function (`T f(T, T)`) called by name needs at least two arguments: `max(1)` used to
+  return 1 without calling `max`, `max()` crashed. A function without parameters rejects arguments
+  (`age = 5` used to drop the 5). An operator operand, and a call argument, must be values.
+- A top-level `process()` starts at the first command on an empty stack, so a context can be reused
+  without `clear()`. `clear()` also resets the saved-value types, so a read before the write fails
+  again instead of returning the previous run's value.
+- A named saved value or argument keeps one type: storing a different type is a parse error unless it
+  converts implicitly. `ctx_set_as` now names an argument slot (it looked up the saved-value table).
+- An empty effect script, or `{}` in an effect block, does nothing; in a value context it is an error.
+  Synthetic block names (`__string_block`, ...) no longer turn into strings.
+- An expression nests at most 256 levels deep (`max_expression_depth`).
+- Overload resolution converts arguments as late as possible: an argument conversion costs more than a
+  result conversion. An integer expression in a floating-point block is now computed in integers and
+  converted once, as the README promises and as the constant folder already did (`-7` used to pick the
+  double `unary_minus`, `2 % 0` the double `%`).
+- `chance` and `random` seed a script's fixed states from the system seed and the script's name; every
+  script used to draw the same states, so different scripts rolled the same values. The context's
+  `prng_state` (e.g. a frame index) stays the varying part. Seeded values differ from 1.3.1.
+- `describe()` stops at the first command that cannot run, and never runs a void iterator.
+- An overload trial no longer copies the script's token storage (copying a parse context gives an empty
+  token scratch); that copy grew with the square of a long expression's length.
 
 ### Fixed
 
@@ -32,6 +66,27 @@ All notable changes to this project are documented here. The format is based on
   resolution. Each is now a syntax error with its position.
 - An integer literal that does not fit `script_int_t` is a syntax error. It used to compile as an
   inexact double wherever a double was acceptable.
+- Crashes and memory errors: an effect child left a placeholder in the parse-time stack model, shifting
+  every later stack index (wrong values, SIGSEGV); a value-less child was folded as an operand; a list
+  changed inside its own pipeline (heap-use-after-free); runtime type tags pointing into a destroyed
+  container's string pool (heap-use-after-free); `remove_from` of an absent value erased `end()`;
+  `clamp` with crossed bounds (now a script error); empty scripts, `max()`, a bare `AND` (unbounded
+  recursion); unsafe void functions left their arguments on the stack; a streamed script with a root
+  scope crashed on its second row, and a rejected streamed row left its commands in the container.
+- Wrong results: an object block whose last child was skipped (condition, `?=`) left no value;
+  a scoped call inside an `execute`d script read the caller's stack slot; `a.b = x`
+  miscounted block sizes (swallowing the next row); `ctx:saved:x.next` dropped `next`; `select` /
+  `switch` / `random` branches were not converted to the block's type; conditions inside numeric
+  blocks did not compile; `execute` truncated a double into an integer argument; `value_or` converted
+  after its branches merged; `?=` on a scope path did not guard the path; a skipped `?=` in an integer
+  block produced a double; a `map` after `add_to` failed the earlier `add_to`; folded `!=` and folded
+  integers in floating-point blocks disagreed with the unfolded code; `condition` in an argument block
+  was silently ignored; `(1, 2) * 3` spliced the group into its parent; `max(NaN, 1)` depended on the
+  argument order.
+- Types: `const T*` and `const bool` values; an untyped scope (an undeclared argument) can call scoped
+  functions; an explicit `HT = void` keeps the first parameter in the signature; a member-function
+  iterator compiles; an enum script result is readable as the enum; `f(...)` / `f{...}` compile like
+  `f = {...}` (scope paths, `=` rows inside braces); malformed scope paths (`a.`, `a:`) are rejected.
 
 ## [1.3.1] - 2026-09-08
 

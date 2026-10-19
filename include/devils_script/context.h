@@ -33,6 +33,9 @@ namespace devils_script {
 
 struct context {
   static constexpr size_t script_arguments_size = 8;
+  // How deep `execute` may nest at run time. A script that executes itself through the resolver
+  // (directly or via others) recurses natively; without a bound that overflowed the C++ stack.
+  static constexpr size_t max_execute_depth = 128;
   static constexpr size_t stack_size = DEVILS_SCRIPT_DEFAULT_STACK_SIZE;
   static constexpr size_t local_vars_size = 16;
 
@@ -111,6 +114,7 @@ struct context {
   size_t arg_base;
   size_t saved_base;
   size_t list_base;
+  size_t execute_depth = 0;   // `execute` frames currently running; see max_execute_depth
   void* userptr;
   const script_container* current_script;
   std::function<void(const std::string&)> trace;
@@ -326,15 +330,17 @@ void context::set_saved(const size_t index, const T& val) {
   saved_stack.set<T>(index, val);
 }
 
+// An enum result is stored as the script integer, like every enum value on the stack.
 template <typename T> requires(valid_stack_type<T>)
 bool context::is_return() const {
-  using basic_T = final_stack_el_t<T>;
+  using basic_T = script_stack_el_t<T>;
   return return_type() == utils::type_name<basic_T>();
 }
 
 template <typename T> requires(valid_stack_type<T>)
 auto context::get_return() const -> final_stack_el_t<T> {
-  return _return_value.get<T>();
+  if constexpr (std::is_enum_v<std::remove_cvref_t<T>>) return static_cast<std::remove_cvref_t<T>>(_return_value.get<script_int_t>());
+  else return _return_value.get<T>();
 }
 
 template <typename T> requires(valid_stack_type<T>)
@@ -343,8 +349,8 @@ auto context::safe_get_return() const -> final_stack_el_t<T> {
   if constexpr (is_typeless_v<basic_T>) {
     return basic_T(_return_value._mem, _return_value.type());
   } else {
-    if (!is_return<basic_T>()) throw std::runtime_error(std::format("Could not get return value of type '{}', actual return value has type '{}'", utils::type_name<basic_T>(), _return_value.type()));
-    return get_return<basic_T>();
+    if (!is_return<T>()) throw std::runtime_error(std::format("Could not get return value of type '{}', actual return value has type '{}'", utils::type_name<script_stack_el_t<T>>(), _return_value.type()));
+    return get_return<T>();
   }
 }
 

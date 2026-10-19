@@ -18,6 +18,12 @@ namespace {
 
 using subtree = std::vector<tavl::node>;
 
+// How deep one row's expression may nest. tavl bounds bracket nesting, but not operator chains:
+// `- - - ... 1` recursed here, and `a + b + ...` is built in a loop yet yields a tree as deep as the
+// chain, which normalization and the semantic pass then walk recursively. Thousands of levels
+// overflowed the C++ stack; 256 also keeps such a row within a small thread stack.
+constexpr size_t max_expression_depth = 256;
+
 std::string format_syntax_error(const tavl::source_span& span, std::string_view what) {
   return std::format("Syntax error @ {}:{}: {}", span.line, span.column, what);
 }
@@ -35,6 +41,7 @@ struct ev_cursor {
   const std::vector<tavl::event>& evs;
   const tavl::parser& p;
   size_t i = 0;
+  size_t depth = 0;   // recursion depth of the parse_* functions
 
   const tavl::event& peek() const {
     static const tavl::event none{};
@@ -86,9 +93,35 @@ subtree wrap(tavl::node_type nt, const tavl::token& t, const std::vector<subtree
 
 subtree parse_expr(ev_cursor& c, int min_prec);
 
+struct depth_guard {
+  ev_cursor& c;
+  explicit depth_guard(ev_cursor& c) : c(c) {
+    if (++c.depth > max_expression_depth)
+      throw script_syntax_error(tavl::error_type::err_nesting_too_deep, c.tok().span,
+                                std::format("expression nests deeper than {} levels", max_expression_depth));
+  }
+  ~depth_guard() { --c.depth; }
+};
+
+// Depth of a flat prefix tree (node.child_count = footprint).
+size_t tree_depth(const subtree& t) {
+  size_t max_depth = 0;
+  std::vector<size_t> ends;   // one past the last node of each open ancestor
+  for (size_t i = 0; i < t.size(); ++i) {
+    while (!ends.empty() && i >= ends.back()) ends.pop_back();
+    ends.push_back(i + 1 + t[i].child_count);
+    max_depth = std::max(max_depth, ends.size());
+  }
+  return max_depth;
+}
+
 // one row of a block: a single expression, nothing after it
 subtree parse_row(ev_cursor& c) {
+  const auto start = c.tok();
   subtree row = parse_expr(c, 0);
+  if (tree_depth(row) > max_expression_depth)
+    throw script_syntax_error(tavl::error_type::err_nesting_too_deep, start.span,
+                              std::format("expression nests deeper than {} levels", max_expression_depth));
   if (!c.at_row_end())
     throw script_syntax_error(tavl::error_type::err_too_many_values, c.tok().span,
                               std::format("unexpected '{}' after the expression", c.content()));
@@ -150,6 +183,7 @@ subtree parse_postfix(ev_cursor& c) {
 }
 
 subtree parse_prefix(ev_cursor& c) {
+  depth_guard guard(c);
   if (c.is_op() && c.p.operator_info(c.content(), tavl::op_fixity::prefix)) {
     const auto op = c.tok(); c.next();
     require_operand(c, op);
@@ -160,6 +194,7 @@ subtree parse_prefix(ev_cursor& c) {
 }
 
 subtree parse_expr(ev_cursor& c, int min_prec) {
+  depth_guard guard(c);
   subtree lhs = parse_prefix(c);
   for (;;) {
     if (!c.is_op()) break;

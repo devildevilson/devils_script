@@ -57,6 +57,7 @@ int64_t andbin(int64_t, context*, const script_container*);
 
 int64_t invb(int64_t, context*, const script_container*);
 int64_t sum(int64_t, context*, const script_container*);
+int64_t sumi(int64_t, context*, const script_container*);
 int64_t mul(int64_t, context*, const script_container*);
 int64_t neg(int64_t, context*, const script_container*);
 int64_t pos(int64_t, context*, const script_container*);
@@ -71,6 +72,7 @@ int64_t mulsetstack(int64_t, context*, const script_container*);
 int64_t andbin_unsafe(int64_t, context*, const script_container*);
 int64_t invb_unsafe(int64_t, context*, const script_container*);
 int64_t sum_unsafe(int64_t, context*, const script_container*);
+int64_t sumi_unsafe(int64_t, context*, const script_container*);
 int64_t mul_unsafe(int64_t, context*, const script_container*);
 int64_t neg_unsafe(int64_t, context*, const script_container*);
 int64_t pos_unsafe(int64_t, context*, const script_container*);

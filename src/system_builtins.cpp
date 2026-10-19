@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <optional>
 
 namespace devils_script {
@@ -22,8 +23,8 @@ static script_int_t rawmuli(const script_int_t val1, const script_int_t val2) no
 static script_int_t rawsubi(const script_int_t val1, const script_int_t val2) noexcept { return script_int_t(script_uint_t(val1) - script_uint_t(val2)); }
 static script_int_t rawposi(const script_int_t val1) noexcept { return +val1; }
 static script_int_t rawnegi(const script_int_t val1) noexcept { return script_int_t(0u - script_uint_t(val1)); }
-// Integer remainder. Division by zero and INT64_MIN % -1 are trapping in hardware, so both are
-// rejected as script errors rather than left to the CPU.
+// Integer remainder. Division by zero and INT64_MIN % -1 trap in hardware: the first is a script
+// error, the second is answered directly (x % -1 is always 0) rather than left to the CPU.
 static script_int_t rawmodi(const script_int_t val1, const script_int_t val2) {
   if (val2 == 0) throw std::runtime_error("Integer remainder by zero");
   if (val2 == -1) return 0;
@@ -47,8 +48,12 @@ static bool rawless(const script_float_t val1, const script_float_t val2) noexce
 static bool rawmoreeq(const script_float_t val1, const script_float_t val2) noexcept { return val1 >= val2; }
 static bool rawlesseq(const script_float_t val1, const script_float_t val2) noexcept { return val1 <= val2; }
 
-static script_float_t rawmax(const script_float_t val1, const script_float_t val2) noexcept { return std::max(val1, val2); }
-static script_float_t rawmin(const script_float_t val1, const script_float_t val2) noexcept { return std::min(val1, val2); }
+static script_int_t rawmaxi(const script_int_t val1, const script_int_t val2) noexcept { return std::max(val1, val2); }
+static script_int_t rawmini(const script_int_t val1, const script_int_t val2) noexcept { return std::min(val1, val2); }
+static script_int_t rawabsi(const script_int_t val1) noexcept { return val1 < 0 ? script_int_t(0u - script_uint_t(val1)) : val1; }   // wraps for the minimum
+// NaN wins either way round; std::max/std::min answered by argument order.
+static script_float_t rawmax(const script_float_t val1, const script_float_t val2) noexcept { return std::isnan(val1) || std::isnan(val2) ? std::numeric_limits<script_float_t>::quiet_NaN() : std::max(val1, val2); }
+static script_float_t rawmin(const script_float_t val1, const script_float_t val2) noexcept { return std::isnan(val1) || std::isnan(val2) ? std::numeric_limits<script_float_t>::quiet_NaN() : std::min(val1, val2); }
 static script_float_t rawabs(const script_float_t val1) noexcept { return std::abs(val1); }
 static script_float_t rawceil(const script_float_t val1) noexcept { return std::ceil(val1); }
 static script_float_t rawfloor(const script_float_t val1) noexcept { return std::floor(val1); }
@@ -95,7 +100,11 @@ static script_float_t rawsign(const script_float_t v1) noexcept { return v1 > 0.
 static script_float_t rawfma(const script_float_t v1, const script_float_t v2, const script_float_t v3) noexcept { return v1 * v2 + v3; }
 static script_float_t rawfract(const script_float_t v1) noexcept { return v1 - rawfloor(v1); }
 static script_float_t rawmix(const script_float_t v1, const script_float_t v2, const script_float_t v3) noexcept { return v1 * (1.0 - v3) + v2 * v3; }
-static script_float_t rawsclamp(const script_float_t t, const script_float_t v1, const script_float_t v2) noexcept { return std::clamp(t, v1, v2);  }
+// std::clamp is undefined for lo > hi.
+static script_float_t rawsclamp(const script_float_t t, const script_float_t v1, const script_float_t v2) {
+  if (v2 < v1) throw std::runtime_error(std::format("'clamp' lower bound {} is greater than upper bound {}", v1, v2));
+  return std::clamp(t, v1, v2);
+}
 static script_float_t rawsmoothstep(const script_float_t v1, const script_float_t v2, const script_float_t x) noexcept {
   if (x <= v1) return 0.0;
   if (x >= v2) return 1.0;
@@ -119,6 +128,20 @@ struct builtin_registration_scope {
   explicit builtin_registration_scope(bool& f) noexcept : flag(&f), prev(f) { f = true; }
   ~builtin_registration_scope() noexcept { *flag = prev; }
 };
+
+// Emitted after the last case of a value-producing `switch` without a default: falling through
+// would leave the switch's value missing from the stack.
+int64_t switch_no_match(int64_t, context* ctx, const script_container* scr) {
+  scr->error_at(ctx, "'switch' found no matching case and has no default case");
+}
+
+// Emitted after each `random` weight. A negative or NaN weight makes every branch test fail, so no
+// branch would run and the block would leave no value.
+int64_t check_random_weight(int64_t, context* ctx, const script_container* scr) {
+  const auto weight = ctx->stack.get<script_float_t>(-1);
+  if (!(weight >= script_float_t(0))) scr->error_at(ctx, std::format("'random' weight must be a non-negative number, got {}", weight));
+  return 0;
+}
 }
 
 void system::init_math() {
@@ -152,6 +175,10 @@ void system::init_math() {
   ROI(internal::operator_and)("and", { 3, command_data::math_ftype::binary, command_data::associativity::left });
   ROI(internal::operator_or)("or", { 2, command_data::math_ftype::binary, command_data::associativity::left });
   
+  // Integers first, like ADD: an integer max must not go through double (2^53 + 1 would round).
+  RFI(internal::rawmaxi)("max");
+  RFI(internal::rawmini)("min");
+  RFI(internal::rawabsi)("abs");
   RFI(internal::rawmax)("max");
   RFI(internal::rawmin)("min");
   RFI(internal::rawabs)("abs");
@@ -221,7 +248,7 @@ static ignore_value remove_from(const thisctxlist& l, const any_stack& val) {
   auto& list = l.ctx->lists[l.idx];
   size_t counter = 0;
   for (; counter < list.size() && memcmp(list[counter].mem, val._mem, MAXIMUM_STACK_VAL_SIZE) != 0; ++counter) {}
-  list.erase(list.begin() + counter);
+  if (counter < list.size()) list.erase(list.begin() + counter);   // an absent value removes nothing
   return ignore_value{};
 }
 
@@ -318,6 +345,13 @@ static int64_t execute_script(int64_t arg, context* ctx, const script_container*
   const auto old_list = ctx->list_base;
   const auto old_return = ctx->_return_value;
   const auto old_size = ctx->stack.size();
+  if (ctx->execute_depth >= context::max_execute_depth)
+    scr->error_at(ctx, std::format("'execute' of '{}' nests deeper than {} scripts (recursion?)", sub->get_name(), context::max_execute_depth));
+  struct depth_guard {
+    size_t& depth;
+    explicit depth_guard(size_t& depth) : depth(depth) { ++depth; }
+    ~depth_guard() { --depth; }
+  } depth(ctx->execute_depth);
   try {
   const size_t nargs = sub->args.size();
 
@@ -419,18 +453,22 @@ void system::init_basic_functions() {
   builtin_registration_scope builtins(registering_builtins);
   RFI(internal::operator_and)("AND", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    set_expected_type set(ctx, utils::type_name<bool>());   // a condition inside a numeric block is still bool
     return sys->fold_block(ctx, scr, args, basicf::AND);
   });
   RFI(internal::operator_or)("OR", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    set_expected_type set(ctx, utils::type_name<bool>());   // a condition inside a numeric block is still bool
     return sys->fold_block(ctx, scr, args, basicf::OR);
   });
   RFI(internal::operator_and)("NAND", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    set_expected_type set(ctx, utils::type_name<bool>());   // a condition inside a numeric block is still bool
     return sys->fold_block(ctx, scr, args, basicf::NAND);
   });
   RFI(internal::operator_or)("NOR", {}, [](emitter& e, const command_block& args, const std::vector<std::string>&) -> size_t {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
+    set_expected_type set(ctx, utils::type_name<bool>());   // a condition inside a numeric block is still bool
     return sys->fold_block(ctx, scr, args, basicf::NOR);
   });
   RFI(internal::rawaddi)("ADD");
@@ -544,7 +582,8 @@ void system::init_basic_functions() {
         // Forbid binding the list this script is currently iterating (we are inside its pipeline
         // callback): the sub would mutate the live list mid-iteration, and the running pipeline holds
         // a reference/iterators into it. list_index_upvalue is SIZE_MAX outside a callback.
-        if (caller_idx == ctx->list_index_upvalue)
+        if (caller_idx == ctx->list_index_upvalue ||
+            std::find(ctx->iterated_lists.begin(), ctx->iterated_lists.end(), caller_idx) != ctx->iterated_lists.end())
           sys->raise_error(std::format("'execute' target '{}' cannot bind list '{}' while it is being iterated", script_name, lname));
         list_bindings.push_back({ sub_slot, caller_idx });
         continue;
@@ -592,25 +631,14 @@ void system::init_basic_functions() {
       }
       const auto top = ctx->top();
       if (top != expected) {
-        const bool top_num = type_is_bool(top) || type_is_fundamental(top);
-        const bool exp_num = type_is_bool(expected) || type_is_fundamental(expected);
-        if (top_num && exp_num) {
-          // An in/out target must round-trip into the same caller slot, so a silent numeric
-          // conversion would corrupt its stored type — require an exact match instead.
-          if (inout) sys->raise_error(std::format("'execute' in/out argument '{}' of '{}' must match type '{}' exactly, got '{}'", arg_name, script_name, expected, top));
-          if (type_is_bool(expected)) {
-            if (type_is_integral(top)) sys->setup_type_conversion<int64_t, bool>(ctx, scr);
-            else if (type_is_floating_point(top)) sys->setup_type_conversion<double, bool>(ctx, scr);
-          } else if (type_is_integral(expected)) {
-            if (type_is_bool(top)) sys->setup_type_conversion<bool, int64_t>(ctx, scr);
-            else if (type_is_floating_point(top)) sys->setup_type_conversion<double, int64_t>(ctx, scr);
-          } else if (type_is_floating_point(expected)) {
-            if (type_is_bool(top)) sys->setup_type_conversion<bool, double>(ctx, scr);
-            else if (type_is_integral(top)) sys->setup_type_conversion<int64_t, double>(ctx, scr);
-          }
-        } else {
+        // An in/out target must round-trip into the same caller slot, so a conversion would corrupt
+        // its stored type — require an exact match instead.
+        if (inout) sys->raise_error(std::format("'execute' in/out argument '{}' of '{}' must match type '{}' exactly, got '{}'", arg_name, script_name, expected, top));
+        // Only the registered implicit conversions (integer -> floating point): a double passed for an
+        // integer argument used to be truncated, and out of range it was undefined behaviour.
+        if (!sys->can_convert_implicitly(top, expected))
           sys->raise_error(std::format("'execute' argument '{}' of '{}' expects type '{}', got '{}'", arg_name, script_name, expected, top));
-        }
+        sys->setup_type_conversion(ctx, scr, top, expected);
       }
 
       if (inout) {
@@ -654,6 +682,7 @@ void system::init_basic_functions() {
     if (exec_base + sub->max_stack > ctx->max_stack_depth) ctx->max_stack_depth = exec_base + sub->max_stack;
     if (sub->max_saved > ctx->max_child_saved) ctx->max_child_saved = sub->max_saved;
     if (sub->max_lists > ctx->max_child_lists) ctx->max_child_lists = sub->max_lists;
+    if (sub->max_args > ctx->max_child_args) ctx->max_child_args = sub->max_args;
 
     for (size_t k = 0; k < nargs; ++k) ctx->pop();   // consume root (if any) + named arguments
     if (!type_is_void(ret)) ctx->push(ret);
@@ -683,6 +712,9 @@ void system::init_basic_functions() {
       if (cb.name() == custom_description_constant) { offset += cb.size(); cb = command_block(args, offset); }
       offset += sys->parse_arg<1, 1, decltype(&internal::value_or)>(ctx, scr, cb, ctx->expected_type, std::string_view(), {});
     } while (ctx->pop_while_ignore());
+    // Each branch is brought to the result type inside the branch. Converting after the merge point
+    // ran the conversion on whichever branch was taken, reading one type as another.
+    sys->convert_top_to(ctx, scr, ctx->expected_type, "'value_or' value");
     const auto second_arg_value_type = ctx->top();
     auto end = e.make_label();
     e.jump_to(basicf::jump, end);
@@ -695,25 +727,17 @@ void system::init_basic_functions() {
       if (cb.name() == custom_description_constant) { offset += cb.size(); cb = command_block(args, offset); }
       offset += sys->parse_arg<2, 2, decltype(&internal::value_or)>(ctx, scr, cb, second_arg_value_type, std::string_view(), {});
     } while (ctx->pop_while_ignore());
-    const auto third_arg_value_type = ctx->top();
+    if (!type_is_any_type(second_arg_value_type) && !type_is_any_object(second_arg_value_type) && ctx->top() != second_arg_value_type) {
+      if (!sys->can_convert_implicitly(ctx->top(), second_arg_value_type))
+        sys->raise_error(std::format("'value_or' default returns '{}', but its value returns '{}'", ctx->top(), second_arg_value_type));
+      sys->setup_type_conversion(ctx, scr, ctx->top(), second_arg_value_type);
+    }
     e.bind(end);
 
+    // Both branches now leave the value's type; an untyped context used to get `expected_type`
+    // (an element view) here and reject a perfectly typed comparison.
     ctx->pop();
-
-    ctx->push(ctx->expected_type);
-
-    if (!type_is_any_stack(second_arg_value_type) && !type_is_any_object(second_arg_value_type) && second_arg_value_type != third_arg_value_type) {
-      if ((type_is_bool(second_arg_value_type) || type_is_fundamental(second_arg_value_type)) !=
-        (type_is_bool(third_arg_value_type) || type_is_fundamental(third_arg_value_type)))
-        sys->raise_error(std::format("Its expected that 'value_or' receives equal types as input for second and third argument, received: {} {}", second_arg_value_type, third_arg_value_type));
-
-      if (type_is_bool(second_arg_value_type)           && type_is_floating_point(third_arg_value_type)) sys->setup_type_conversion<double, bool>(ctx, scr);
-      if (type_is_bool(second_arg_value_type)           && type_is_integral(third_arg_value_type))       sys->setup_type_conversion<int64_t, bool>(ctx, scr);
-      if (type_is_floating_point(second_arg_value_type) && type_is_bool(third_arg_value_type))           sys->setup_type_conversion<bool, double>(ctx, scr);
-      if (type_is_floating_point(second_arg_value_type) && type_is_integral(third_arg_value_type))       sys->setup_type_conversion<int64_t, double>(ctx, scr);
-      if (type_is_integral(second_arg_value_type)       && type_is_bool(third_arg_value_type))           sys->setup_type_conversion<bool, int64_t>(ctx, scr);
-      if (type_is_integral(second_arg_value_type)       && type_is_floating_point(third_arg_value_type)) sys->setup_type_conversion<double, int64_t>(ctx, scr);
-    }
+    ctx->push(second_arg_value_type);
 
     return args.size();
   });
@@ -886,8 +910,11 @@ void system::init_basic_functions() {
       const bool has_cond = !cond.empty();
       if (has_cond) sys->dispatch_node(ctx, scr, cond, "AND");
       e.guarded_clause(end, has_cond, [&]{
+        const size_t before = ctx->stack_types.size();
         sys->dispatch_node(ctx, scr, block);
-        if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'select' function returns 'ignore_value'"));
+        if (type_is_void(exp)) ctx->drop_ignore_above(before);
+        else if (ctx->is_ignore()) sys->raise_error(std::format("Block in 'select' function returns 'ignore_value'"));
+        else sys->convert_top_to(ctx, scr, exp, std::format("Block '{}' in 'select'", block.name()));
       });
 
       if (!type_is_void(exp)) ctx->pop();
@@ -910,9 +937,11 @@ void system::init_basic_functions() {
     const bool exp_is_bool = type_is_bool(exp);
     const bool exp_is_fund = type_is_fundamental(exp);
 
+    const bool exp_is_int = exp_is_fund && type_is_integral(exp);
     if (!exp_is_void) {
       if (exp_is_bool) sys->push_basic_function(ctx, scr, basicf::pushbool, true);
-      if (exp_is_fund) sys->push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(0.0));
+      else if (exp_is_int) sys->push_basic_function(ctx, scr, basicf::pushint, 0);   // used to be a double, rejected in an integer block
+      else if (exp_is_fund) sys->push_basic_function(ctx, scr, basicf::pushvalue, std::bit_cast<int64_t>(0.0));
     }
 
     auto end = e.make_label();   // a failed condition jumps out of the whole sequence
@@ -924,8 +953,10 @@ void system::init_basic_functions() {
       sys->dispatch_node(ctx, scr, cond, "AND"); // condition would generate a description
       e.jump_to(basicf::condjump, end);
 
+      const size_t before = ctx->stack_types.size();
       sys->dispatch_node(ctx, scr, block);
-      if (!type_is_void(exp) && ctx->is_ignore()) sys->raise_error(std::format("Block in 'sequence' function returns 'ignore_value'"));
+      if (exp_is_void) ctx->drop_ignore_above(before);
+      else if (ctx->is_ignore()) sys->raise_error(std::format("Block in 'sequence' function returns 'ignore_value'"));
 
       if (exp_is_bool) {
         if (ctx->is<int64_t>()) sys->setup_type_conversion<int64_t, bool>(ctx, scr);
@@ -933,7 +964,10 @@ void system::init_basic_functions() {
         sys->push_basic_function(ctx, scr, basicf::andbin, 0);
       }
 
-      if (exp_is_fund) {
+      if (exp_is_int) {
+        sys->convert_top_to(ctx, scr, exp, std::format("Block '{}' in 'sequence'", block.name()));
+        sys->push_basic_function(ctx, scr, basicf::sumi, 0);
+      } else if (exp_is_fund) {
         if (ctx->is<int64_t>()) sys->setup_type_conversion<int64_t, double>(ctx, scr);
         if (ctx->is<bool>()) sys->setup_type_conversion<bool, double>(ctx, scr);
         sys->push_basic_function(ctx, scr, basicf::sum, 0);
@@ -976,16 +1010,35 @@ void system::init_basic_functions() {
     ctx->scope_stack.push_back(switch_index);
     auto end = e.make_label();
     bool has_case = false;
+    bool has_default = false;
+
+    // Runs a case body and brings its value to the switch's type.
+    const auto emit_case_body = [&](const command_block& curblock) {
+      const size_t before_case = ctx->stack_types.size();
+      sys->dispatch_node(ctx, scr, curblock);
+      if (exp_is_void) ctx->drop_ignore_above(before_case);
+      else {
+        if (ctx->is_ignore()) sys->raise_error(std::format("'switch' case '{}' returns 'ignore_value'", curblock.name()));
+        sys->convert_top_to(ctx, scr, exp, std::format("'switch' case '{}'", curblock.name()));
+        ctx->pop();
+      }
+    };
 
     size_t offset = 1;
     while (offset < args.size()) {
       const auto curblock = command_block(args, offset);
       offset += curblock.size();
       if (curblock.name() == "value" || curblock.name() == custom_description_constant) continue;
-      has_case = true;
+      if (has_default) sys->raise_error("'switch' default case (the one without 'value') must be the last case");
 
       const auto case_value_node = curblock.find("value");
-      if (case_value_node.empty()) sys->raise_error("'switch' case block requires 'value'");
+      if (case_value_node.empty()) {
+        // The default case: reached only when no case before it matched.
+        has_default = true;
+        emit_case_body(curblock);
+        continue;
+      }
+      has_case = true;
 
       {
         set_expected_type set(ctx, switch_type);
@@ -1005,18 +1058,15 @@ void system::init_basic_functions() {
       sys->push_basic_function(ctx, scr, basicf::erase, case_index);
       ctx->erase(case_index);
 
-      sys->dispatch_node(ctx, scr, curblock);
-      if (!exp_is_void) {
-        if (ctx->is_ignore()) sys->raise_error(std::format("'switch' case '{}' returns 'ignore_value'", curblock.name()));
-        ctx->pop();
-      }
+      emit_case_body(curblock);
 
       e.jump_to(basicf::jump, end);
       e.bind(next_case);
       sys->push_basic_function(ctx, scr, basicf::erase, case_index);
     }
 
-    if (!has_case) sys->raise_error("'switch' requires at least one case block");
+    if (!has_case) sys->raise_error("'switch' requires at least one case block with 'value'");
+    if (!has_default && !exp_is_void) scr->cmds.push_back(container::command(&switch_no_match, INT64_C(0)));
 
     e.bind(end);
     sys->scope_exit(ctx, scr, 1);
@@ -1064,6 +1114,8 @@ void system::init_basic_functions() {
         sys->setup_block_description(ctx, scr, wnode.name(), sys->static_string_arg(cd, custom_description_constant), start);
 
         if (last_index == ctx->stack_types.size() - 1) sys->raise_error(std::format("No new values on stack after 'weight' node computation?"));
+        sys->convert_top_to(ctx, scr, utils::type_name<script_float_t>(), "'random' weight");
+        scr->cmds.push_back(container::command(&check_random_weight, INT64_C(0)));
         const size_t weight_index = ctx->stack_types.size() - 1;
 
         if (values_indicies.size() > 0) {
@@ -1093,8 +1145,10 @@ void system::init_basic_functions() {
         sys->fold_block(ctx, scr, curblock, basicf::invalid);
         const auto cd = curblock.find(custom_description_constant);
         sys->setup_block_description(ctx, scr, curblock.name(), sys->static_string_arg(cd, custom_description_constant), start);
-        if (!is_void) {
+        if (is_void) ctx->drop_ignore_above(stack_size);
+        else {
           if (stack_size == ctx->stack_types.size()) sys->raise_error(std::format("'{}' produces no value on stack", curblock.name()));
+          sys->convert_top_to(ctx, scr, value_type, std::format("'random' node '{}'", curblock.name()));
           if (value_type != ctx->top()) sys->raise_error(std::format("'random' node expects all of values to be same type, expected type '{}', but got '{}'", value_type, ctx->top()));
           ctx->pop();
         }
@@ -1109,7 +1163,7 @@ void system::init_basic_functions() {
     sys->push_basic_function(ctx, scr, basicf::erase, stack_index);
     ctx->erase(stack_index);
 
-    ctx->push(value_type);
+    if (!is_void) ctx->push(value_type);
 
     return args.size();
   });
@@ -1182,7 +1236,9 @@ void system::init_basic_functions() {
     const size_t desc_start = scr->block_descs.size();
 
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
-    sys->fold_block(ctx, scr, nextblock, basicf::invalid);
+    // dispatch_node, like `arg`: folding would compile only the children of the next path element
+    // and drop the element itself, so `ctx:saved:x.liege:id` read `id` of x, not of x's liege.
+    sys->dispatch_node(ctx, scr, nextblock);
     sys->scope_exit(ctx, scr, 1);
 
     const auto desc_name = sys->static_string_arg(nextblock.find(custom_description_constant), custom_description_constant);
@@ -1211,7 +1267,7 @@ void system::init_basic_functions() {
         scr->saved.push_back({ sys->store_string(scr, child.name()), top });
         index = scr->saved.size()-1;
       } else {
-        scr->saved[index].type = top;
+        scr->saved[index].type = sys->slot_value_type(ctx, scr, scr->saved[index].type, top, true, std::format("Saved value '{}'", child.name()));
       }
 
       sys->push_basic_function(ctx, scr, basicf::savectxrvalue, index);
@@ -1235,7 +1291,7 @@ void system::init_basic_functions() {
       scr->saved.push_back({ sys->store_string(scr, child.name()), type });
       index = scr->saved.size()-1;
     } else {
-        scr->saved[index].type = type;
+      scr->saved[index].type = sys->slot_value_type(ctx, scr, scr->saved[index].type, type, false, std::format("Saved value '{}'", child.name()));
     }
 
     sys->push_basic_function(ctx, scr, basicf::savectxlvalue, pack2(scope_index, index));
@@ -1305,7 +1361,7 @@ void system::init_basic_functions() {
         scr->args.push_back({ sys->store_string(scr, child.name()), top });
         index = scr->args.size()-1;
       } else {
-        scr->args[index].type = top;
+        scr->args[index].type = sys->slot_value_type(ctx, scr, scr->args[index].type, top, true, std::format("Argument '{}'", child.name()));
       }
 
       sys->push_basic_function(ctx, scr, basicf::setargrvalue, index);
@@ -1324,13 +1380,16 @@ void system::init_basic_functions() {
     if (ctx->scope_stack.size() < 1) throw std::runtime_error(std::format("Context does not contain scope to save!"));
     const size_t scope_index = ctx->scope_stack[ctx->scope_stack.size() - 1];
     const auto type = ctx->stack_types[scope_index];
-    size_t index = scr->find_saved(child.name());
+    // An argument slot: looked up among the arguments, not the saved values (the indexes of the two
+    // tables have nothing to do with each other).
+    size_t index = scr->find_arg(child.name());
     if (index >= scr->args.size()) {
       scr->args.push_back({ sys->store_string(scr, child.name()), type });
       index = scr->args.size() - 1;
     } else {
-      scr->args[index].type = type;
+      scr->args[index].type = sys->slot_value_type(ctx, scr, scr->args[index].type, type, false, std::format("Argument '{}'", child.name()));
     }
+    if (index >= context::script_arguments_size) sys->raise_error(std::format("Maximum arguments count is {}", context::script_arguments_size));
 
     sys->push_basic_function(ctx, scr, basicf::setarglvalue, pack2(scope_index, index));
     ctx->push<ignore_value>();
@@ -1348,6 +1407,11 @@ void system::init_basic_functions() {
       scr->lists.push_back({ sys->store_string(scr, child.name()), std::string_view() });
       index = scr->lists.size()-1;
     } else {}
+
+    const bool iterated = std::find(ctx->iterated_lists.begin(), ctx->iterated_lists.end(), index) != ctx->iterated_lists.end();
+    const auto reject_if_iterated = [&](const std::string_view what) {
+      if (iterated) sys->raise_error(std::format("List '{}' cannot be changed by '{}' inside its own pipeline", child.name(), what));
+    };
 
     const size_t start = ctx->stack_types.size();
 
@@ -1430,15 +1494,24 @@ void system::init_basic_functions() {
         ctx->push(input_type);
         ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
         {
-          // Mark this list as "being iterated" for the duration of the per-element callback, so an
-          // `execute` inside it can't bind the same list in/out (it would mutate the live list under us).
+          // Mark this list as "being iterated" for the duration of the per-element callback, so
+          // nothing inside it (a list op, `add_to`, an `execute` binding) can change the live list.
           push_list_index_upvalue pliu(ctx, index);
+          struct iterating {
+            std::vector<size_t>& lists;
+            iterating(std::vector<size_t>& lists, const size_t index) : lists(lists) { lists.push_back(index); }
+            ~iterating() { lists.pop_back(); }
+          } it(ctx->iterated_lists, index);
           set_expected_type set(ctx, expected);
           sys->dispatch_node(ctx, scr, body);
         }
         sys->scope_exit(ctx, scr, 1);
 
         if (ctx->stack_types.size() <= before) sys->raise_error(std::format("List pipeline body '{}' produced no value", body.name()));
+        // An integer list sums, compares and averages through the registered integer -> floating
+        // point conversion; it used to be rejected outright.
+        if (!type_is_any_type(expected) && ctx->top() != expected && sys->can_convert_implicitly(ctx->top(), expected))
+          sys->setup_type_conversion(ctx, scr, ctx->top(), expected);
         const auto result_type = ctx->top();
         if (!type_is_any_type(expected) && result_type != expected) sys->raise_error(std::format("List pipeline body '{}' expected '{}', got '{}'", body.name(), expected, result_type));
         ctx->pop();
@@ -1493,6 +1566,8 @@ void system::init_basic_functions() {
         const auto maybe_kind = op_kind(op.name());
         if (!maybe_kind) sys->raise_error(std::format("Unknown list pipeline operation '{}'", op.name()));
         const auto kind = *maybe_kind;
+        if (kind == container::list_pipeline_kind::add_to || kind == container::list_pipeline_kind::clear ||
+            kind == container::list_pipeline_kind::filter || kind == container::list_pipeline_kind::map) reject_if_iterated(op.name());
 
         command_block default_body;
         if (requires_default(kind)) {
@@ -1506,12 +1581,14 @@ void system::init_basic_functions() {
         // Emit the op + three immediate-data slots; the metadata (callback ranges, resume point,
         // input element type) is backpatched into those slots once the sections are compiled — no
         // side table. Offsets are stored relative to the opcode's own cmd index (op_cmd).
-        const auto input_type_at_op = scr->lists[index].type;  // element type fed to this op's callback
+        // Element type at this op: fed to its callback, checked by add_to, pushed by first/last. A later
+        // `map` changes the list's type, so the final type is not the type every op sees.
+        auto input_type_at_op = scr->lists[index].type;
         const size_t op_cmd = scr->cmds.size();
         scr->cmds.emplace_back(container::command(&list_pipeline, pack2(int32_t(kind), int32_t(index))));
         scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+1] value range
         scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+2] default_start + end
-        scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+3] input_type string ref
+        scr->cmds.emplace_back(container::command(&list_op_data, int64_t(0)));  // [op+3] input_type index into scr->types
         sys->record_data_slots(ctx, op_cmd + 1, 3);
         size_t value_start = 0, value_end = 0, default_start = 0;  // absolute cmd indices; 0 == section absent
 
@@ -1521,6 +1598,7 @@ void system::init_basic_functions() {
           if (type_is_ignore(result_type) || type_is_void(result_type)) sys->raise_error(std::format("List operation '{}' cannot add '{}'", op.name(), result_type));
           if (scr->lists[index].type.empty()) scr->lists[index].type = result_type;
           else if (scr->lists[index].type != result_type) sys->raise_error(std::format("List '{}' expects '{}', got '{}'", child.name(), scr->lists[index].type, result_type));
+          input_type_at_op = scr->lists[index].type;
         } else if (has_value_callback(kind)) {
           const auto [s, en, result_type] = compile_value_section(direct_body(op), callback_expected(kind));
           value_start = s; value_end = en;
@@ -1548,8 +1626,10 @@ void system::init_basic_functions() {
         sys->record_cmd_index(ctx, op_cmd + 2, 1, op_cmd, true);
         sys->record_cmd_index(ctx, op_cmd + 2, 2, op_cmd, false);
         if (!input_type_at_op.empty()) {
-          const auto ref = sys->store_string(scr, input_type_at_op);
-          scr->cmds[op_cmd + 3].arg = packstrid(uint32_t(ref.start), uint32_t(ref.count));
+          // 1-based index into scr->types; 0 means "the list's own type".
+          auto itr = std::find(scr->types.begin(), scr->types.end(), input_type_at_op);
+          if (itr == scr->types.end()) itr = scr->types.insert(itr, input_type_at_op);
+          scr->cmds[op_cmd + 3].arg = int64_t(itr - scr->types.begin()) + 1;
         }
 
         if (kind == container::list_pipeline_kind::filter || kind == container::list_pipeline_kind::map || kind == container::list_pipeline_kind::clear) {
@@ -1572,6 +1652,8 @@ void system::init_basic_functions() {
       return args.size();
     }
 
+    // add_to / remove_from / is_in; conservatively all of them, since they share one scope.
+    reject_if_iterated(nextblock.name());
     push_list_index_upvalue pliu(ctx, index);
     ctx->scope_stack.push_back(ctx->stack_types.size() - 1);
     sys->dispatch_node(ctx, scr, nextblock);

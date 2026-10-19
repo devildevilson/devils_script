@@ -113,8 +113,8 @@ written in hexadecimal, octal or binary: `0x1f`, `0o17`, `0b101` (the prefix let
 An integer literal has to fit `script_int_t`: `9223372036854775808` is a syntax error, not a double -
 write `9223372036854775808.0` for that, and `-9223372036854775807 - 1` for the smallest `int64_t`.
 
-Integer arithmetic is exact and wraps two's complement on overflow. `%` rejects division by zero and
-`INT_MIN % -1` as script errors instead of trapping. Mixing an integer with a floating-point value
+Integer arithmetic is exact and wraps two's complement on overflow. `%` rejects division by zero as a
+script error instead of trapping, and `x % -1` is 0 (so `INT_MIN % -1` cannot trap either). Mixing an integer with a floating-point value
 converts the integer side; nothing converts the other way on its own, so `1.5 > 1` compares 1.5
 against 1.0 rather than truncating.
 

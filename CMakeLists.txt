@@ -154,6 +154,7 @@ if (DS_BUILD_TESTS)
 
   add_executable (devils_script_tests
     tests/audit.cpp
+    tests/audit2.cpp
     tests/optimizer.cpp
     tests/numbers.cpp
     tests/main.cpp

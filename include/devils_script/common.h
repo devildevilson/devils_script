@@ -73,6 +73,10 @@ constexpr script_float_t unpack_float(const int64_t arg) noexcept {
 // binary behind a `0x` / `0o` / `0b` prefix (either case, as tavl lexes them). Such a literal is an
 // integer and has to fit `script_int_t`; `out_of_range` must never fall back to a floating-point
 // value.
+// What a skipped `?=` call leaves in a value context: 0 none (an invalid handle), 1 false,
+// 2 floating-point zero, 3 integer zero.
+int32_t nullable_guard_mode(const std::string_view expected_type) noexcept;
+
 enum class integer_literal { none, valid, out_of_range };
 integer_literal parse_integer_literal(const std::string_view text, script_int_t& value) noexcept;
 std::string integer_literal_out_of_range_message(const std::string_view text);
@@ -113,6 +117,7 @@ constexpr std::string_view devils_script_version = DEVILS_SCRIPT_VERSION;
   X(MUL) \
   X(andbin) \
   X(sum) \
+  X(sumi) \
   X(mul) \
   X(sumsetstack) \
   X(mulsetstack) \
@@ -159,13 +164,17 @@ template <typename T>
 using final_stack_el_t = std::conditional_t<
   utils::is_void_v<T>, utils::void_t,
   std::conditional_t<
-    std::is_same_v<bool, T>, bool,
+    std::is_same_v<bool, std::remove_cvref_t<T>>, bool,      // `const bool` too, not the integer branch
     std::conditional_t<
       std::is_integral_v<T>, script_int_t,
       std::conditional_t<
         std::is_floating_point_v<T>, script_float_t,
+  // Pointee constness is ignored like in signature matching (see scope_type_name): a `const T*`
+  // value is the same stack type as `T*`, so runtime type checks agree with the parser.
+  std::conditional_t<
+    std::is_pointer_v<std::remove_cvref_t<T>>, std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>*,
   std::remove_cvref_t<T>
->>>>;
+>>>>>;
 
 template <typename T>
 using script_stack_el_t = std::conditional_t<
@@ -409,8 +418,10 @@ using valid_scope_t_or_void = std::conditional_t<
             std::conditional_t<
             std::is_same_v<ignore_value, std::remove_cvref_t<T>>, utils::void_t,
               std::conditional_t<
+              utils::is_optional_v<T>, utils::void_t,   // an optional first parameter is an argument
+              std::conditional_t<
               valid_stack_el_type_v<std::remove_cvref_t<T>>, std::remove_cvref_t<T>, std::remove_cvref_t<T>*
-  >>>>>>>;
+  >>>>>>>>;
 
 template <typename F>
 using scope_t = valid_scope_t_or_void<member_of_or_first<F>>;
@@ -548,7 +559,7 @@ auto stack_element::view::rawget() const -> const final_stack_el_t<T> {
 template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, element_view>)
 auto stack_element::view::get() const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
-  if (!is<basic_T>()) throw std::runtime_error(std::format("Stack value view contains '{}' type, but '{}' is requested", _type, utils::type_id<basic_T>()));
+  if (!is<basic_T>()) throw std::runtime_error(std::format("Stack value view contains '{}' type, but '{}' is requested", _type, utils::type_name<basic_T>()));
   if constexpr (is_el_view_v<basic_T>) {
     return *this;
   } else return rawget<basic_T>();
@@ -597,7 +608,7 @@ bool any_stack::is() const {
 template <typename T> requires(valid_stack_el_type_v<T> || std::is_same_v<std::remove_cvref_t<T>, stack_element::view> || std::is_same_v<std::remove_cvref_t<T>, any_stack>)
 auto any_stack::get() const -> final_stack_el_t<T> {
   using basic_T = final_stack_el_t<T>;
-  if (!is<basic_T>()) throw std::runtime_error(std::format("Stack value view contains '{}' type, but '{}' is requested", _type, utils::type_id<basic_T>()));
+  if (!is<basic_T>()) throw std::runtime_error(std::format("Stack value view contains '{}' type, but '{}' is requested", _type, utils::type_name<basic_T>()));
   if constexpr (is_typeless_v<basic_T>) {
     return stack_element::view(_mem, _type);
   } else return detail::load_stack_bytes<basic_T>(_mem);

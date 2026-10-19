@@ -187,6 +187,15 @@ int64_t sum(int64_t, context* ctx, const script_container*) {
   return -1;
 }
 
+// Integer accumulation (an integer `sequence`): wraps like the rest of the integer arithmetic.
+int64_t sumi(int64_t, context* ctx, const script_container*) {
+  using uint_t = std::make_unsigned_t<script_int_t>;
+  const script_int_t n2 = ctx->stack.safe_pop<script_int_t>();
+  const script_int_t n1 = ctx->stack.safe_pop<script_int_t>();
+  ctx->stack.push(script_int_t(uint_t(n1) + uint_t(n2)));
+  return -1;
+}
+
 int64_t mul(int64_t, context* ctx, const script_container*) {
   const script_float_t n2 = ctx->stack.safe_pop<script_float_t>();
   const script_float_t n1 = ctx->stack.safe_pop<script_float_t>();
@@ -285,6 +294,14 @@ int64_t sum_unsafe(int64_t, context* ctx, const script_container*) {
   const script_float_t n2 = ctx->stack.pop<script_float_t>();
   const script_float_t n1 = ctx->stack.pop<script_float_t>();
   ctx->stack.push(n1 + n2);
+  return -1;
+}
+
+int64_t sumi_unsafe(int64_t, context* ctx, const script_container*) {
+  using uint_t = std::make_unsigned_t<script_int_t>;
+  const script_int_t n2 = ctx->stack.pop<script_int_t>();
+  const script_int_t n1 = ctx->stack.pop<script_int_t>();
+  ctx->stack.push(script_int_t(uint_t(n1) + uint_t(n2)));
   return -1;
 }
 
@@ -559,7 +576,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
 
   const auto [vs_off, ve_off] = unpack2(scr->cmds[P + 1].arg);
   const auto [ds_off, end_off] = unpack2(scr->cmds[P + 2].arg);
-  const auto [it_pos, it_size] = unpackstrid(scr->cmds[P + 3].arg);
+  const int64_t input_type_ref = scr->cmds[P + 3].arg;
 
   const size_t value_start = P + size_t(vs_off);
   const size_t value_end = P + size_t(ve_off);
@@ -569,13 +586,13 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
 
   auto& list = ctx->lists[list_index + ctx->list_base];  // physical slot; scr->lists is per-container metadata, not offset
   const auto type = scr->lists[list_index].type;
-  const auto stored_input = it_size == 0 ? std::string_view() : scr->get_string(it_pos, it_size);
+  const auto stored_input = input_type_ref == 0 ? std::string_view() : scr->types[size_t(input_type_ref - 1)];
   const auto input_type = stored_input.empty() ? type : stored_input;
 
   switch (kind) {
     case container::list_pipeline_kind::add_to: {
       const auto val = run_default_callback(ctx, scr, default_start, default_end);
-      if (!type.empty() && val.type() != type) throw std::runtime_error(std::format("List expects '{}', got '{}'", type, val.type()));
+      if (!input_type.empty() && val.type() != input_type) throw std::runtime_error(std::format("List expects '{}', got '{}'", input_type, val.type()));
       push_any_to_list(list, val);
       break;
     }
@@ -696,7 +713,7 @@ int64_t list_pipeline(int64_t arg, context* ctx, const script_container* scr) {
         }
       }
       if (found >= 0) {
-        ctx->stack.push(type, list[size_t(found)]);
+        ctx->stack.push(input_type, list[size_t(found)]);
       } else {
         const auto def = run_default_callback(ctx, scr, default_start, default_end);
         ctx->stack.push(def);

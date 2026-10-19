@@ -35,6 +35,16 @@ void script_container::process(context* ctx) const {
     error_at(ctx, std::format("context operand stack too small: needs {} slots at frame base {}, but the context provides only {}", max_stack, ctx->frame_base, ctx->stack._data.size()));
   if (ctx->saved_base + max_saved > ctx->saved_stack._data.size())
     error_at(ctx, std::format("context saved-value stack too small: needs {} slots at base {}, but the context provides only {}", max_saved, ctx->saved_base, ctx->saved_stack._data.size()));
+  if (!lists.empty() && ctx->list_base + lists.size() > ctx->lists.size())
+    error_at(ctx, std::format("context has {} lists at base {}, but the script uses {}; call create_lists() first", ctx->lists.size(), ctx->list_base, lists.size()));
+
+  // A top-level run starts from the first command on an empty stack. Reusing a context without
+  // clear() used to resume at the previous run's index, on its leftover stack (after an exception,
+  // in the middle of the script). An `execute`d sub-script is entered with its own frame set up.
+  if (ctx->current_script == nullptr) {
+    ctx->current_index = 0;
+    ctx->stack.resize(0);
+  }
 
   current_script_guard guard(ctx, this);
   for (; ctx->current_index < cmds.size(); ++ctx->current_index) {
@@ -49,6 +59,7 @@ void script_container::shrink_to_fit() {
   args.shrink_to_fit();
   saved.shrink_to_fit();
   lists.shrink_to_fit();
+  types.shrink_to_fit();
   string_pool.shrink_to_fit();
 }
 
@@ -143,11 +154,28 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
   work.describing = true;
   bool stopped = false;
 
+  // A void iterator is the opcode at its node's start, followed by one jump data slot per callback
+  // section; the node's cmd_index is the last command of the last section. Skipping only that command
+  // used to run the iterator - and every effect in its callbacks.
+  const auto is_effect_iterator = [&](const size_t i, const block_description& bd) {
+    return i == bd.cmd_start && bd.cmd_index > i && i + 1 < cmds.size() && find_basicf_by_fp(cmds[i + 1].fp) == basicf::jump &&
+           cmds[i + 1].arg > int64_t(i + 1) && cmds[i + 1].arg <= int64_t(bd.cmd_index) + 1;
+  };
+
   // Effect-ness is a property of the producing node (a void function/iterator): only its result
   // command is the effect to skip — argument pushes inside it must still be evaluated.
   const auto cmd_is_effect = [&](const size_t i) {
     const size_t n = i < cmd_node.size() ? cmd_node[i] : SIZE_MAX;
-    return n != SIZE_MAX && block_descs[n].effect && block_descs[n].cmd_index == i;
+    if (n == SIZE_MAX || !block_descs[n].effect) return false;
+    const auto& bd = block_descs[n];
+    if (bd.cmd_index == i) return true;
+    return is_effect_iterator(i, bd);
+  };
+  // Where describe() continues after skipping effect command `i`: past the command, or for a void
+  // iterator past its whole callback range.
+  const auto skip_effect = [&](const size_t i) -> size_t {
+    const auto& bd = block_descs[cmd_node[i]];
+    return is_effect_iterator(i, bd) ? bd.cmd_index + 1 : i + 1;
   };
 
   size_t counter = 0;
@@ -162,11 +190,21 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
         const auto& cmd = cmds[i];
         std::invoke(cmd.fp, cmd.arg, &work, this);
         work.current_index += 1;
-      } catch (const context::description_unavailable& e) {
+      } catch (const std::exception& e) {
+        // Stop at the first command that cannot run (an `execute`, or a real error). Carrying on
+        // without its result made every later command consume the wrong stack slots: invented
+        // values, and in unsafe mode reads below the stack.
         ok = false;
         error = e.what();
         work = std::move(before);
         stopped = true;
+      } catch (...) {
+        ok = false;
+        error = "unknown evaluation error";
+        work = std::move(before);
+        stopped = true;
+      }
+      if (stopped) {
         // Values sampled at the beginning of an unfinished parent are not its result.
         for (size_t n = 0; n < table.size(); ++n) {
           if (block_descs[n].cmd_index >= i) {
@@ -174,19 +212,9 @@ void container::describe(context* ctx, const description_callback_t& fn) const {
             table[n].error = error;
           }
         }
-      } catch (const std::exception& e) {
-        ok = false;
-        error = e.what();
-        work = std::move(before);
-        work.current_index = i + 1;
-      } catch (...) {
-        ok = false;
-        error = "unknown evaluation error";
-        work = std::move(before);
-        work.current_index = i + 1;
       }
     } else if (reached) {
-      work.current_index += 1;
+      work.current_index = skip_effect(i);
     }
 
     const auto record = [&](const size_t node) {

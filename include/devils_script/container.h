@@ -86,6 +86,10 @@ struct script_container {
   std::vector<argument_data> args;
   std::vector<argument_data> saved;
   std::vector<argument_data> lists;
+  // Type names a command argument refers to by index (a list op's element type). Like the `type`
+  // fields above they view compile-time type names, never `string_pool`: the runtime copies them
+  // into stack and saved-slot type tags, which outlive the container.
+  std::vector<std::string_view> types;
   std::string string_pool;
   string_ref name{};
   // Static return type of this script (the parse-time RETURN_T), as a stable type-name view.
@@ -106,6 +110,9 @@ struct script_container {
   // `list_frame_enter` never reallocates ctx->lists — otherwise a list-pipeline callback that runs a
   // list-using sub-script would invalidate the `list&` reference the pipeline holds across the call.
   size_t max_lists = 0;
+  // Peak argument-frame usage: this script's arguments plus the deepest nested `execute` chain of
+  // argument frames, which stack above each other in the fixed-size argument stack.
+  size_t max_args = 0;
 
   script_container() noexcept;
   void process(context* ctx) const;

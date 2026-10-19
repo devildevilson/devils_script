@@ -88,6 +88,17 @@ public:
     std::vector<block> output;
     std::string token_storage;
 
+    rpn_conversion_ctx() = default;
+    rpn_conversion_ctx(rpn_conversion_ctx&&) = default;
+    rpn_conversion_ctx& operator=(rpn_conversion_ctx&&) = default;
+    // A copy is a fresh, empty scratch. parse_context is copied once per overload trial, and during
+    // the semantic pass this is only an append-only store for the tokens the trial splits off scope
+    // paths; command blocks keep pointing at the storage they were built over, so existing tokens stay
+    // readable through the original. Copying the whole script's tokens into every trial made overload
+    // resolution of long expressions roughly cubic.
+    rpn_conversion_ctx(const rpn_conversion_ctx&) noexcept {}
+    rpn_conversion_ctx& operator=(const rpn_conversion_ctx&) noexcept { output.clear(); token_storage.clear(); return *this; }
+
     std::tuple<token_ref, size_t> convert_scope(const std::string_view& expr, block* arr, const size_t max_size, size_t line = 0, size_t column = 0);
     std::string_view token_text(const token_ref& token) const noexcept;
     token_ref store_token(std::string_view text, size_t line = 0, size_t column = 0);
@@ -98,6 +109,8 @@ public:
     size_t normalize(const std::vector<tavl::node>& tree, std::string_view src);
     size_t normalize_block(const tavl::node* block, std::string_view src);
     void normalize_row(const tavl::node* row, std::string_view src);
+    size_t normalize_call(std::string_view lvalue, const size_t lvalue_line, const size_t lvalue_column, const tavl::node* rhs,
+                          const std::vector<const tavl::node*>* call_args, const bool nullable_call, std::string_view src);
     size_t normalize_expr(const tavl::node* n, std::string_view src);
     token_ref normalize_token(const tavl::node* n, std::string_view src);
 
@@ -159,6 +172,9 @@ public:
     size_t source_column;   // (used to stamp script_container::locs for error reporting)
     size_t unlimited_func_index;
     size_t list_index_upvalue;
+    // Lists whose pipeline callback is being compiled. The running pipeline holds a reference into
+    // such a list, so nothing inside the callback may change it.
+    std::vector<size_t> iterated_lists;
     size_t prev_chaining;
     size_t description_placeholder_depth;
 
@@ -169,6 +185,7 @@ public:
     size_t max_stack_depth;
     size_t max_child_saved;
     size_t max_child_lists;   // deepest max_lists among executed sub-scripts; see container::max_lists
+    size_t max_child_args;    // deepest max_args among executed sub-scripts; see container::max_args
     // Upper bounds enforced at parse end (default to the context's stack/local-vars sizes). A script
     // whose computed max_stack/max_saved exceeds these is rejected so it can never overrun the runtime
     // stacks. Set before parsing to carve scripts into nesting classes with smaller budgets.
@@ -224,6 +241,11 @@ public:
     void init(const system& sys, container& c);
 
     uint64_t gen_value();           // advances this parse's PRNG (seeded from system at parse start)
+    // Seeds this parse's PRNG from the system seed and the script's name, and draws the script's own
+    // state from it. `chance` mixes that state, a per-occurrence state and the context's state: the
+    // first two are fixed per script, so they have to differ between scripts - seeded from the system
+    // seed alone, every script drew the same states and gave the same rolls.
+    void seed_script(const system& sys, const std::string_view name, container& c);
 
     bool is_func_subblock() const;
     void push_func(const std::string_view &name);
@@ -246,6 +268,9 @@ public:
     bool is_object() const;
 
     bool pop_while_ignore();
+    // Drops the ignore_value placeholders above `size`: what a value-less (effect) child reported.
+    // Anything at or below `size` belongs to an enclosing block and stays.
+    void drop_ignore_above(const size_t size);
 
     template <typename T>
     void push();
@@ -425,6 +450,18 @@ public:
   std::optional<int32_t> implicit_conversion_cost(const std::string_view& from, const std::string_view& to) const;
   bool can_convert_implicitly(const std::string_view& from, const std::string_view& to) const;
   void setup_type_conversion(parse_ctx* ctx, container* scr, const std::string_view& from, const std::string_view& to) const;
+  // An argument block's own `condition` has no meaning: nothing would evaluate it, so
+  // `max(1, { condition = false, 30 })` used to be 30. Only ADD/MUL terms and the bodies of
+  // select/sequence/switch/random take a condition, and they consume it themselves.
+  void reject_ignored_condition(const command_block& arg_block, const std::string_view& function) const;
+  // The type a named saved/argument slot keeps when `value_type` is stored into it. A slot has one
+  // type for the whole script: retyping it made every earlier read fail at run time. An untyped slot
+  // takes the value's type; a value on top of the stack may convert to the slot's type.
+  std::string_view slot_value_type(parse_ctx* ctx, container* scr, const std::string_view& slot_type, const std::string_view& value_type,
+                                   const bool value_on_top, const std::string_view& slot) const;
+  // Converts the value on top to `to` through the registered implicit conversions, or rejects it.
+  // `what` names the producer in the error. Does nothing when `to` accepts any type.
+  void convert_top_to(parse_ctx* ctx, container* scr, const std::string_view& to, const std::string_view& what) const;
 
   void toggle_safety();
   bool safety() const;

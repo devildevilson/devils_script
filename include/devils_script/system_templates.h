@@ -42,14 +42,13 @@ void system::register_implicit_conversion(const int32_t cost) {
 }
 
 namespace detail {
-template <typename F>
+// `first_argument_index` is the registration's own: whether the first parameter is the scope depends
+// on the HT it was registered with, not on what scope_t<F> would infer. Inferring it here listed an
+// HT=void function's first parameter as its scope and dropped it from the signature.
+template <typename F, size_t first_argument_index>
 std::vector<std::string_view> make_argument_type_list() {
   std::vector<std::string_view> out;
-  constexpr bool is_not_member_func = is_not_member_function<F>;
-  using scope_type = scope_t<F>;
-  constexpr bool requires_scope = !utils::is_void_v<scope_type>;
   constexpr size_t sig_args_count = utils::function_arguments_count<F>;
-  constexpr size_t first_argument_index = size_t(requires_scope && is_not_member_func);
   out.reserve(sig_args_count - first_argument_index);
   utils::static_for<sig_args_count - first_argument_index>([&](auto index) {
     constexpr size_t arg_index = first_argument_index + index;
@@ -111,6 +110,7 @@ size_t system::parse_args(
     }
 
     const auto& name = !func_args_names.empty() ? func_args_names[index] : std::string();
+    reject_ignored_condition(arg_block, curfname);
     next_size = parse_arg<Arg>(ctx, scr, arg_block, index, std::string_view(), std::string_view(), name, fn);
   }
 
@@ -160,7 +160,9 @@ size_t system::parse_args(parse_ctx* ctx, container* scr, const command_block& b
         if (name == custom_description_constant) raise_error(std::format("Using 'custom_description' as name of an argument is not allowed"));
 
         arg_block = block.find(name);
-        if (arg_block.empty()) raise_error(std::format("Could not find argument '{}' for function '{}'", name, curfname));
+        if constexpr (!is_optional) {   // an absent optional is passed as an invalid element
+          if (arg_block.empty()) raise_error(std::format("Could not find argument '{}' for function '{}'", name, curfname));
+        }
       } else {
         arg_block = command_block(block, offset);
         next_size = arg_block.size();
@@ -171,6 +173,7 @@ size_t system::parse_args(parse_ctx* ctx, container* scr, const command_block& b
       }
 
       const auto& name = !func_args_names.empty() ? func_args_names[LI] : std::string();
+      reject_ignored_condition(arg_block, curfname);
       next_size = parse_arg<I, LI, F>(ctx, scr, arg_block, std::string_view(), override_block_behaviour, name, fn);
     }
 
@@ -210,8 +213,13 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   using cur_arg_type = final_stack_el_t<Arg>;
   constexpr auto cur_arg_type_name = utils::type_name<cur_arg_type>();
   constexpr bool is_optional = utils::is_optional_v<cur_arg_type>;
+  // An optional argument is passed as its value (or as an invalid element when absent), so the
+  // conversions and the type check below work on the value type.
+  using value_arg_type = std::conditional_t<is_optional, final_stack_el_t<utils::optional_value_t<cur_arg_type>>, cur_arg_type>;
+  constexpr auto value_arg_type_name = utils::type_name<value_arg_type>();
 
-  if (block.empty()) return 0;
+  // An absent optional argument still has to push its invalid element (below).
+  if (block.empty() && !is_optional) return 0;
   if (block.name() == custom_description_constant) return block.size();
 
   const auto curfname = ctx->function_names.back();
@@ -272,39 +280,41 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
     } else dispatch_node(ctx, scr, block, override_lvalue);
   }
 
-  if (!arg_name.empty()) { // special case - named argument description
+  if (!arg_name.empty() && !block.empty()) { // special case - named argument description
     const auto cd = block.find(custom_description_constant);
     const auto cd_str = static_string_arg(cd, custom_description_constant);
     const auto tok = block.name() == "__empty_lvalue" ? override_lvalue : block.name();
     setup_block_description(ctx, scr, tok, cd_str, start, SIZE_MAX, container::description_node_kind::argument);
   }
 
-  if constexpr (std::is_fundamental_v<cur_arg_type>) {
+  if constexpr (std::is_fundamental_v<value_arg_type>) {
     if (!ctx->is_ignore()) {
-      if (ctx->is_bool()) setup_type_conversion<bool, cur_arg_type>(ctx, scr);
-      if (ctx->is_integral()) setup_type_conversion<int64_t, cur_arg_type>(ctx, scr);
+      if (ctx->is_bool()) setup_type_conversion<bool, value_arg_type>(ctx, scr);
+      if (ctx->is_integral()) setup_type_conversion<int64_t, value_arg_type>(ctx, scr);
       // Widening conversions are emitted here directly, without consulting the registry. Narrowing a
       // floating-point value to an integer is not one of them: it drops the fraction, so it has to be
       // written out (`to_int`). Leaving it in meant an overload taking int64 could swallow `1.5` as
       // `1`, and `1.5 > 1` compiled into `1 > 1`.
-      if constexpr (!std::is_integral_v<cur_arg_type> || std::is_same_v<bool, cur_arg_type>) {
-        if (ctx->is_number()) setup_type_conversion<double, cur_arg_type>(ctx, scr);
+      if constexpr (!std::is_integral_v<value_arg_type> || std::is_same_v<bool, value_arg_type>) {
+        if (ctx->is_number()) setup_type_conversion<double, value_arg_type>(ctx, scr);
       }
     }
   }
 
-  if (!ctx->is_ignore() && ctx->top() != cur_arg_type_name && can_convert_implicitly(ctx->top(), cur_arg_type_name)) {
-    setup_type_conversion(ctx, scr, ctx->top(), cur_arg_type_name);
+  if (!ctx->is_ignore() && ctx->top() != value_arg_type_name && can_convert_implicitly(ctx->top(), value_arg_type_name)) {
+    setup_type_conversion(ctx, scr, ctx->top(), value_arg_type_name);
   }
 
-  if constexpr (std::is_enum_v<cur_arg_type>) {
+  if constexpr (std::is_enum_v<value_arg_type>) {
     if (!ctx->is_ignore() && !ctx->is<int64_t>())
-      raise_error(std::format("Could not parse argument {} for function '{}': function expects enum '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
-  } else if (!is_typeless_v<cur_arg_type> && !ctx->is_ignore() && !ctx->is<cur_arg_type>()) {
-    raise_error(std::format("Could not parse argument {} for function '{}': function expects '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
+      raise_error(std::format("Could not parse argument {} for function '{}': function expects enum '{}', but got '{}'", index, curfname, value_arg_type_name, ctx->top()));
+  } else if (!is_typeless_v<value_arg_type> && !ctx->is_ignore() && !ctx->is<value_arg_type>()) {
+    raise_error(std::format("Could not parse argument {} for function '{}': function expects '{}', but got '{}'", index, curfname, value_arg_type_name, ctx->top()));
   }
 
-  if (fn) std::invoke(fn, ctx, scr, index, block);
+  // A child that reported no value (an effect) is not an operand: parse_args drops its placeholder
+  // and moves on. Folding it would combine a value that is not on the stack.
+  if (fn && !ctx->is_ignore()) std::invoke(fn, ctx, scr, index, block);
 
   return block.size();
 }
@@ -320,8 +330,13 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
   using cur_arg_type = final_stack_el_t<Arg>;
   constexpr auto cur_arg_type_name = utils::type_name<cur_arg_type>();
   constexpr bool is_optional = utils::is_optional_v<cur_arg_type>;
+  // An optional argument is passed as its value (or as an invalid element when absent), so the
+  // conversions and the type check below work on the value type.
+  using value_arg_type = std::conditional_t<is_optional, final_stack_el_t<utils::optional_value_t<cur_arg_type>>, cur_arg_type>;
+  constexpr auto value_arg_type_name = utils::type_name<value_arg_type>();
 
-  if (block.empty()) return 0;
+  // An absent optional argument still has to push its invalid element (below).
+  if (block.empty() && !is_optional) return 0;
   if (block.name() == custom_description_constant) return block.size();
 
   const auto& curfname = ctx->function_names.back();
@@ -385,39 +400,41 @@ size_t system::parse_arg(parse_ctx* ctx, container* scr, const command_block& bl
     } else fold_block(ctx, scr, block, local_override_block_behaviour);
   }
 
-  if (!arg_name.empty()) { // special case - named argument description
+  if (!arg_name.empty() && !block.empty()) { // special case - named argument description
     const auto cd = block.find(custom_description_constant);
     const auto cd_str = static_string_arg(cd, custom_description_constant);
     const auto tok = block.name();
     setup_block_description(ctx, scr, tok, cd_str, start, SIZE_MAX, container::description_node_kind::argument);
   }
 
-  if constexpr (std::is_fundamental_v<cur_arg_type>) {
+  if constexpr (std::is_fundamental_v<value_arg_type>) {
     if (!ctx->is_ignore()) {
-      if (ctx->is_bool()) setup_type_conversion<bool, cur_arg_type>(ctx, scr);
-      if (ctx->is_integral()) setup_type_conversion<int64_t, cur_arg_type>(ctx, scr);
+      if (ctx->is_bool()) setup_type_conversion<bool, value_arg_type>(ctx, scr);
+      if (ctx->is_integral()) setup_type_conversion<int64_t, value_arg_type>(ctx, scr);
       // Widening conversions are emitted here directly, without consulting the registry. Narrowing a
       // floating-point value to an integer is not one of them: it drops the fraction, so it has to be
       // written out (`to_int`). Leaving it in meant an overload taking int64 could swallow `1.5` as
       // `1`, and `1.5 > 1` compiled into `1 > 1`.
-      if constexpr (!std::is_integral_v<cur_arg_type> || std::is_same_v<bool, cur_arg_type>) {
-        if (ctx->is_number()) setup_type_conversion<double, cur_arg_type>(ctx, scr);
+      if constexpr (!std::is_integral_v<value_arg_type> || std::is_same_v<bool, value_arg_type>) {
+        if (ctx->is_number()) setup_type_conversion<double, value_arg_type>(ctx, scr);
       }
     }
   }
 
-  if (!ctx->is_ignore() && ctx->top() != cur_arg_type_name && can_convert_implicitly(ctx->top(), cur_arg_type_name)) {
-    setup_type_conversion(ctx, scr, ctx->top(), cur_arg_type_name);
+  if (!ctx->is_ignore() && ctx->top() != value_arg_type_name && can_convert_implicitly(ctx->top(), value_arg_type_name)) {
+    setup_type_conversion(ctx, scr, ctx->top(), value_arg_type_name);
   }
 
-  if constexpr (std::is_enum_v<cur_arg_type>) {
+  if constexpr (std::is_enum_v<value_arg_type>) {
     if (!ctx->is_ignore() && !ctx->is<int64_t>())
-      raise_error(std::format("Could not parse argument {} for function '{}': function expects enum '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
-  } else if (!is_typeless_v<cur_arg_type> && !ctx->is_ignore() && !ctx->is<cur_arg_type>()) {
-    raise_error(std::format("Could not parse argument {} for function '{}': function expects '{}', but got '{}'", index, curfname, cur_arg_type_name, ctx->top()));
+      raise_error(std::format("Could not parse argument {} for function '{}': function expects enum '{}', but got '{}'", index, curfname, value_arg_type_name, ctx->top()));
+  } else if (!is_typeless_v<value_arg_type> && !ctx->is_ignore() && !ctx->is<value_arg_type>()) {
+    raise_error(std::format("Could not parse argument {} for function '{}': function expects '{}', but got '{}'", index, curfname, value_arg_type_name, ctx->top()));
   }
 
-  if (fn) std::invoke(fn, ctx, scr, index, block);
+  // A child that reported no value (an effect) is not an operand: parse_args drops its placeholder
+  // and moves on. Folding it would combine a value that is not on the stack.
+  if (fn && !ctx->is_ignore()) std::invoke(fn, ctx, scr, index, block);
 
   return block.size();
 }
@@ -478,7 +495,7 @@ template <auto f, typename HT, on_effect_t<decltype(f), HT> eff, is_valid_t<HT> 
 void system::register_function(std::string name, std::vector<std::string> func_args_names, custom_init_fn_t init_f) {
   using F = decltype(f);
 
-  auto func = [func_args_names = std::move(func_args_names), init_f = std::move(init_f)]
+  auto func = [func_args_names = std::move(func_args_names), init_f = std::move(init_f), registered_name = name]
     (emitter& e, const command_block& args) -> size_t
   {
     [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
@@ -500,12 +517,23 @@ void system::register_function(std::string name, std::vector<std::string> func_a
 
     const bool expected_void = type_is_void(ctx->expected_type);
     if (uftype == user_function_type::effect && !expected_void) sys->raise_error(std::format("Function effect '{}' called in not effect context", curfname));
-    if (!utils::is_void_v<scope_type> && !ctx->is_scope<scope_type>())
+    // An untyped scope is checked below, where its type gets committed.
+    if (!utils::is_void_v<scope_type> && !ctx->is_scope<scope_type>() && ctx->current_scope_type() != utils::type_name<element_view>())
       sys->raise_error(std::format("Trying to call function '{}' in wrong scope context: {} != {}", curfname, ctx->current_scope_type(), stn));
 
     if (!init_f) {
       if constexpr (!unlimited_args) {
         if (args_count != 0 && args.args_count() > args_count) sys->raise_error(std::format("Too many arguments for function '{}'", args.name()));
+        // A function without parameters takes no arguments either; only one returning an object may
+        // be followed by a block, which runs in the returned scope. `age = 5` used to drop the 5, and
+        // `age = { bump = 1 }` the effect.
+        if constexpr (args_count == 0 && uftype != user_function_type::object) {
+          for (const auto& child : args.children()) {
+            const auto n = child.name();
+            if (n != "condition" && n != custom_description_constant && n != "value" && n != "weight")
+              sys->raise_error(std::format("Function '{}' takes no arguments, got '{}'", args.name(), n));
+          }
+        }
       }
 
       int64_t scope_index = INT64_MAX;
@@ -595,7 +623,9 @@ void system::register_function(std::string name, std::vector<std::string> func_a
           }
         } else {
           // command_block b(args, 1) is first argument
+          size_t values = 0;
           sys->parse_args<first_argument>(ctx, scr, args, 1, 0, func_args_names, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
+            values += 1;
             if (index == 0) return;
 
             // For an effect, push its name on top of the two fold operands so on_effect can read it.
@@ -603,6 +633,17 @@ void system::register_function(std::string name, std::vector<std::string> func_a
             sys->emit_call_instruction<f, HT, vf>(ctx, scr, &userfunc<f, HT, vf, eff>, &userfunc_unsafe<f, HT, vf, eff>, scope_index);
             sys->apply_call_stack_effect<ret_type>(ctx, eff != nullptr ? 3 : 2);
           });
+
+          // `T f(T, T)` folds any number of arguments, but a call written by name still needs two:
+          // one used to come back unchanged without calling f, none left nothing on the stack. The
+          // implicit blocks a script is made of (a `{}` body folded with ADD/AND, an argument value)
+          // and the combinators themselves, which also name those implicit blocks, may hold one value.
+          const auto combinator = find_basicf(registered_name);
+          const bool is_combinator = combinator == basicf::ADD || combinator == basicf::MUL || combinator == basicf::AND ||
+                                     combinator == basicf::OR || combinator == basicf::NAND || combinator == basicf::NOR;
+          const bool written_call = args.name() == registered_name && !is_combinator;
+          if (values == 0) sys->raise_error(std::format("'{}' produces no value", args.name()));
+          if (written_call && values < 2) sys->raise_error(std::format("Function '{}' needs at least 2 arguments, got {}", curfname, values));
         }
 
         ctx->unlimited_func_index = prev_index;
@@ -637,7 +678,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
             const size_t guard_index = scr->cmds.size();
             if constexpr (supports_nullable) if (nullable) {
               constexpr function_t guard = &detail::nullable_scope_guard<ret_type, &is_valid<ret_type>>;
-              const int32_t mode = type_is_bool(ctx->expected_type) ? 1 : (type_is_fundamental(ctx->expected_type) ? 2 : 0);
+              const int32_t mode = nullable_guard_mode(ctx->expected_type);
               scr->cmds.push_back(container::command(guard, pack2(0, mode)));
             }
             sys->fold_block(ctx, scr, args, basicf::invalid);
@@ -654,7 +695,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
             const size_t guard_index = scr->cmds.size();
             if constexpr (supports_nullable) if (nullable) {
               constexpr function_t guard = &detail::nullable_scope_guard<ret_type, &is_valid<ret_type>>;
-              const int32_t mode = type_is_bool(ctx->expected_type) ? 1 : (type_is_fundamental(ctx->expected_type) ? 2 : 0);
+              const int32_t mode = nullable_guard_mode(ctx->expected_type);
               scr->cmds.push_back(container::command(guard, pack2(0, mode)));
             }
             sys->dispatch_node(ctx, scr, remaining);
@@ -694,7 +735,7 @@ void system::register_function(std::string name, std::vector<std::string> func_a
   constexpr auto stn = scope_type_name<scope_type>();
 
   command_data mcd{
-    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F>(), utils::make_function_sig_string<F>(),
+    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F, first_argument_index>(), utils::make_function_sig_string<F>(),
     15, unlimited_args ? INT32_MAX : int32_t(args_count), command_data::associativity::right, parse_ftype,
     std::move(func),
     utils::is_void_v<ret_type> ? container::description_node_kind::effect : container::description_node_kind::function
@@ -758,7 +799,7 @@ void system::register_operator(std::string name, const operator_props& ps, custo
   static_assert(!utils::is_void_v<ret_type> && !std::is_same_v<ret_type, ignore_value>, "Operators must have a proper return value");
 
   command_data mcd{
-    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
+    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F, first_argument_index>(), utils::make_function_sig_string<F>(), ps.priority, static_cast<int32_t>(ps.mtype), ps.assoc, parse_ftype,
     [init_f = std::move(init_f)](emitter& e, const command_block& args) -> size_t {
       [[maybe_unused]] const auto sys = e.sys; [[maybe_unused]] const auto ctx = e.ctx; [[maybe_unused]] const auto scr = e.scr;
       constexpr auto stn = scope_type_name<scope_type>();
@@ -780,12 +821,16 @@ void system::register_operator(std::string name, const operator_props& ps, custo
 
         std::vector<size_t> jumps;
         if constexpr (unlimited_args) {
+          size_t operands = 0;
           sys->parse_args<first_argument>(ctx, scr, args, 1, 0, {}, [&](parse_ctx* ctx, container* scr, const size_t index, const command_block&) {
+            operands += 1;
             if (index == 0) return;
 
             sys->emit_call_instruction<f, HT, vf>(ctx, scr, &mathfunc<f, HT, vf>, &mathfunc_unsafe<f, HT, vf>, scope_index);
             sys->apply_call_stack_effect<ret_type>(ctx, 2);
           });
+          // Unlike a block such as `ADD = { 1, effect }`, every operand of an operator is a value.
+          if (operands != args.args_count()) sys->raise_error(std::format("An operand of '{}' produces no value", curfname));
         } else {
           size_t offset = 1;
           offset = sys->parse_args<first_argument_index, 0, F>(ctx, scr, args, offset, {});
@@ -837,11 +882,12 @@ void system::register_function_iter(std::string name, std::vector<std::string> f
   using scope_type = std::remove_cvref_t<HT>;
   constexpr auto parse_ftype = command_data::ftype::function_t;
   using ret_type = final_stack_el_t<utils::function_result_type<F>>;
+  constexpr size_t first_argument_index = size_t(!utils::is_void_v<scope_type> && is_not_member_function<F>);
 
   constexpr auto stn = scope_type_name<scope_type>();
 
   command_data cd{
-    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F>(), utils::make_function_sig_string<F>(), 15, 50, command_data::associativity::right, parse_ftype,
+    name, stn, utils::type_name<ret_type>(), detail::make_argument_type_list<F, first_argument_index>(), utils::make_function_sig_string<F>(), 15, 50, command_data::associativity::right, parse_ftype,
     [func_args_names = std::move(func_args_names), init_f = std::move(init_f)]
       (emitter& e, const command_block& args)
     {
@@ -1015,6 +1061,7 @@ void system::parse_context::init(const system& sys, container& c) {
   max_stack_depth = 0;
   max_child_saved = 0;
   max_child_lists = 0;
+  max_child_args = 0;
   conversion_cost = 0;
   ftype = function_type::lvalue;
   prng_s = prng::xoshiro256starstar::init(sys.get_seed());
@@ -1046,6 +1093,7 @@ container system::parse(std::string_view name, std::string_view text) const {
   try {
     ctx.init<RETURN_T, ROOT_T>(*this, scr);
     scr.name = store_string(&scr, name);
+    ctx.seed_script(*this, name, scr);
     // Raw source stays local: it only feeds normalize/make_script_ast. The container never retains
     // it — `store_string` builds the compact `scr.source` token pool during the semantic pass.
     const auto script_block = std::string_view(text);
@@ -1088,7 +1136,8 @@ container system::parse(std::string_view name, std::string_view text) const {
       if (!ctx.stack_types.empty() && ctx.stack_types.back() != ctx.return_type && can_convert_implicitly(ctx.stack_types.back(), ctx.return_type)) {
         setup_type_conversion(&ctx, &scr, ctx.stack_types.back(), ctx.return_type);
       }
-      if (!ctx.is<ret_type>()) raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", ctx.stack_types.back(), scope_type_name<ret_type>(), ctx.stack_types.size()));
+      if (ctx.stack_types.empty()) raise_error(std::format("Script produces no value, expected '{}'", scope_type_name<ret_type>()));
+      if (!ctx.is<ret_type>()) raise_error(std::format("Invalid return type '{}' expected '{}', stack size {}", ctx.top(), scope_type_name<ret_type>(), ctx.stack_types.size()));
       push_basic_function(&ctx, &scr, basicf::pushreturn, 0);
     }
 
