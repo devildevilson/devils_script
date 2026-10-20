@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-10-20
 
 ### Added
 
@@ -37,7 +37,8 @@ All notable changes to this project are documented here. The format is based on
   (`age = 5` used to drop the 5). An operator operand, and a call argument, must be values.
 - A top-level `process()` starts at the first command on an empty stack, so a context can be reused
   without `clear()`. `clear()` also resets the saved-value types, so a read before the write fails
-  again instead of returning the previous run's value.
+  again instead of returning the previous run's value. A script with lists run on a context without
+  `create_lists()` is an error up front instead of an out-of-bounds access.
 - A named saved value or argument keeps one type: storing a different type is a parse error unless it
   converts implicitly. `ctx_set_as` now names an argument slot (it looked up the saved-value table).
 - An empty effect script, or `{}` in an effect block, does nothing; in a value context it is an error.
@@ -71,9 +72,7 @@ All notable changes to this project are documented here. The format is based on
   (`f =`) and out-of-range floats previously compiled; an unterminated string even lost its last
   character. `system::parse(name, text)` throws `Syntax error @ line:column: ...`; the streaming
   overload reports the same message through the error callback and returns the `tavl` error for the
-  row, keeping the stream usable for the following rows. `tavl`'s data-profile row-naming rule
-  (`err_expected_identifier`) and its warnings stay ignored: `{ -x }` and `{ bump }` are ordinary
-  devils_script.
+  row, keeping the stream usable for the following rows.
 - The AST builder checks expressions itself. A missing operand (`5 + 3 *`, `dbl = -`) used to become
   an empty-token leaf, which a string context accepted as `""`; a token after a complete expression
   (`dbl = 5.0 6.0`) was dropped together with the rest of its block; `= x` reached overload

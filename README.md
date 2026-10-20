@@ -225,7 +225,8 @@ with scalar/vector overloads and explicit conversion rules.
 - Nullable scoped calls with `?=`, which skip invalid branches and return a typed default.
 - Prefix, postfix, binary, and literal custom operators through `register_operator`.
 - Arithmetic, comparison, boolean, trigonometric, and numeric builtins via `init_math()`.
-- Block forms such as `value_or`, `select`, `sequence`, `switch`, and weighted `random`.
+- Block forms such as `value_or`, `select`, `sequence`, `switch` (a last case without `value` is the
+  default), and weighted `random`.
 - Iterator registration with named subblocks through `register_function_iter`.
 - Context values through `ctx_save`, `ctx_save_as`, and `ctx:saved:name`.
 - Script arguments through `ctx:arg:name`, `ctx_set`, and `ctx_set_as`.
@@ -234,8 +235,12 @@ with scalar/vector overloads and explicit conversion rules.
 - Script-in-script calls with `execute = { script_name, arg = value, ... }`, including in/out scalar
   arguments and in/out list bindings; sub-scripts are resolved by name through a user-installed
   resolver (see *Script-in-script calls* below).
-- Debug helpers `assert` and `trace`; runtime errors report `script '<name>' @ line:column`.
-- Deterministic PRNG (`chance`, `random`, `rndmix`) seeded per `system` and per `context`.
+- Debug helpers `assert` and `trace`; runtime errors report `script '<name>' @ line:column`, syntax
+  and compile errors `@ line:column` of the node they happened in.
+- Deterministic PRNG (`chance`, `random`, `rndmix`). A roll mixes a state fixed per script (the next
+  value of the system's sequence, restarted by `system::reseed`), a state fixed per occurrence, and
+  `context::prng_state` — the varying part, e.g. a frame index. Each iterator or list-pipeline
+  callback call rolls anew; a run repeated with the same `prng_state` rolls the same values.
 - Safe and unsafe opcode variants; `system::toggle_safety()` disables stack safety checks
   for lower overhead after scripts are trusted.
 - Command peephole optimization enabled by default; `system::toggle_optimizations()` is available
@@ -286,8 +291,8 @@ parallel description tree for tooling. For deployment you can drop the descripti
   the backing storage.
 - `system::reserve_from_hint(container*, block_count, token_bytes)` pre-reserves the command and
   string buffers before codegen — useful when parsing many small scripts.
-- `script_container::max_stack` / `max_saved` / `max_lists` record the peak operand-stack,
-  saved-value, and list depth a script needs (accounting for `execute` nesting). Size a
+- `script_container::max_stack` / `max_saved` / `max_lists` / `max_args` record the peak operand-stack,
+  saved-value, list, and argument-frame depth a script needs (accounting for `execute` nesting). Size a
   `context(stack_capacity, saved_capacity)` from them — or bucket scripts into nesting classes — and
   `process()` rejects an undersized context up front instead of overflowing mid-run.
 
