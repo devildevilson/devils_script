@@ -157,6 +157,7 @@ if (DS_BUILD_TESTS)
     tests/audit2.cpp
     tests/optimizer.cpp
     tests/numbers.cpp
+    tests/sequencing.cpp
     tests/main.cpp
     tests/basics.cpp
     tests/statements.cpp

@@ -7,6 +7,7 @@
 #include "devils_script/system.h"
 
 #include <limits>
+#include <vector>
 
 namespace ds = devils_script;
 
@@ -15,6 +16,9 @@ namespace {
 int64_t big() { return 9007199254740993LL; }
 int64_t counted() { return 3; }
 double half() { return 0.5; }
+double hunger() { return 0.75; }
+std::vector<int64_t> operand_calls;
+int64_t mark(int64_t value) { operand_calls.push_back(value); return value; }
 
 ds::system make() {
   ds::system sys;
@@ -36,6 +40,82 @@ R eval(const ds::system& sys, const char* source) {
 }
 
 }  // namespace
+
+TEST_CASE("numbers: binary operands keep source order") {
+  for (const bool safe : { true, false }) {
+    for (const bool optimize : { true, false }) {
+      CAPTURE(safe);
+      CAPTURE(optimize);
+      auto sys = make();
+      if (!safe) sys.toggle_safety();
+      if (!optimize) sys.toggle_optimizations();
+      sys.register_function<&hunger>("hunger");
+
+      const std::pair<const char*, int64_t> integers[] = {
+        { "20 - 3", 17 },
+        { "20 - counted", 17 },
+        { "counted - 20", -17 },
+        { "(20 - counted) - (10 - 2)", 9 },
+        { "20 % counted", 2 },
+      };
+      for (const auto& [source, expected] : integers) {
+        CAPTURE(source);
+        CHECK(eval<int64_t>(sys, source) == expected);
+      }
+
+      const std::pair<const char*, double> floats[] = {
+        { "7 / 2", 3.5 },
+        { "counted / 2", 1.5 },
+        { "2 / half", 4.0 },
+        { "half - 2", -1.5 },
+        { "(counted - 1) / (half + 0.5)", 2.0 },
+      };
+      for (const auto& [source, expected] : floats) {
+        CAPTURE(source);
+        CHECK(eval<double>(sys, source) == expected);
+      }
+
+      const std::pair<const char*, bool> comparisons[] = {
+        { "hunger > 0.5", true },
+        { "hunger < 0.5", false },
+        { "counted > 2", true },
+        { "counted < 4", true },
+        { "counted >= 2", true },
+        { "counted <= 4", true },
+      };
+      for (const auto& [source, expected] : comparisons) {
+        CAPTURE(source);
+        CHECK(eval<bool>(sys, source) == expected);
+      }
+    }
+  }
+}
+
+TEST_CASE("numbers: binary operands call functions from left to right") {
+  for (const bool optimize : { true, false }) {
+    CAPTURE(optimize);
+    auto sys = make();
+    if (!optimize) sys.toggle_optimizations();
+    sys.register_function<&mark, void>("mark");
+
+    // Even a commutative operator must preserve the order of observable calls.
+    struct test { const char* source; std::vector<int64_t> calls; int64_t result; };
+    const test cases[] = {
+      { "mark(1) + mark(2)", { 1, 2 }, 3 },
+      { "mark(1) - (mark(2) - mark(3))", { 1, 2, 3 }, 2 },
+    };
+    for (const auto& [source, calls, result] : cases) {
+      CAPTURE(source);
+      operand_calls.clear();
+      const auto script = sys.parse<int64_t, void>("script", source);
+      CHECK(operand_calls.empty());
+      ds::context ctx;
+      script.process(&ctx);
+      CHECK(operand_calls == calls);
+      CHECK(ctx.get_return<int64_t>() == result);
+    }
+  }
+}
 
 TEST_CASE("numbers: an integer literal stays an integer") {
   const auto sys = make();

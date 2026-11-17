@@ -274,7 +274,10 @@ size_t system::rpn_conversion_ctx::normalize_expr(const tavl::node* n, std::stri
 
     const size_t idx = output.size();                 // binary
     output.push_back({ store_token(op, n->token.span.line, n->token.span.column), 1 });
-    const size_t s = normalize_expr(ch[0], src) + normalize_expr(ch[1], src);
+    // Both calls append to output; '+' does not sequence its operands.
+    const size_t lhs_size = normalize_expr(ch[0], src);
+    const size_t rhs_size = normalize_expr(ch[1], src);
+    const size_t s = lhs_size + rhs_size;
     output[idx].size += s;
     return 1 + s;
   }
